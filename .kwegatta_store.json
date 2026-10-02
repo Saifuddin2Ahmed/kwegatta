@@ -1,0 +1,573 @@
+{
+  "profiles": [
+    {
+      "id": "user-1790935872814",
+      "created_at": "2026-10-02T10:11:12.814Z",
+      "name": "Saifuddin Ahmed",
+      "role": "builder",
+      "headline": "ERP Systems, Flutter, Vibe Coding and AI Dev",
+      "bio": "I offer ERP Systems, Flutter, Vibe Coding and AI Dev. I am looking for Marketing help.",
+      "offers": "ERP Systems, Flutter, Vibe Coding and AI Dev",
+      "needs": "Marketing help",
+      "teaches": "",
+      "learns": "grant",
+      "tags": [
+        "html",
+        "dart",
+        "jupyter notebook",
+        "erp",
+        "systems"
+      ],
+      "skills": [
+        "HTML",
+        "Dart",
+        "Jupyter Notebook"
+      ],
+      "github": "Saifuddin2Ahmed",
+      "linkedin": "",
+      "whatsapp": "+249968033707",
+      "avatar": "data:image/jpeg;base64,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",
+      "status": "Open to projects",
+      "is_demo": false,
+      "gh": {
+        "login": "Saifuddin2Ahmed",
+        "repos": 7,
+        "langs": [
+          "HTML",
+          "Dart",
+          "Jupyter Notebook"
+        ],
+        "top": [
+          {
+            "name": "ishraqa-site",
+            "desc": "إشراقة يومية: موقع التطبيق",
+            "lang": "HTML",
+            "stars": 0,
+            "url": "https://github.com/Saifuddin2Ahmed/ishraqa-site"
+          },
+          {
+            "name": "Saifuddin2Ahmed",
+            "desc": "Config files for my GitHub profile.",
+            "lang": "Jupyter Notebook",
+            "stars": 0,
+            "url": "https://github.com/Saifuddin2Ahmed/Saifuddin2Ahmed"
+          },
+          {
+            "name": "OtwoX-Digital-Solutions",
+            "desc": "OtwoX Digital Solutions | أوتو اكس للحلول الرقمية — The ERP built for Africa and the Middle East",
+            "lang": null,
+            "stars": 0,
+            "url": "https://github.com/Saifuddin2Ahmed/OtwoX-Digital-Solutions"
+          },
+          {
+            "name": "prognator-ai-arc-hackathon",
+            "desc": "Team Prognator AI's official repository for the 'AI Agents on Arc with USDC' Hackathon.",
+            "lang": null,
+            "stars": 0,
+            "url": "https://github.com/Saifuddin2Ahmed/prognator-ai-arc-hackathon"
+          }
+        ]
+      }
+    },
+    {
+      "id": "demo-amina",
+      "name": "Amina Nakato",
+      "role": "business",
+      "headline": "Market researcher & business development lead",
+      "bio": "MUBS business student specializing in market discovery and customer validation. Looking for a mobile engineer to build a digital saving-circles platform.",
+      "offers": "Marketing, customer interviews, pitch decks, budgeting and revenue models",
+      "needs": "A mobile developer for a savings-group app for student entrepreneurs",
+      "teaches": "Financial modeling, pitch deck storytelling and business plans",
+      "learns": "Flutter basics and how APIs work",
+      "tags": [
+        "marketing",
+        "fintech",
+        "research",
+        "pitch-decks",
+        "mubs"
+      ],
+      "skills": [
+        "Customer Interviews",
+        "Financial Modeling",
+        "Pitch Decks",
+        "Pricing Strategy"
+      ],
+      "github": "amina-nakato",
+      "linkedin": "https://www.linkedin.com/in/amina-nakato-demo",
+      "whatsapp": "256772123456",
+      "avatar": "",
+      "status": "Looking for a co-founder",
+      "is_demo": true,
+      "created_at": "2026-10-01T13:58:15.149Z",
+      "gh": {
+        "login": "amina-nakato",
+        "repos": 3,
+        "langs": [
+          "Markdown",
+          "HTML"
+        ],
+        "top": [
+          {
+            "name": "savings-circle-spec",
+            "desc": "Requirements and customer surveys for saving-group apps",
+            "lang": "Markdown",
+            "stars": 4,
+            "url": "https://github.com"
+          }
+        ]
+      }
+    },
+    {
+      "id": "demo-brian",
+      "name": "Brian Okello",
+      "role": "builder",
+      "headline": "Full-stack mobile engineer building with Flutter",
+      "bio": "Computer science builder passionate about offline-first fintech tools. Looking for an energetic co-founder who understands local merchant distribution.",
+      "offers": "Flutter and Firebase cross-platform mobile apps, REST APIs, state management",
+      "needs": "A business partner who understands sales, pricing and merchant outreach",
+      "teaches": "Flutter UI, Dart state management, Firebase Firestore integration",
+      "learns": "B2B sales and investor pitching",
+      "tags": [
+        "flutter",
+        "mobile",
+        "firebase",
+        "dart",
+        "offline-first"
+      ],
+      "skills": [
+        "Flutter",
+        "Dart",
+        "Firebase",
+        "State Management",
+        "Android"
+      ],
+      "github": "brian-okello-dev",
+      "linkedin": "https://www.linkedin.com/in/brian-okello-demo",
+      "whatsapp": "256782234567",
+      "avatar": "",
+      "status": "Looking for a team",
+      "is_demo": true,
+      "created_at": "2026-10-01T15:58:15.149Z",
+      "gh": {
+        "login": "brian-okello-dev",
+        "repos": 14,
+        "langs": [
+          "Dart",
+          "TypeScript",
+          "Kotlin"
+        ],
+        "top": [
+          {
+            "name": "kampala-pos",
+            "desc": "Offline retail POS prototype in Flutter",
+            "lang": "Dart",
+            "stars": 12,
+            "url": "https://github.com"
+          },
+          {
+            "name": "momo-gateway-mock",
+            "desc": "Mobile money API test wrapper",
+            "lang": "TypeScript",
+            "stars": 9,
+            "url": "https://github.com"
+          }
+        ]
+      }
+    },
+    {
+      "id": "demo-grace",
+      "name": "Grace Atim",
+      "role": "design",
+      "headline": "Product designer focusing on accessible UI/UX",
+      "bio": "Designer crafting intuitive user interfaces for East African digital products in Figma. Looking for frontend developers who care about pixel precision.",
+      "offers": "UI and UX design in Figma, design systems, interactive prototypes, branding",
+      "needs": "A developer to turn my designs into a live web or mobile product",
+      "teaches": "Figma auto-layout, mobile usability heuristics, brand identity",
+      "learns": "Tailwind CSS and responsive web implementation",
+      "tags": [
+        "ui-ux",
+        "figma",
+        "branding",
+        "design-systems",
+        "accessibility"
+      ],
+      "skills": [
+        "Figma",
+        "UI Design",
+        "Wireframing",
+        "User Testing",
+        "Design Tokens"
+      ],
+      "github": "grace-atim-design",
+      "linkedin": "https://www.linkedin.com/in/grace-atim-demo",
+      "whatsapp": "256701345678",
+      "avatar": "",
+      "status": "Open to projects",
+      "is_demo": true,
+      "created_at": "2026-10-01T18:58:15.149Z",
+      "gh": {
+        "login": "grace-atim-design",
+        "repos": 5,
+        "langs": [
+          "CSS",
+          "HTML"
+        ],
+        "top": [
+          {
+            "name": "kampala-design-kit",
+            "desc": "Open-source Primer-style UI tokens for Ugandan startups",
+            "lang": "CSS",
+            "stars": 15,
+            "url": "https://github.com"
+          }
+        ]
+      }
+    },
+    {
+      "id": "demo-daniel",
+      "name": "Daniel Ssemwanga",
+      "role": "builder",
+      "headline": "Data analyst & Python developer",
+      "bio": "Building data scrapers and predictive models for agriculture markets. Seeking partners who have direct access to cooperative unions and farmers.",
+      "offers": "Python, data analysis, Pandas, machine learning, web scraping, backend APIs",
+      "needs": "Someone who knows agriculture supply chains and farmer cooperatives",
+      "teaches": "Python data science, Jupyter, REST API development with FastAPI",
+      "learns": "Agribusiness economics and rural logistics",
+      "tags": [
+        "python",
+        "data",
+        "machine-learning",
+        "fastapi",
+        "agritech"
+      ],
+      "skills": [
+        "Python",
+        "Pandas",
+        "FastAPI",
+        "Data Analytics",
+        "Scikit-learn"
+      ],
+      "github": "dan-ssemwanga",
+      "linkedin": "https://www.linkedin.com/in/daniel-ssemwanga-demo",
+      "whatsapp": "256752456789",
+      "avatar": "",
+      "status": "Looking for a co-founder",
+      "is_demo": true,
+      "created_at": "2026-10-01T21:58:15.149Z",
+      "gh": {
+        "login": "dan-ssemwanga",
+        "repos": 19,
+        "langs": [
+          "Python",
+          "SQL",
+          "Shell"
+        ],
+        "top": [
+          {
+            "name": "uganda-crop-prices",
+            "desc": "Scraper and visualizer for weekly regional market prices",
+            "lang": "Python",
+            "stars": 22,
+            "url": "https://github.com"
+          },
+          {
+            "name": "soil-yield-model",
+            "desc": "Predictive regression for maize yields",
+            "lang": "Python",
+            "stars": 11,
+            "url": "https://github.com"
+          }
+        ]
+      }
+    },
+    {
+      "id": "demo-sarah",
+      "name": "Sarah Namutebi",
+      "role": "business",
+      "headline": "Accounting major & grant strategist",
+      "bio": "Final year accounting student at MUBS experienced in unit economics and grant applications. Looking for a developer to co-create digital bookkeeping for SMEs.",
+      "offers": "Accounting, financial models, grant writing, tax filings, compliance",
+      "needs": "A technical co-founder for a simplified WhatsApp bookkeeping tool",
+      "teaches": "Cash flow forecasting, business valuation and grant budget preparation",
+      "learns": "No-code tools and automation webhooks",
+      "tags": [
+        "finance",
+        "accounting",
+        "grants",
+        "smes",
+        "bookkeeping"
+      ],
+      "skills": [
+        "Accounting",
+        "Financial Modeling",
+        "Grant Proposals",
+        "Tax Planning"
+      ],
+      "github": "",
+      "linkedin": "https://www.linkedin.com/in/sarah-namutebi-demo",
+      "whatsapp": "256773567890",
+      "avatar": "",
+      "status": "Looking for a co-founder",
+      "is_demo": true,
+      "created_at": "2026-10-02T00:58:15.149Z",
+      "gh": null
+    },
+    {
+      "id": "demo-joseph",
+      "name": "Joseph Mugisha",
+      "role": "builder",
+      "headline": "Full-stack TypeScript & React engineer",
+      "bio": "Software engineer building web apps with Next.js, React and Node. Eager to partner with a growth marketer to launch hackathon projects to the public.",
+      "offers": "Web development with React, TypeScript, Node.js, Express, Tailwind CSS",
+      "needs": "A designer and help finding our first 50 paying customers",
+      "teaches": "Modern React hooks, TypeScript patterns, Tailwind CSS layouts",
+      "learns": "Product positioning, SEO and early user acquisition",
+      "tags": [
+        "react",
+        "node",
+        "typescript",
+        "tailwind",
+        "fullstack"
+      ],
+      "skills": [
+        "React",
+        "TypeScript",
+        "Node.js",
+        "Tailwind CSS",
+        "PostgreSQL"
+      ],
+      "github": "joseph-mugisha",
+      "linkedin": "https://www.linkedin.com/in/joseph-mugisha-demo",
+      "whatsapp": "256784678901",
+      "avatar": "",
+      "status": "Looking for a team",
+      "is_demo": true,
+      "created_at": "2026-10-02T03:58:15.149Z",
+      "gh": {
+        "login": "joseph-mugisha",
+        "repos": 28,
+        "langs": [
+          "TypeScript",
+          "JavaScript",
+          "HTML"
+        ],
+        "top": [
+          {
+            "name": "kampala-dev-jobs",
+            "desc": "Job board aggregator for Kampala tech talent",
+            "lang": "TypeScript",
+            "stars": 31,
+            "url": "https://github.com"
+          },
+          {
+            "name": "react-uganda-components",
+            "desc": "Accessible components with mobile money payment drawers",
+            "lang": "TypeScript",
+            "stars": 18,
+            "url": "https://github.com"
+          }
+        ]
+      }
+    },
+    {
+      "id": "demo-esther",
+      "name": "Esther Achieng",
+      "role": "other",
+      "headline": "Agribusiness manager & rural network lead",
+      "bio": "Working directly with coffee and maize farming cooperatives in Eastern Uganda. Seeking technical builders to digitize crop collection logs.",
+      "offers": "Deep agriculture field domain knowledge, cooperative network, ground logistics",
+      "needs": "An app developer and a data person to build an SMS/mobile collection register",
+      "teaches": "Field operational logistics, farmer onboarding, cooperative governance",
+      "learns": "Digital tools for inventory management",
+      "tags": [
+        "agritech",
+        "community",
+        "operations",
+        "logistics",
+        "cooperatives"
+      ],
+      "skills": [
+        "Field Operations",
+        "Farmer Training",
+        "Logistics",
+        "Stakeholder Management"
+      ],
+      "github": "",
+      "linkedin": "https://www.linkedin.com/in/esther-achieng-demo",
+      "whatsapp": "256705789012",
+      "avatar": "",
+      "status": "Looking for a mentor",
+      "is_demo": true,
+      "created_at": "2026-10-02T06:58:15.149Z",
+      "gh": null
+    },
+    {
+      "id": "demo-peter",
+      "name": "Peter Kato",
+      "role": "builder",
+      "headline": "IoT hardware hacker & embedded systems tinkerer",
+      "bio": "Building low-cost solar telemetry and moisture sensors using ESP32 and Arduino. Looking for web devs to build real-time monitoring dashboards.",
+      "offers": "Hardware prototyping, Arduino, ESP32, IoT sensors, PCB soldering",
+      "needs": "A frontend web developer and advice on prototype grant funding",
+      "teaches": "Microcontroller basics, sensor calibration and MQTT networking",
+      "learns": "React dashboard visualization and WebSockets",
+      "tags": [
+        "iot",
+        "arduino",
+        "hardware",
+        "embedded",
+        "sensors"
+      ],
+      "skills": [
+        "Arduino",
+        "ESP32",
+        "C++",
+        "Circuits",
+        "MQTT"
+      ],
+      "github": "peter-kato-iot",
+      "linkedin": "https://www.linkedin.com/in/peter-kato-demo",
+      "whatsapp": "256756890123",
+      "avatar": "",
+      "status": "Open to projects",
+      "is_demo": true,
+      "created_at": "2026-10-02T08:58:15.149Z",
+      "gh": {
+        "login": "peter-kato-iot",
+        "repos": 11,
+        "langs": [
+          "C++",
+          "C",
+          "Python"
+        ],
+        "top": [
+          {
+            "name": "solar-monitor-firmware",
+            "desc": "ESP32 firmware logging solar voltage over GSM/GPRS",
+            "lang": "C++",
+            "stars": 14,
+            "url": "https://github.com"
+          }
+        ]
+      }
+    }
+  ],
+  "follows": [],
+  "matches": [
+    {
+      "id": "id-1790935894752-xreidxm",
+      "created_at": "2026-10-02T10:11:34.752Z",
+      "a_id": "user-1790935872814",
+      "b_id": "demo-peter",
+      "score": 30,
+      "reason": "You and Peter bring complementary builder and builder perspectives to a project.",
+      "spark": "A rapid prototype combining ERP Systems, Flutter, Vibe Cod with Hardware prototyping, Arduino,."
+    },
+    {
+      "id": "id-1790935894469-etbonqe",
+      "created_at": "2026-10-02T10:11:34.469Z",
+      "a_id": "user-1790935872814",
+      "b_id": "demo-sarah",
+      "score": 34,
+      "reason": "You and Sarah bring complementary business and builder perspectives to a project.",
+      "spark": "A commercial launch combining ERP Systems, Flutter, Vibe Cod with Accounting, financial models, ."
+    },
+    {
+      "id": "id-1790935894189-e2hh3ce",
+      "created_at": "2026-10-02T10:11:34.189Z",
+      "a_id": "user-1790935872814",
+      "b_id": "demo-amina",
+      "score": 54,
+      "reason": "Amina offers marketing, matching what you need.",
+      "spark": "A commercial launch combining ERP Systems, Flutter, Vibe Cod with Marketing, customer interviews."
+    },
+    {
+      "id": "match-amina-brian",
+      "a_id": "demo-amina",
+      "b_id": "demo-brian",
+      "score": 94,
+      "reason": "Amina needs a mobile developer for a savings group app, which Brian specializes in with Flutter and Firebase.",
+      "spark": "Kampala Student Thrift: mobile savings and lending circle app with automated ledger sync.",
+      "created_at": "2026-10-01T19:58:15.150Z"
+    },
+    {
+      "id": "match-grace-joseph",
+      "a_id": "demo-grace",
+      "b_id": "demo-joseph",
+      "score": 92,
+      "reason": "Grace offers complete UI/UX Figma systems that Joseph can immediately implement in React and Tailwind.",
+      "spark": "Campus Boda: on-demand campus parcel courier booking web app.",
+      "created_at": "2026-10-02T01:58:15.150Z"
+    },
+    {
+      "id": "match-daniel-esther",
+      "a_id": "demo-daniel",
+      "b_id": "demo-esther",
+      "score": 95,
+      "reason": "Daniel provides data science and predictive market scrapers; Esther provides cooperative relationships and ground logistics.",
+      "spark": "Gulu Grain Price Predictor: USSD & web grain price advisory for rural cooperatives.",
+      "created_at": "2026-10-02T05:58:15.150Z"
+    }
+  ],
+  "notifications": [
+    {
+      "id": "notif-1790940384284-2n1a2",
+      "to_id": "user-1790935872814",
+      "from_id": "test-user",
+      "type": "connect",
+      "body": "A member reached out to connect: \"Let us build together\"",
+      "read": false,
+      "created_at": "2026-10-02T11:26:24.284Z"
+    },
+    {
+      "id": "id-1790935873553-ekpfpe5",
+      "created_at": "2026-10-02T10:11:13.177Z",
+      "to_id": "user-1790935872814",
+      "type": "welcome",
+      "body": "Welcome to Kwegatta, Saifuddin! Open your profile to scan your personal QR code or explore matches.",
+      "read": false
+    }
+  ],
+  "posts": [
+    {
+      "id": "post-1",
+      "author_id": "demo-amina",
+      "title": "Need a Flutter builder for Hack Day project",
+      "body": "We are validating a group savings tool for campus trade associations. Already interviewed 15 students today at MUBS. Looking for a builder to join our pitch team before 4 PM!",
+      "kind": "need",
+      "tags": [
+        "fintech",
+        "flutter",
+        "hackday",
+        "mubs"
+      ],
+      "created_at": "2026-10-02T07:58:15.150Z"
+    },
+    {
+      "id": "post-2",
+      "author_id": "demo-peter",
+      "title": "Offering ESP32 sensors & hardware kit",
+      "body": "I brought 4 ESP32 boards, temperature and soil moisture sensors to the hackathon. If your team has an agritech or climate idea, let me build the hardware layer for you!",
+      "kind": "offer",
+      "tags": [
+        "iot",
+        "hardware",
+        "agritech"
+      ],
+      "created_at": "2026-10-02T08:28:15.150Z"
+    },
+    {
+      "id": "post-3",
+      "author_id": "demo-grace",
+      "title": "Primer UI tokens ready for hackathon web apps",
+      "body": "Just finished open-sourcing a clean GitHub-style design kit in Figma with dark & light modes. Free for all teams here today!",
+      "kind": "idea",
+      "tags": [
+        "design",
+        "ui-ux",
+        "figma"
+      ],
+      "created_at": "2026-10-02T09:10:15.150Z"
+    }
+  ]
+}

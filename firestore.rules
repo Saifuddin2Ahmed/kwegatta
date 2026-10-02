@@ -1,0 +1,11 @@
+rules_version = '2';
+// Hack-day and production rules for Kwegatta
+// Anyone can read and write these collections during Hacktoberfest Hack Day,
+// or authenticated users when Firebase Auth is configured.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{col}/{doc} {
+      allow read, write: if col in ['profiles', 'follows', 'matches', 'notifications', 'posts'];
+    }
+  }
+}

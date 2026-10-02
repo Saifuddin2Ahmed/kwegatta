@@ -1,0 +1,109 @@
+{
+  "entities": {
+    "Profile": {
+      "title": "Profile",
+      "description": "User profile in Kwegatta network",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 80 },
+        "role": { "type": "string", "enum": ["builder", "business", "design", "other"] },
+        "headline": { "type": "string", "maxLength": 100 },
+        "bio": { "type": "string", "maxLength": 400 },
+        "offers": { "type": "string", "maxLength": 400 },
+        "needs": { "type": "string", "maxLength": 400 },
+        "teaches": { "type": "string", "maxLength": 400 },
+        "learns": { "type": "string", "maxLength": 400 },
+        "tags": { "type": "array" },
+        "skills": { "type": "array" },
+        "github": { "type": "string", "maxLength": 60 },
+        "linkedin": { "type": "string", "maxLength": 200 },
+        "whatsapp": { "type": "string", "maxLength": 30 },
+        "avatar": { "type": "string" },
+        "status": { "type": "string", "maxLength": 100 },
+        "is_demo": { "type": "boolean" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["id", "name", "created_at"]
+    },
+    "Follow": {
+      "title": "Follow",
+      "description": "Follow relationship between two members",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "follower_id": { "type": "string" },
+        "following_id": { "type": "string" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["id", "follower_id", "following_id"]
+    },
+    "Match": {
+      "title": "Match",
+      "description": "Complementary team or learning match",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "a_id": { "type": "string" },
+        "b_id": { "type": "string" },
+        "score": { "type": "number" },
+        "reason": { "type": "string" },
+        "spark": { "type": "string" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["id", "a_id", "b_id", "score"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User notification for matches, follows, or connection requests",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "to_id": { "type": "string" },
+        "from_id": { "type": "string" },
+        "type": { "type": "string", "enum": ["match", "follow", "connect", "welcome", "digest"] },
+        "body": { "type": "string" },
+        "read": { "type": "boolean" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["id", "to_id", "type", "body"]
+    },
+    "Post": {
+      "title": "Post",
+      "description": "Feed post for ideas, needs, offers or questions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "author_id": { "type": "string" },
+        "body": { "type": "string" },
+        "title": { "type": "string" },
+        "kind": { "type": "string", "enum": ["idea", "need", "offer", "question"] },
+        "tags": { "type": "array" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["id", "author_id", "body"]
+    }
+  },
+  "firestore": {
+    "/profiles/{profileId}": {
+      "schema": "Profile",
+      "description": "Member profiles"
+    },
+    "/follows/{followId}": {
+      "schema": "Follow",
+      "description": "Follow graph"
+    },
+    "/matches/{matchId}": {
+      "schema": "Match",
+      "description": "Pair and learning matches"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Member notifications"
+    },
+    "/posts/{postId}": {
+      "schema": "Post",
+      "description": "Community feed posts"
+    }
+  }
+}
