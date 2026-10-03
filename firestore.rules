@@ -1,11 +1,48 @@
 rules_version = '2';
-// Hack-day and production rules for Kwegatta
-// Anyone can read and write these collections during Hacktoberfest Hack Day,
-// or authenticated users when Firebase Auth is configured.
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{col}/{doc} {
-      allow read, write: if col in ['profiles', 'follows', 'matches', 'notifications', 'posts'];
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Profiles collection
+    match /profiles/{profileId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.auth.uid == profileId;
+      allow update, delete: if isOwner(profileId);
+    }
+
+    // Follows collection
+    match /follows/{followId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.resource.data.follower_id == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.follower_id == request.auth.uid;
+    }
+
+    // Matches collection
+    match /matches/{matchId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // Notifications collection (Recipient only)
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && resource.data.to_id == request.auth.uid;
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && resource.data.to_id == request.auth.uid;
+    }
+
+    // Posts collection
+    match /posts/{postId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.resource.data.author_id == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.author_id == request.auth.uid;
     }
   }
 }

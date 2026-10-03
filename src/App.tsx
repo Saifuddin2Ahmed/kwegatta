@@ -7,13 +7,15 @@ import { PeopleView } from './components/PeopleView';
 import { FeedView } from './components/FeedView';
 import { InboxView } from './components/InboxView';
 import { ProfileView } from './components/ProfileView';
+import { LivingNetworkHero } from './components/LivingNetworkHero';
 import { OnboardingChat } from './components/OnboardingChat';
 import { WallView } from './components/WallView';
 import { SetupView } from './components/SetupView';
+import { AdminView } from './components/AdminView';
 import { AboutView } from './components/AboutView';
+import { Footer } from './components/Footer';
 import { Profile, Post, NotificationItem, Follow } from './types';
-import { db, APP_NAME, calculateHeuristicScore } from './services/api';
-import { Sparkles } from 'lucide-react';
+import { db, APP_NAME, ensureAuthToken } from './services/api';
 
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
@@ -30,10 +32,9 @@ export default function App() {
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Initialize theme
+  // Initialize theme (default to dark ink theme)
   useEffect(() => {
-    const savedTheme = (localStorage.getItem('kw_theme') as 'dark' | 'light') ||
-      (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    const savedTheme = (localStorage.getItem('kw_theme') as 'dark' | 'light') || 'dark';
     setTheme(savedTheme);
     document.documentElement.dataset.theme = savedTheme;
   }, []);
@@ -55,15 +56,28 @@ export default function App() {
   // Fetch central shared database
   const refreshData = useCallback(async () => {
     try {
+      const myId = localStorage.getItem('kw_me');
+      if (myId) {
+        try {
+          await ensureAuthToken(myId);
+        } catch (e) {
+          // continue
+        }
+      }
+
       const [ps, pos] = await Promise.all([
         db.list<Profile>('profiles', { limit: 500 }),
         db.list<Post>('posts', { limit: 100 })
       ]);
-      setAllProfiles(ps);
-      setPosts(pos);
+      
+      if (ps && ps.length > 0) {
+        setAllProfiles(ps);
+      }
+      if (pos) {
+        setPosts(pos);
+      }
 
-      const myId = localStorage.getItem('kw_me');
-      if (myId) {
+      if (myId && ps && ps.length > 0) {
         const found = ps.find(p => p.id === myId);
         if (found) {
           setCurrentProfile(found);
@@ -71,12 +85,12 @@ export default function App() {
             db.list<Follow>('follows', { eq: { follower_id: myId }, limit: 500 }),
             db.list<NotificationItem>('notifications', { eq: { to_id: myId }, limit: 100 })
           ]);
-          setFollows(fls);
-          setNotifications(notifs);
+          setFollows(fls || []);
+          setNotifications(notifs || []);
         }
       }
     } catch (err) {
-      console.error('Failed to sync data:', err);
+      // Quiet fallback
     }
   }, []);
 
@@ -98,7 +112,7 @@ export default function App() {
     } else if (main === 'u' && sub) {
       setViewedProfileId(sub);
       setActiveTab('userProfile');
-    } else if (['home', 'learn', 'people', 'feed', 'inbox', 'me', 'setup', 'onboard'].includes(main)) {
+    } else if (['home', 'learn', 'people', 'feed', 'inbox', 'me', 'setup', 'admin', 'about', 'onboard'].includes(main)) {
       setActiveTab(main);
       setViewedProfileId(null);
     } else {
@@ -121,7 +135,9 @@ export default function App() {
     else if (tab === 'inbox') window.location.hash = '#/inbox';
     else if (tab === 'me') window.location.hash = '#/me';
     else if (tab === 'wall') window.location.hash = '#/wall';
+    else if (tab === 'admin') window.location.hash = '#/admin';
     else if (tab === 'setup') window.location.hash = '#/setup';
+    else if (tab === 'about') window.location.hash = '#/about';
     else if (tab === 'onboard') window.location.hash = '#/onboard';
     else window.location.hash = `#/${tab}`;
   };
@@ -178,67 +194,39 @@ export default function App() {
 
   const handleSignOut = () => {
     localStorage.removeItem('kw_me');
+    localStorage.removeItem('kwegatta_current_profile');
     setCurrentProfile(null);
-    setFollows([]);
-    setNotifications([]);
     navigateTo('onboard');
-    showToast('Signed out of this device');
+    showToast('Signed out successfully');
   };
 
-  // Periodic nudge: check if new people joined who fit my needs
-  useEffect(() => {
-    if (!currentProfile) return;
-
-    const lastCheck = localStorage.getItem(`kw_last_nudge_${currentProfile.id}`);
-    const now = new Date().toISOString();
-    localStorage.setItem(`kw_last_nudge_${currentProfile.id}`, now);
-
-    if (lastCheck) {
-      const newlyJoined = allProfiles.filter(
-        p => p.id !== currentProfile.id && p.created_at && p.created_at > lastCheck
-      );
-      const fitting = newlyJoined.filter(
-        p => calculateHeuristicScore(currentProfile, p) >= 50
-      );
-
-      if (fitting.length > 0) {
-        const text = `${fitting.length} new ${fitting.length === 1 ? 'person' : 'people'} joined who match what you need: ${fitting.slice(0, 3).map(p => p.name.split(' ')[0]).join(', ')}.`;
-        db.insert('notifications', {
-          to_id: currentProfile.id,
-          type: 'digest',
-          body: text,
-          read: false,
-          created_at: now
-        }).then(() => {
-          showToast(text);
-          refreshData();
-        });
-      }
-    }
-  }, [allProfiles.length, currentProfile?.id]);
-
-  const followingIds = new Set(follows.map(f => f.following_id));
-  const followerIds = new Set(
-    follows.filter(f => f.following_id === currentProfile?.id).map(f => f.follower_id)
-  );
   const unreadCount = notifications.filter(n => !n.read).length;
+  const followingIds = new Set(follows.map(f => f.following_id));
+  const followerIds = new Set(follows.filter(f => f.following_id === currentProfile?.id).map(f => f.follower_id));
 
-  // Dedicated Projector Wall View
-  if (activeTab === 'wall') {
-    return <WallView onBack={() => navigateTo('home')} />;
-  }
-
-  // Profile to display in ProfileView
+  // Determine displayed profile for userProfile or me
   const displayedProfile =
-    activeTab === 'me'
-      ? currentProfile
-      : activeTab === 'userProfile' && viewedProfileId
+    activeTab === 'userProfile' && viewedProfileId
       ? allProfiles.find(p => p.id === viewedProfileId) || null
+      : activeTab === 'me'
+      ? currentProfile
       : null;
 
+  // Projector Wall Mode is full-screen standalone
+  if (activeTab === 'wall') {
+    return (
+      <WallView
+        onBack={() => navigateTo('home')}
+      />
+    );
+  }
+
+  const isAdminAuthenticated = Boolean(sessionStorage.getItem('kw_admin_token'));
+
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--bg)] text-[var(--fg)]">
-      {/* Header */}
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)] flex flex-col font-sans transition-colors selection:bg-[var(--gold)] selection:text-[#090D16]">
+      
+      {/* Top Application Header */}
       <Header
         currentProfile={currentProfile}
         unreadCount={unreadCount}
@@ -252,38 +240,54 @@ export default function App() {
         onNavigate={navigateTo}
       />
 
-      {/* Navigation tabs */}
-      <NavTabs
-        activeTab={activeTab === 'userProfile' ? '' : activeTab}
-        unreadCount={unreadCount}
-        onTabChange={navigateTo}
-      />
+      {/* Navigation tabs (visible when user is onboarded) */}
+      {currentProfile && activeTab !== 'onboard' && (
+        <NavTabs
+          activeTab={activeTab === 'userProfile' ? '' : activeTab}
+          unreadCount={unreadCount}
+          onTabChange={navigateTo}
+        />
+      )}
 
       {/* Toast Notification Banner */}
       {toastMessage && (
-        <div className="fixed bottom-4 right-4 z-50 max-w-sm p-3 rounded-md bg-[var(--subtle)] border border-[var(--border)] shadow-xl text-xs text-[var(--fg)] flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-2">
+        <div className="fixed bottom-5 right-5 z-50 max-w-sm p-4 rounded-xl bg-[var(--card)] border border-[var(--card-border)] shadow-2xl text-xs font-medium text-[var(--fg)] flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-3">
           <span>{toastMessage}</span>
           <button
             onClick={() => setToastMessage(null)}
-            className="text-[var(--muted)] hover:text-[var(--fg)] text-xs font-bold"
+            className="text-[var(--fg-muted)] hover:text-[var(--fg)] text-xs font-bold p-1"
+            aria-label="Dismiss toast"
           >
             ✕
           </button>
         </div>
       )}
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6">
-        {/* Onboarding View */}
-        {(!currentProfile && activeTab !== 'userProfile') || activeTab === 'onboard' ? (
-          <OnboardingChat
-            onCompleted={newProfile => {
-              setCurrentProfile(newProfile);
-              setAllProfiles(prev => [newProfile, ...prev]);
-              navigateTo('home');
-              showToast(`Welcome ${newProfile.name.split(' ')[0]}! Your matches are ready.`);
-            }}
-          />
+      {/* Main Content Container with standard max-width and balanced vertical rhythm */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-8">
+        
+        {/* Onboarding & Landing View (when visitor has no profile or explicitly opened onboarding) */}
+        {(!currentProfile && activeTab !== 'userProfile' && activeTab !== 'admin' && activeTab !== 'about') || activeTab === 'onboard' ? (
+          <div className="space-y-8">
+            <LivingNetworkHero
+              profiles={allProfiles}
+              postsCount={posts.length}
+              onJoinClick={() => {
+                const el = document.getElementById('onboarding-composer');
+                el?.scrollIntoView({ behavior: 'smooth' });
+              }}
+            />
+            <div id="onboarding-composer">
+              <OnboardingChat
+                onCompleted={newProfile => {
+                  setCurrentProfile(newProfile);
+                  setAllProfiles(prev => [newProfile, ...prev]);
+                  navigateTo('home');
+                  showToast(`Welcome ${newProfile.name.split(' ')[0]}! Your matches are ready.`);
+                }}
+              />
+            </div>
+          </div>
         ) : activeTab === 'home' ? (
           <MatchesView
             currentProfile={currentProfile!}
@@ -332,12 +336,28 @@ export default function App() {
             onMarkAllRead={handleMarkAllRead}
             onViewProfile={navigateToProfile}
           />
-        ) : activeTab === 'setup' ? (
-          <SetupView
-            onSignOut={handleSignOut}
-            onRefreshData={refreshData}
+        ) : activeTab === 'admin' ? (
+          <AdminView
+            onBack={() => navigateTo('home')}
+            onRefreshGlobalData={refreshData}
             onToast={showToast}
           />
+        ) : activeTab === 'setup' ? (
+          isAdminAuthenticated ? (
+            <SetupView
+              onSignOut={handleSignOut}
+              onRefreshData={refreshData}
+              onToast={showToast}
+            />
+          ) : (
+            <div className="kw-card p-12 text-center space-y-4 max-w-md mx-auto">
+              <h3 className="font-bold text-base text-[var(--fg)]">Page not found</h3>
+              <p className="text-xs text-[var(--fg-muted)]">The requested page does not exist or requires admin authorization.</p>
+              <button onClick={() => navigateTo('home')} className="kw-btn kw-btn-gold text-xs py-2 px-5 font-semibold">
+                Go to Matches
+              </button>
+            </div>
+          )
         ) : activeTab === 'about' ? (
           <AboutView onNavigateHome={() => navigateTo('home')} />
         ) : displayedProfile ? (
@@ -363,79 +383,19 @@ export default function App() {
             onToast={showToast}
           />
         ) : (
-          <div className="primer-box p-12 text-center space-y-3">
-            <h3 className="font-semibold text-base">Page not found</h3>
-            <p className="text-xs text-[var(--muted)]">The requested member or page does not exist.</p>
-            <button onClick={() => navigateTo('home')} className="primer-btn primer-btn-primary text-xs py-1.5 px-3">
+          <div className="kw-card p-12 text-center space-y-4 max-w-md mx-auto">
+            <h3 className="font-bold text-base text-[var(--fg)]">Page not found</h3>
+            <p className="text-xs text-[var(--fg-muted)]">The requested member or page does not exist.</p>
+            <button onClick={() => navigateTo('home')} className="kw-btn kw-btn-gold text-xs py-2 px-5 font-semibold">
               Go to Matches
             </button>
           </div>
         )}
       </main>
 
-      {/* GitHub Primer Footer with Mandatory Notice and Links */}
-      <footer className="mt-auto border-t border-[var(--border)] py-6 px-4 bg-[var(--subtle)]">
-        <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-[var(--muted)]">
-          <div className="flex items-center gap-2">
-            <div className="w-5 h-5 rounded-full bg-[var(--fg)] text-[var(--header)] grid place-items-center">
-              <Sparkles className="w-3 h-3" />
-            </div>
-            <span>Kwegatta — Hack Day Kampala x MUBS</span>
-          </div>
+      {/* Production-Grade Multi-Column Startup Footer */}
+      <Footer onNavigate={navigateTo} />
 
-          {/* Hard requirement: "Powered by Gemma 4 (open-weight)" in the footer */}
-          <div className="font-medium text-[var(--fg)]">
-            Powered by Gemma 4 (open-weight)
-          </div>
-
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            <button
-              onClick={() => navigateTo('about')}
-              className="hover:underline hover:text-[var(--accent)] text-[var(--fg)] font-medium"
-            >
-              About & Team
-            </button>
-            <span>·</span>
-            <a
-              href="https://github.com/Saifuddin2Ahmed/kwegatta"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:underline hover:text-[var(--accent)]"
-            >
-              Repository
-            </a>
-            <span>·</span>
-            <a
-              href="https://www.mlh.com/opensource-ai"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:underline hover:text-[var(--accent)]"
-            >
-              MLH Challenge
-            </a>
-            <span>·</span>
-            <a
-              href="https://ai.google.dev/gemma/docs/core"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:underline hover:text-[var(--accent)]"
-            >
-              Gemma 4 Licence (Apache 2.0)
-            </a>
-            <span>·</span>
-            <a href="#/wall" className="hover:underline hover:text-[var(--accent)]">
-              Projector Wall
-            </a>
-            <span>·</span>
-            <button
-              onClick={() => navigateTo('setup')}
-              className="hover:underline hover:text-[var(--accent)]"
-            >
-              Setup
-            </button>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }

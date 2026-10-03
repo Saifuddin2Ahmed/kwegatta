@@ -10,8 +10,8 @@ Only the latest release on the primary branch is currently supported for securit
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
-| < 0.1.0 | :x:                |
+| 1.0.x   | :white_check_mark: |
+| < 1.0.0 | :x:                |
 
 ---
 
@@ -46,7 +46,11 @@ If you discover or suspect a security flaw in Kwegatta:
 ## Security Architectural Guarantees
 
 * **Zero Browser API Keys**: All AI calls to Google's generative endpoints occur strictly on the server backend (`server.ts` or Cloud Run proxy). The `GEMINI_API_KEY` is never transmitted to or executed in client browsers.
-* **Contact Privacy & Scrape Protection**: Phone numbers are redacted in public member directory queries (`GET /api/data/profiles`) and are only revealed upon an explicit, logged `POST /api/connect` interaction.
+* **Resource-Level Authorization**: Edits and deletions across all collections (`profiles`, `posts`, `follows`, `notifications`) require cryptographic session tokens verifying resource ownership or admin authority.
+* **Contact Privacy & Scrape Protection**: Phone numbers are redacted in public member directory queries (`GET /api/data/profiles`) for anonymous callers and protected by visibility preferences.
+* **Rate Limiting & Abuse Defense**: IP-sliding rate limiters protect global API endpoints (180 req/min), AI inference (25 calls/min), and admin access (10 attempts/min).
+* **Timing-Safe Authentication**: Administrative login utilizes `crypto.timingSafeEqual` to neutralize timing side-channel attacks.
 * **Fact-Bounded Prompts**: AI generation pipelines are constrained to facts provided directly by members; the model prompt strictly prohibits inventing credentials.
-* **Client-Side Sanitization**: All user-generated text is rendered with React text nodes and sanitized against script injection.
+* **Input Sanitization & Output Safety**: All user-generated text is bounded in length, validated against dangerous protocols (`javascript:`), and rendered safely in React.
+* **Hardened Cloud Firestore Rules**: Database rules enforce ownership matching (`request.auth.uid == resource.data.author_id`) and private notification isolation.
 * **Data Sovereignty**: Any member may permanently delete their account or export their complete data archive via the profile settings.

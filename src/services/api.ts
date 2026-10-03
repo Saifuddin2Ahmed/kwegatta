@@ -460,6 +460,48 @@ export async function fetchGitHubData(input: string): Promise<GitHubData | null>
   return out;
 }
 
+export function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('kw_auth_token');
+}
+
+export function setAuthToken(token: string) {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('kw_auth_token', token);
+  }
+}
+
+export function getAuthHeaders(existingHeaders: Record<string, string> = {}): Record<string, string> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = { ...existingHeaders };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+export async function ensureAuthToken(userId: string): Promise<string | null> {
+  const existing = getAuthToken();
+  if (existing) return existing;
+  try {
+    const res = await fetch('/api/auth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.token) {
+        setAuthToken(data.token);
+        return data.token;
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+  return null;
+}
+
 // Explicit connection request (Digital Public Goods Privacy compliance)
 export async function requestMemberConnect(
   requesterId: string,
@@ -468,7 +510,7 @@ export async function requestMemberConnect(
 ): Promise<{ success: boolean; target_id: string; target_name: string; whatsapp: string; linkedin: string }> {
   const res = await fetch('/api/connect', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ requester_id: requesterId, target_id: targetId, reason })
   });
   if (!res.ok) {
@@ -480,7 +522,8 @@ export async function requestMemberConnect(
 // Delete member profile permanently (Digital Public Goods privacy indicator)
 export async function deleteMemberProfile(profileId: string): Promise<boolean> {
   const res = await fetch(`/api/profiles/${encodeURIComponent(profileId)}`, {
-    method: 'DELETE'
+    method: 'DELETE',
+    headers: getAuthHeaders()
   });
   return res.ok;
 }
@@ -513,70 +556,105 @@ export const db = {
     collection: string,
     options: { eq?: Record<string, any>; limit?: number; after?: string; currentUserId?: string } = {}
   ): Promise<T[]> {
-    const params = new URLSearchParams();
-    if (options.eq) params.set('eq', JSON.stringify(options.eq));
-    if (options.limit) params.set('limit', String(options.limit));
-    if (options.after) params.set('after', options.after);
+    try {
+      const params = new URLSearchParams();
+      if (options.eq) params.set('eq', JSON.stringify(options.eq));
+      if (options.limit) params.set('limit', String(options.limit));
+      if (options.after) params.set('after', options.after);
 
-    let currentUserId = options.currentUserId;
-    if (!currentUserId && typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem('kwegatta_current_profile');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (parsed && parsed.id) currentUserId = parsed.id;
+      const headers = getAuthHeaders();
+
+      const res = await fetch(`/api/data/${collection}?${params.toString()}`, { headers });
+      if (!res.ok) {
+        const cached = typeof window !== 'undefined' ? localStorage.getItem(`kw_cache_${collection}`) : null;
+        if (cached) {
+          try { return JSON.parse(cached); } catch (e) {}
         }
-      } catch (e) {
-        // ignore
+        return [];
       }
+      const data = await res.json();
+      if (Array.isArray(data) && !options.eq && !options.after && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(`kw_cache_${collection}`, JSON.stringify(data.slice(0, 100)));
+        } catch (e) {}
+      }
+      return data;
+    } catch (err) {
+      const cached = typeof window !== 'undefined' ? localStorage.getItem(`kw_cache_${collection}`) : null;
+      if (cached) {
+        try { return JSON.parse(cached); } catch (e) {}
+      }
+      return [];
     }
-
-    const headers: Record<string, string> = {};
-    if (currentUserId) {
-      headers['x-user-id'] = currentUserId;
-    }
-
-    const res = await fetch(`/api/data/${collection}?${params.toString()}`, { headers });
-    if (!res.ok) return [];
-    return res.json();
   },
 
   async insert<T>(collection: string, row: Partial<T>): Promise<T> {
-    const res = await fetch(`/api/data/${collection}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(row)
-    });
-    if (!res.ok) throw new Error(`Failed to insert into ${collection}`);
-    return res.json();
+    try {
+      const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`/api/data/${collection}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(row)
+      });
+      if (!res.ok) throw new Error(`Failed to insert into ${collection}`);
+      const data = await res.json();
+      if (collection === 'profiles' && data.token) {
+        setAuthToken(data.token);
+      }
+      return data;
+    } catch (err: any) {
+      console.warn(`[db.insert] error for ${collection}:`, err.message);
+      return row as T;
+    }
   },
 
   async update<T>(collection: string, id: string, patch: Partial<T>): Promise<T> {
-    const res = await fetch(`/api/data/${collection}/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(patch)
-    });
-    if (!res.ok) throw new Error(`Failed to update ${collection}/${id}`);
-    return res.json();
+    try {
+      const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
+      const res = await fetch(`/api/data/${collection}/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify(patch)
+      });
+      if (!res.ok) throw new Error(`Failed to update ${collection}/${id}`);
+      return res.json();
+    } catch (err: any) {
+      console.warn(`[db.update] error for ${collection}:`, err.message);
+      return patch as T;
+    }
   },
 
   async remove(collection: string, id: string): Promise<boolean> {
-    const res = await fetch(`/api/data/${collection}/${encodeURIComponent(id)}`, {
-      method: 'DELETE'
-    });
-    return res.ok;
+    try {
+      const headers = getAuthHeaders();
+      const res = await fetch(`/api/data/${collection}/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers
+      });
+      return res.ok;
+    } catch (err: any) {
+      console.warn(`[db.remove] error for ${collection}:`, err.message);
+      return false;
+    }
   },
 
   async seedDemo(): Promise<number> {
-    const res = await fetch('/api/demo/seed', { method: 'POST' });
-    const data = await res.json();
-    return data.count || 0;
+    try {
+      const res = await fetch('/api/demo/seed', { method: 'POST', headers: getAuthHeaders() });
+      const data = await res.json();
+      return data.count || 0;
+    } catch (e) {
+      return 0;
+    }
   },
 
   async clearDemo(): Promise<number> {
-    const res = await fetch('/api/demo/clear', { method: 'POST' });
-    const data = await res.json();
-    return data.count || 0;
+    try {
+      const res = await fetch('/api/demo/clear', { method: 'POST', headers: getAuthHeaders() });
+      const data = await res.json();
+      return data.count || 0;
+    } catch (e) {
+      return 0;
+    }
   }
 };

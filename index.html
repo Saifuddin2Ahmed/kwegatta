@@ -2,17 +2,55 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
     <title>Kwegatta: find the people you should build with</title>
     <meta name="description" content="Network where students and builders match by what they need and offer using the open-weight Gemma 4 model." />
     <meta property="og:title" content="Kwegatta: find the people you should build with" />
     <meta property="og:description" content="Network where students and builders match by what they need and offer using the open-weight Gemma 4 model." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- Defensive Fetch Setter Guard for Sandboxed / Preview Environments -->
+    <script>
+      (function() {
+        try {
+          const originalFetch = window.fetch;
+          let currentFetch = originalFetch;
+          Object.defineProperty(window, 'fetch', {
+            get: function() {
+              return currentFetch;
+            },
+            set: function(newFetch) {
+              currentFetch = newFetch;
+            },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {
+          // If already defined or non-configurable, continue safely
+        }
+      })();
+    </script>
+
+    <!-- PWA & Mobile Web App Meta -->
+    <meta name="theme-color" content="#090D16" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Kwegatta" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- Official Kwegatta Favicons & Apple Touch Icon -->
+    <link rel="icon" type="image/svg+xml" href="/kwegatta-icon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- Typography: Space Grotesk (Headings) + Inter (Body) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

@@ -1,7 +1,7 @@
 # Kwegatta 🤝
 
 [![Hacktoberfest 2026](https://img.shields.io/badge/Hacktoberfest-2026-ff7a00.svg?style=flat-square&logo=hacktoberfest)](https://hacktoberfest.com/)
-[![Nominee: Best Open-Source AI Project](https://img.shields.io/badge/Nominee-Best_Open--Source_AI_Project-238636.svg?style=flat-square)](https://www.mlh.com/opensource-ai)
+[![Entry: Best Open-Source AI Project](https://img.shields.io/badge/Entry-Best_Open--Source_AI_Project-238636.svg?style=flat-square)](https://www.mlh.com/opensource-ai)
 [![Open-Weight Model: Gemma 4 31B IT](https://img.shields.io/badge/Model-gemma--4--31b--it-4493f8.svg?style=flat-square)](https://ai.google.dev/gemma/docs/core)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](./LICENSE)
 [![Gemma Terms: Apache 2.0](https://img.shields.io/badge/Gemma_License-Apache_2.0-blue.svg?style=flat-square)](https://ai.google.dev/gemma/docs/core)
@@ -9,7 +9,7 @@
 [![Design: GitHub Primer](https://img.shields.io/badge/Design-GitHub_Primer-21262d.svg?style=flat-square&logo=github)](https://primer.style/)
 
 > **"Find the people you should build and learn with."**  
-> *Kwegatta* (from Luganda: *to connect, unite, join forces*) is a fast, open-source networking and peer-learning platform built for student builder communities. First launched for **Hacktoberfest 2026 Hack Day Kampala x MUBS** (Makerere University Business School).
+> Kwegatta comes from the Luganda word okwegatta, meaning to unite or come together. As the saying goes, Okwegatta ge maanyi: unity is strength. First launched for **Hacktoberfest 2026 Hack Day Kampala x MUBS** (Makerere University Business School).
 
 * **Live Application**: [https://kwegatta.ai.studio](https://kwegatta.ai.studio)
 * **GitHub Repository**: [https://github.com/Saifuddin2Ahmed/kwegatta](https://github.com/Saifuddin2Ahmed/kwegatta)
@@ -85,16 +85,17 @@ Traditional networking fails because:
 
 ## Team
 
-All team members share equal credit and are listed alphabetically below:
+The team behind Kwegatta:
 
 | Name | Affiliation | Background | Role in Kwegatta | GitHub |
 | ---- | ----------- | ---------- | ---------------- | ------ |
-| **Abubaker Mohamed Adam** | Sub-Saharan College | NGO volunteer | Community and NGO partnerships |
-| **Adinan Juuko** | Victoria University | Software Engineering | Testing and quality |
-| **Mupole Uwizeye Alexis** | Bugema University | Business Computing | Product and data |
-| **Nabagulanyi Prossy Sherry** | Makerere University Business School | Student | User research and outreach |
-| **Ojambo Emmanuel** | Makerere University Business School | Accounting | Business model and sustainability |
-| **Saifuddin Ahmed** | Future Stars Center for Development and Capacity Building (refugee-led NGO) | Engineer | Team lead and engineering |
+| **Saifuddin Ahmed** | Future Stars Center for Development and Capacity Building (refugee-led NGO) | Engineer | Team lead and engineering | [@Saifuddin2Ahmed](https://github.com/Saifuddin2Ahmed) |
+| **Abubaker Mohamed Adam** | Sub-Saharan College | NGO volunteer | Community and NGO partnerships | [@abubakermohammed092077-bit](https://github.com/abubakermohammed092077-bit) |
+| **Adinan Juuko** | Victoria University | Software Engineering | Testing and quality | [@Aditech-191](https://github.com/Aditech-191) |
+| **Amme Patience Esther** | Makerere University Business School | Bachelor of Marketing | Marketing and communications | none yet |
+| **Mupole Uwizeye Alexis** | Bugema University | Business Computing | Product and data | [@Alexis-Mupole](https://github.com/Alexis-Mupole) |
+| **Nabagulanyi Prossy Sherry** | Makerere University Business School | Student | User research and outreach | none yet |
+| **Ojambo Emmanuel** | Makerere University Business School | Accounting | Business model and sustainability | none yet |
 
 ---
 
@@ -135,7 +136,7 @@ graph TD
     EXPRESS -->|"Firestore CRUD Operations"| FIRESTORE
 ```
 
-Detailed architectural documentation is available in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Detailed architectural documentation is available in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 

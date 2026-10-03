@@ -79,6 +79,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [editLearns, setEditLearns] = useState(profile.learns || '');
   const [editStatus, setEditStatus] = useState(profile.status || 'Open to projects');
   const [editWhatsApp, setEditWhatsApp] = useState(profile.whatsapp || '');
+  const [editHideWhatsApp, setEditHideWhatsApp] = useState(profile.hide_whatsapp || false);
   const [gemmaInstruction, setGemmaInstruction] = useState('');
   const [isRewriting, setIsRewriting] = useState(false);
 
@@ -123,7 +124,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         teaches: editTeaches.slice(0, 400),
         learns: editLearns.slice(0, 400),
         status: editStatus,
-        whatsapp: editWhatsApp.replace(/[^\d+]/g, '')
+        whatsapp: editWhatsApp.replace(/[^\d+]/g, ''),
+        hide_whatsapp: editHideWhatsApp
       };
 
       await db.update('profiles', profile.id, updated);
@@ -219,30 +221,43 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   };
 
   const handleConnectWhatsApp = async () => {
+    if (!currentProfile) {
+      onToast('Please join or sign in to connect with members');
+      return;
+    }
+
     try {
       setIsConnecting(true);
-      const requesterId = currentProfile ? currentProfile.id : 'guest';
-      const res = await requestMemberConnect(
-        requesterId,
-        profile.id,
-        'Let\'s build together!'
-      );
+      const text = `Hi ${profile.name.split(' ')[0]}, I'm ${currentProfile.name} on Kwegatta. Let's connect!`;
 
-      if (res.whatsapp) {
-        const url = formatWhatsAppUrl(
-          res.whatsapp,
-          `Hi ${profile.name.split(' ')[0]}, I'm ${currentProfile ? currentProfile.name : 'a fellow builder'} on Kwegatta. Let's connect!`
-        );
-        window.open(url, '_blank', 'noopener,noreferrer');
-        onToast(`Connected with ${profile.name}! Opening WhatsApp...`);
-      } else if (res.linkedin || profile.linkedin) {
-        window.open(res.linkedin || profile.linkedin, '_blank', 'noopener,noreferrer');
-        onToast(`Opening LinkedIn for ${profile.name}...`);
-      } else {
-        onToast(`${profile.name} has not set a contact link yet.`);
+      // Log notification to target member
+      await db.insert('notifications', {
+        to_id: profile.id,
+        from_id: currentProfile.id,
+        type: 'connect',
+        body: `${currentProfile.name} reached out to connect with you.`,
+        read: false,
+        created_at: new Date().toISOString()
+      });
+
+      if (profile.whatsapp) {
+        const url = formatWhatsAppUrl(profile.whatsapp, text);
+        if (url) {
+          window.open(url, '_blank', 'noopener,noreferrer');
+          onToast(`Opening WhatsApp for ${profile.name}...`);
+          return;
+        }
       }
+
+      if (profile.linkedin) {
+        window.open(profile.linkedin, '_blank', 'noopener,noreferrer');
+        onToast(`Opening LinkedIn for ${profile.name}...`);
+        return;
+      }
+
+      onToast(`${profile.name} has not set a direct contact link yet.`);
     } catch (err: any) {
-      onToast(err.message || 'Error establishing connection');
+      onToast(err.message || 'Error opening WhatsApp');
     } finally {
       setIsConnecting(false);
     }
@@ -528,12 +543,29 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </a>
               </div>
             )}
-            {profile.whatsapp && (
+            {profile.whatsapp ? (
               <div className="flex items-center gap-2">
                 <MessageCircle className="w-3.5 h-3.5 flex-shrink-0 text-[var(--success)]" />
-                <span>WhatsApp: {profile.whatsapp}</span>
+                <a
+                  href={formatWhatsAppUrl(profile.whatsapp, `Hi ${profile.name.split(' ')[0]}, I found your profile on Kwegatta!`)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="truncate hover:underline text-[var(--success)] font-medium"
+                >
+                  WhatsApp: {profile.whatsapp}
+                </a>
               </div>
-            )}
+            ) : profile.hide_whatsapp && !isMine ? (
+              <div className="flex items-center gap-2 text-[var(--fg-muted)]">
+                <MessageCircle className="w-3.5 h-3.5 flex-shrink-0 opacity-50" />
+                <span>WhatsApp: Hidden by member</span>
+              </div>
+            ) : !currentProfile ? (
+              <div className="flex items-center gap-2 text-[var(--gold)]">
+                <MessageCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                <span>WhatsApp: (Sign in to view)</span>
+              </div>
+            ) : null}
           </div>
 
           {/* Dynamic Profile QR Code with fullscreen modal button */}
@@ -749,15 +781,25 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-[var(--muted)] mb-1">
-                      WhatsApp number (visible on profile)
+                      WhatsApp number
                     </label>
                     <input
                       type="tel"
                       value={editWhatsApp}
                       onChange={e => setEditWhatsApp(e.target.value)}
+                      placeholder="+256 700 000000"
                       className="primer-input text-xs"
                       maxLength={25}
                     />
+                    <label className="flex items-center gap-2 mt-2 text-xs text-[var(--fg)] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!editHideWhatsApp}
+                        onChange={e => setEditHideWhatsApp(!e.target.checked)}
+                        className="rounded border-[var(--card-border)] text-[var(--gold)] focus:ring-[var(--gold)]"
+                      />
+                      <span>Visible to other signed-in members (recommended)</span>
+                    </label>
                   </div>
                 </div>
               </div>

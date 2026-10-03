@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, Camera, Upload, ArrowRight, RefreshCw, CheckCircle2 } from 'lucide-react';
+import { Sparkles, Camera, Upload, ArrowRight, RefreshCw, CheckCircle2, Clock, Check, AlertCircle, RotateCcw } from 'lucide-react';
 import { Profile } from '../types';
 import { buildProfileWithGemma, fetchGitHubData, db, APP_NAME } from '../services/api';
-import { resizeImageFile, getAvatarUrl } from '../utils';
+import { resizeImageFile } from '../utils';
+import { Avatar } from './Avatar';
 
 interface OnboardingChatProps {
   onCompleted: (profile: Profile) => void;
@@ -21,28 +22,28 @@ const STEP_SUGGESTIONS: Record<string, string[]> = {
     'Flutter mobile apps & Dart',
     'React, TypeScript & Tailwind',
     'UI/UX design in Figma',
-    'Market research & pitch decks',
-    'Financial modeling & budgets',
-    'Python data scraping & APIs'
+    'Financial modeling & pitch decks',
+    'Python data science & REST APIs',
+    'Marketing, sales & customer discovery'
   ],
   needs: [
-    'Technical co-founder',
-    'Mobile developer (Flutter)',
+    'Technical co-founder (Flutter/React)',
     'UI/UX designer (Figma)',
-    'Business & sales strategist',
-    'First customers & marketing'
+    'Business strategist & marketing',
+    'Backend engineer (APIs & database)',
+    'Domain expert in agriculture / fintech'
   ],
   teaches: [
-    'Flutter & Firebase',
-    'Figma UI components',
-    'Financial cash-flow models',
+    'Flutter mobile development',
+    'Figma UI design & auto-layout',
+    'Financial accounting & budgets',
     'Python REST APIs'
   ],
   learns: [
-    'Flutter app development',
-    'React & TypeScript',
+    'Flutter app architecture',
+    'React & modern TypeScript',
     'Grant funding proposals',
-    'Machine learning basics'
+    'AI prompt engineering'
   ]
 };
 
@@ -51,7 +52,10 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted, onC
   const [formData, setFormData] = useState<Partial<Profile>>({});
   const [inputText, setInputText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isBotTyping, setIsBotTyping] = useState(false);
+  const [whatsappVisible, setWhatsappVisible] = useState(true);
   const [profileDraft, setProfileDraft] = useState<any | null>(null);
+  const [errorState, setErrorState] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -59,141 +63,178 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted, onC
   const STEPS = [
     {
       key: 'name',
+      label: 'Name',
       prompt: `Hi! I'm the ${APP_NAME} AI guide running on Gemma 4 (open-weight). I'll help you find builders, mentors and partners at Hack Day Kampala x MUBS. What is your full name?`,
       placeholder: 'e.g. Sandra Nabirye',
       required: true
     },
     {
       key: 'github',
+      label: 'GitHub',
       prompt: (d: Partial<Profile>) =>
         `Pleasure to meet you, ${d.name?.split(' ')[0]}! What is your GitHub username or profile link? I'll automatically read your public repos and languages.`,
       placeholder: 'e.g. sandra-dev or github.com/sandra-dev',
       required: false
     },
     {
-      key: 'linkedin',
-      prompt: 'Share your LinkedIn profile link so teammates can view your background.',
-      placeholder: 'https://linkedin.com/in/...',
-      required: false
-    },
-    {
       key: 'offers',
-      prompt: 'What skills, resources, or knowledge do you OFFER a team? (e.g. Flutter mobile apps, financial modeling, UI design in Figma, farmer connections)',
-      placeholder: 'e.g. React & TypeScript, UI design, business validation',
+      label: 'Offers',
+      prompt: 'What skills, resources, or knowledge do you OFFER a team? (e.g. Flutter mobile apps, financial modeling, UI design in Figma, business validation)',
+      placeholder: 'e.g. Flutter apps, UI design, market research',
       required: true
     },
     {
       key: 'needs',
-      prompt: 'What do you NEED most right now? (e.g. a technical co-founder, a designer, marketing help, pricing advice)',
+      label: 'Needs',
+      prompt: 'What do you NEED most right now? (e.g. a technical co-founder, a mobile developer, marketing help, pricing advice)',
       placeholder: 'e.g. a developer to build our hackathon demo',
       required: true
     },
     {
       key: 'teaches',
+      label: 'Teaches',
       prompt: 'What skill or subject can you TEACH someone as a peer mentor?',
       placeholder: 'e.g. Dart & Flutter basics, pitch deck design, accounting',
       required: false
     },
     {
       key: 'learns',
+      label: 'Learns',
       prompt: 'What skill or topic do you WANT TO LEARN today? We will find you a study partner.',
       placeholder: 'e.g. Python data analysis, Figma auto-layout, grant writing',
       required: false
     },
     {
       key: 'whatsapp',
-      prompt: 'Your WhatsApp phone number. (Note: WhatsApp numbers are visible on your profile so matches can message you directly with one tap).',
-      placeholder: 'e.g. 0772 123456 or +256772123456',
+      label: 'WhatsApp',
+      prompt: 'What is your WhatsApp phone number? Your WhatsApp number will be visible to other members so you can connect in one tap.',
+      placeholder: 'e.g. +256 700 000000',
       required: false
     },
     {
-      key: 'photo',
-      prompt: 'Finally, snap a selfie with your camera or upload a photo for your profile (or skip to use your GitHub avatar / initials).',
-      isPhoto: true,
-      required: false
+      key: 'avatar',
+      label: 'Photo',
+      prompt: 'Finally, add a profile picture or selfie so teammates can recognize you in the room.',
+      placeholder: '',
+      required: false,
+      isPhoto: true
     }
   ];
 
-  // Initialize first greeting
-  useEffect(() => {
-    setMessages([
+  const secondsLeft = Math.max(10, (STEPS.length - stepIndex) * 7);
+
+  const addMessage = (sender: 'bot' | 'user', text: string, component?: React.ReactNode) => {
+    setMessages(prev => [
+      ...prev,
       {
-        id: 'msg-0',
-        sender: 'bot',
-        text: STEPS[0].prompt as string
+        id: 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+        sender,
+        text,
+        component
       }
     ]);
+  };
+
+  useEffect(() => {
+    if (messages.length === 0) {
+      setIsBotTyping(true);
+      const timer = setTimeout(() => {
+        setIsBotTyping(false);
+        addMessage('bot', STEPS[0].prompt as string);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
   }, []);
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isProcessing]);
+  }, [messages, isProcessing, isBotTyping]);
 
   useEffect(() => {
-    if (!STEPS[stepIndex]?.isPhoto && !profileDraft) {
+    if (!profileDraft && !STEPS[stepIndex]?.isPhoto) {
       inputRef.current?.focus();
     }
   }, [stepIndex, profileDraft]);
 
-  const addMessage = (sender: 'bot' | 'user', text: string, component?: React.ReactNode) => {
-    setMessages(prev => [...prev, { id: 'msg-' + Date.now() + Math.random(), sender, text, component }]);
+  const getPersonalizedReaction = (key: string, value: string, d: Partial<Profile>): string => {
+    const firstName = d.name?.split(' ')[0] || 'there';
+    switch (key) {
+      case 'name':
+        return `Great to meet you, ${firstName}! Let's find your dream team.`;
+      case 'github':
+        return `GitHub saved. Sharing your public repositories helps other builders discover your strengths.`;
+      case 'offers':
+        return `"${value.slice(0, 45)}${value.length > 45 ? '...' : ''}" — strong offer. Builders in the room need this expertise.`;
+      case 'needs':
+        return `Understood. Looking for "${value.slice(0, 45)}${value.length > 45 ? '...' : ''}" — Gemma 4 will pair you with complementary partners.`;
+      case 'teaches':
+        return `Teaching "${value.slice(0, 40)}" makes you a valuable peer mentor today!`;
+      case 'learns':
+        return `Learning "${value.slice(0, 40)}" — we'll pair you with a study partner in the Learn tab.`;
+      case 'whatsapp':
+        return `WhatsApp saved! Other signed-in members can see it on your profile and connect in one tap.`;
+      default:
+        return 'Got it!';
+    }
   };
 
-  const handleNextStep = async (userAnswer: string) => {
+  const handleNextStep = async (value: string) => {
     const currentStep = STEPS[stepIndex];
-    if (!currentStep) return;
+    if (currentStep.required && !value.trim()) return;
 
-    const trimmed = userAnswer.trim();
-    if (currentStep.required && !trimmed) return;
-
-    addMessage('user', trimmed || 'Skip');
+    setErrorState(null);
+    const trimmed = value.trim();
+    if (trimmed) {
+      addMessage('user', trimmed);
+    } else {
+      addMessage('user', 'Skipped');
+    }
     setInputText('');
 
-    const updatedData: Partial<Profile> = { ...formData };
+    const updatedData: Partial<Profile> = {
+      ...formData,
+      [currentStep.key]: trimmed
+    };
 
-    if (currentStep.key === 'name') updatedData.name = trimmed;
-    if (currentStep.key === 'offers') updatedData.offers = trimmed;
-    if (currentStep.key === 'needs') updatedData.needs = trimmed;
-    if (currentStep.key === 'teaches') updatedData.teaches = trimmed;
-    if (currentStep.key === 'learns') updatedData.learns = trimmed;
     if (currentStep.key === 'whatsapp') {
-      updatedData.whatsapp = trimmed.replace(/[^\d+]/g, '');
-    }
-    if (currentStep.key === 'linkedin') {
-      if (trimmed && /linkedin\.com/i.test(trimmed)) {
-        updatedData.linkedin = trimmed.startsWith('http') ? trimmed : `https://${trimmed}`;
-      }
+      updatedData.hide_whatsapp = !whatsappVisible;
     }
 
+    // If step was GitHub, automatically enrich with GitHub API
     if (currentStep.key === 'github' && trimmed) {
       setIsProcessing(true);
-      addMessage('bot', 'Checking GitHub repositories...');
-      const gh = await fetchGitHubData(trimmed);
-      setIsProcessing(false);
-
-      if (gh) {
-        updatedData.github = gh.login;
-        updatedData.gh = gh;
-        if (gh.repos != null) {
-          addMessage(
-            'bot',
-            `Found @${gh.login}: ${gh.repos} public repos${gh.langs?.length ? ', primary languages: ' + gh.langs.slice(0, 3).join(', ') : ''}.`
-          );
-        } else {
-          addMessage('bot', `Saved GitHub username @${gh.login}.`);
+      const username = trimmed.replace(/^https?:\/\/github\.com\//, '').replace(/\/$/, '');
+      updatedData.github = username;
+      try {
+        const gh = await fetchGitHubData(username);
+        if (gh) {
+          updatedData.gh = gh;
         }
-      } else {
-        addMessage('bot', 'Could not locate that GitHub username, continuing smoothly without it.');
+      } catch (e) {
+        // Continue silently
       }
+      setIsProcessing(false);
     }
 
     setFormData(updatedData);
+
+    // Show bot reaction first, then ask next question
+    if (trimmed) {
+      const reaction = getPersonalizedReaction(currentStep.key, trimmed, updatedData);
+      setIsBotTyping(true);
+      await new Promise(r => setTimeout(r, 400));
+      setIsBotTyping(false);
+      addMessage('bot', reaction);
+    }
 
     const nextIdx = stepIndex + 1;
     if (nextIdx < STEPS.length) {
       setStepIndex(nextIdx);
       const nextPrompt = STEPS[nextIdx].prompt;
       const promptText = typeof nextPrompt === 'function' ? nextPrompt(updatedData) : nextPrompt;
+      setIsBotTyping(true);
+      await new Promise(r => setTimeout(r, 400));
+      setIsBotTyping(false);
       addMessage('bot', promptText);
     } else {
       // Completed all steps: invoke Gemma 4 to synthesize profile
@@ -210,7 +251,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted, onC
       const resized = await resizeImageFile(file);
       const updated = { ...formData, avatar: resized };
       setFormData(updated);
-      addMessage('user', 'Uploaded profile photo');
+      addMessage('user', 'Uploaded photo');
       await generateGemmaProfile(updated);
     } catch (err: any) {
       addMessage('bot', 'Could not process that image file. Continuing with default avatar.');
@@ -222,6 +263,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted, onC
 
   const generateGemmaProfile = async (data: Partial<Profile>, instruction?: string) => {
     setIsProcessing(true);
+    setErrorState(null);
     addMessage('bot', 'Gemma 4 is synthesizing your profile headline, tags and role...');
 
     try {
@@ -229,24 +271,34 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted, onC
       setProfileDraft(draft);
       addMessage(
         'bot',
-        `Here is your profile preview (crafted with ${draft.ai ? 'open-weight Gemma 4' : 'keyword rules'}):`,
-        <div className="primer-box p-3 mt-2 bg-[var(--bg)] border border-[var(--border)]">
-          <div className="flex items-center gap-3">
-            <img
-              src={data.avatar || (data.github ? `https://github.com/${data.github}.png` : '') || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" fill="%234493f8"/></svg>'}
-              alt="Avatar"
-              className="w-12 h-12 rounded-full object-cover border border-[var(--border)]"
+        `Here is your profile preview:`,
+        <div className="kw-card p-4 sm:p-5 mt-3 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-xl space-y-3.5 animate-in fade-in zoom-in-95">
+          <div className="flex items-center gap-3.5">
+            <Avatar
+              profile={{ name: data.name || '', avatar: data.avatar } as any}
+              className="w-12 h-12 rounded-full ring-2 ring-[var(--gold)]"
             />
             <div>
-              <div className="font-semibold text-sm">{data.name}</div>
-              <div className="text-xs text-[var(--muted)]">{draft.headline}</div>
-              <span className="primer-label primer-label-blue text-[11px] mt-1">{draft.role}</span>
+              <div className="font-bold text-sm text-[var(--fg)]">
+                {data.name}
+              </div>
+              <div className="text-xs text-[var(--gold)] font-semibold mt-0.5">
+                {draft.headline}
+              </div>
+              <span className="kw-badge kw-badge-teal text-[10px] mt-1.5 font-medium">
+                {draft.role}
+              </span>
             </div>
           </div>
-          <p className="text-xs mt-2.5 text-[var(--fg)] leading-relaxed">{draft.bio}</p>
-          <div className="flex flex-wrap gap-1 mt-2">
+          <p className="text-xs text-[var(--fg)] leading-relaxed">
+            {draft.bio}
+          </p>
+          <div className="flex flex-wrap gap-1.5 pt-1">
             {draft.tags?.map((t: string) => (
-              <span key={t} className="primer-tag text-[11px]">
+              <span
+                key={t}
+                className="kw-badge kw-badge-gold text-[10px]"
+              >
                 #{t}
               </span>
             ))}
@@ -254,7 +306,8 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted, onC
         </div>
       );
     } catch (err: any) {
-      addMessage('bot', 'Profile generation error. You can still save and edit your profile manually.');
+      setErrorState('Could not synthesize AI profile summary at this moment. You can still proceed with your answers.');
+      addMessage('bot', 'Your profile details are saved! You can proceed to matches or retry profile synthesis.');
     } finally {
       setIsProcessing(false);
     }
@@ -269,6 +322,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted, onC
   const handleSaveProfile = async () => {
     if (!formData.name) return;
     setIsProcessing(true);
+    setErrorState(null);
 
     try {
       const fullProfile: Profile = {
@@ -281,71 +335,102 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted, onC
         needs: formData.needs || '',
         teaches: formData.teaches || '',
         learns: formData.learns || '',
-        tags: profileDraft?.tags || [],
-        skills: profileDraft?.skills || [],
+        whatsapp: formData.whatsapp || '',
+        hide_whatsapp: formData.hide_whatsapp ?? false,
         github: formData.github || '',
         linkedin: formData.linkedin || '',
-        whatsapp: formData.whatsapp || '',
-        avatar: formData.avatar || '',
-        status: 'Open to projects',
-        is_demo: false,
-        created_at: new Date().toISOString(),
-        gh: formData.gh || null
+        avatar: formData.avatar || (formData.github ? `https://github.com/${formData.github}.png` : ''),
+        tags: profileDraft?.tags || ['builder', 'hackathon'],
+        skills: profileDraft?.skills || profileDraft?.tags || ['builder', 'hackathon'],
+        created_at: new Date().toISOString()
       };
 
-      const saved = await db.insert<Profile>('profiles', fullProfile);
-      localStorage.setItem('kw_me', saved.id);
-
-      // Create welcome notification
-      await db.insert('notifications', {
-        to_id: saved.id,
-        type: 'welcome',
-        body: `Welcome to ${APP_NAME}, ${saved.name.split(' ')[0]}! Open your profile to scan your personal QR code or explore matches.`,
-        read: false,
-        created_at: new Date().toISOString()
-      });
-
-      onCompleted(saved);
+      await db.insert('profiles', fullProfile);
+      localStorage.setItem('kw_me', fullProfile.id);
+      localStorage.setItem('kwegatta_current_profile', JSON.stringify(fullProfile));
+      onCompleted(fullProfile);
     } catch (err: any) {
-      console.error('Failed to save profile:', err);
-      addMessage('bot', 'Error saving profile. Please check connection and try again.');
+      setErrorState('Something went wrong while saving your profile. Please try again.');
     } finally {
       setIsProcessing(false);
     }
   };
 
   return (
-    <div className="max-w-2xl mx-auto py-6 px-4">
-      <div className="mb-4">
-        <h1 className="text-xl font-bold flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-[var(--accent)]" />
-          <span>Join {APP_NAME}</span>
-        </h1>
-        <p className="text-xs text-[var(--muted)] mt-1">
-          Takes under 60 seconds on a phone. Say what you need and offer; Gemma 4 matches you with collaborators.
-        </p>
+    <div className="max-w-3xl mx-auto pt-2 pb-10 space-y-4 animate-in fade-in">
+      
+      {/* Modern Profile Assembly Progression Tracker */}
+      <div className="kw-card p-4 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-sm space-y-3">
+        <div className="flex items-center justify-between text-xs text-[var(--fg-muted)]">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-[var(--gold)]" />
+            <span className="font-semibold text-xs text-[var(--fg)]">Profile Assembly</span>
+            <span className="text-[var(--fg-subtle)] text-[11px]">· Step {Math.min(stepIndex + 1, STEPS.length)} of {STEPS.length}</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-[var(--gold)] font-medium text-[11px] tabular-nums">
+            <Clock className="w-3.5 h-3.5" />
+            <span>about {secondsLeft}s left</span>
+          </div>
+        </div>
+
+        {/* Horizontal Stepper */}
+        <div className="grid grid-cols-8 gap-1.5 sm:gap-2 pt-1">
+          {STEPS.map((step, idx) => {
+            const isDone = idx < stepIndex;
+            const isCurrent = idx === stepIndex;
+
+            return (
+              <div key={step.key} className="flex flex-col items-center gap-1">
+                {/* Step indicator bar/pill */}
+                <div
+                  className={`w-full h-1.5 rounded-full transition-all duration-300 ${
+                    isDone
+                      ? 'bg-[var(--gold)]'
+                      : isCurrent
+                      ? 'bg-[var(--gold)] shadow-[0_0_8px_rgba(245,183,0,0.5)] animate-pulse'
+                      : 'bg-[var(--bg-subtle)] border border-[var(--card-border)]'
+                  }`}
+                  title={`${step.label}: ${isDone ? 'Completed' : isCurrent ? 'Current step' : 'Upcoming'}`}
+                />
+                <span
+                  className={`text-[10px] font-medium hidden sm:block truncate w-full text-center transition-colors ${
+                    isCurrent
+                      ? 'text-[var(--gold)] font-bold'
+                      : isDone
+                      ? 'text-[var(--fg)]'
+                      : 'text-[var(--fg-subtle)]'
+                  }`}
+                >
+                  {step.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      <div className="primer-box bg-[var(--subtle)] overflow-hidden shadow-sm">
-        {/* Chat log */}
-        <div className="p-4 space-y-3 min-h-[320px] max-h-[58vh] overflow-y-auto">
+      {/* Production-Grade Conversational Onboarding Assistant */}
+      <div className="kw-card bg-[var(--card)] border border-[var(--card-border)] rounded-2xl overflow-hidden shadow-xl transition-all">
+        
+        {/* Chat History & Interactive Log */}
+        <div className="p-4 sm:p-6 space-y-4 min-h-[260px] max-h-[58vh] overflow-y-auto bg-[var(--bg-subtle)]/20">
           {messages.map(msg => (
             <div
               key={msg.id}
-              className={`flex gap-2.5 max-w-[92%] ${
+              className={`flex gap-3 max-w-[92%] sm:max-w-[85%] animate-in slide-in-from-bottom-2 duration-200 ${
                 msg.sender === 'user' ? 'ml-auto flex-row-reverse' : ''
               }`}
             >
               {msg.sender === 'bot' && (
-                <div className="w-7 h-7 rounded-full bg-[var(--accent-subtle)] text-[var(--accent)] grid place-items-center flex-shrink-0 mt-0.5 border border-[var(--border)]">
-                  <Sparkles className="w-3.5 h-3.5" />
+                <div className="w-8 h-8 rounded-full bg-[var(--gold-subtle)] text-[var(--gold)] grid place-items-center flex-shrink-0 mt-0.5 border border-[var(--card-border)] shadow-sm">
+                  <Sparkles className="w-4 h-4" />
                 </div>
               )}
               <div
-                className={`p-3 rounded-md text-xs leading-relaxed border ${
+                className={`p-3.5 sm:p-4 rounded-2xl text-xs sm:text-[13px] leading-relaxed shadow-sm ${
                   msg.sender === 'user'
-                    ? 'bg-[var(--accent-subtle)] border-[var(--accent)] text-[var(--fg)]'
-                    : 'bg-[var(--bg)] border-[var(--border)] text-[var(--fg)]'
+                    ? 'bg-gradient-to-r from-[#F5B700] to-[#E0A600] text-[#090D16] font-medium border border-[var(--gold)]'
+                    : 'bg-[var(--card)] border border-[var(--card-border)] text-[var(--fg)]'
                 }`}
               >
                 <div>{msg.text}</div>
@@ -354,49 +439,85 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted, onC
             </div>
           ))}
 
-          {isProcessing && (
-            <div className="flex gap-2.5 items-center">
-              <div className="w-7 h-7 rounded-full bg-[var(--accent-subtle)] text-[var(--accent)] grid place-items-center flex-shrink-0">
-                <Sparkles className="w-3.5 h-3.5" />
+          {/* Typing Indicator */}
+          {isBotTyping && (
+            <div className="flex gap-3 items-center animate-in fade-in duration-200">
+              <div className="w-8 h-8 rounded-full bg-[var(--gold-subtle)] text-[var(--gold)] grid place-items-center flex-shrink-0 border border-[var(--card-border)]">
+                <Sparkles className="w-4 h-4" />
               </div>
-              <div className="p-2.5 rounded-md bg-[var(--bg)] border border-[var(--border)] text-xs text-[var(--muted)] flex items-center gap-1.5">
-                <span>Gemma 4 is thinking</span>
+              <div className="py-2.5 px-4 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] text-xs text-[var(--fg-muted)] flex items-center gap-1.5 shadow-sm">
                 <span className="typing-dot"></span>
                 <span className="typing-dot"></span>
                 <span className="typing-dot"></span>
               </div>
             </div>
           )}
+
+          {isProcessing && (
+            <div className="flex gap-3 items-center animate-in fade-in">
+              <div className="w-8 h-8 rounded-full bg-[var(--gold-subtle)] text-[var(--gold)] grid place-items-center flex-shrink-0 border border-[var(--card-border)]">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div className="py-3 px-4 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] text-xs text-[var(--fg-muted)] flex items-center gap-2.5 shadow-sm">
+                <span>Gemma 4 is synthesizing your profile</span>
+                <span className="typing-dot"></span>
+                <span className="typing-dot"></span>
+                <span className="typing-dot"></span>
+              </div>
+            </div>
+          )}
+
+          {/* Production Error Banner with Retry */}
+          {errorState && (
+            <div className="p-3.5 rounded-xl bg-[var(--danger-subtle)] border border-red-500/30 text-xs text-[var(--danger)] flex items-center justify-between gap-3 animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <span>{errorState}</span>
+              </div>
+              <button
+                onClick={() => {
+                  setErrorState(null);
+                  if (profileDraft) handleSaveProfile();
+                  else if (stepIndex >= STEPS.length - 1) generateGemmaProfile(formData);
+                }}
+                className="kw-btn text-xs py-1 px-2.5 bg-red-600 text-white border-0 hover:bg-red-700 flex items-center gap-1"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Try again</span>
+              </button>
+            </div>
+          )}
+
           <div ref={chatBottomRef} />
         </div>
 
-        {/* Input Bar or Preview Action Buttons */}
-        <div className="p-3 bg-[var(--bg)] border-t border-[var(--border)]">
+        {/* Modern Chat Composer & Action Bar */}
+        <div className="p-4 sm:p-5 bg-[var(--card)] border-t border-[var(--card-border)] space-y-3">
           {profileDraft ? (
-            <div className="flex flex-wrap gap-2 justify-end">
+            <div className="flex flex-wrap gap-2.5 justify-end">
               <button
                 onClick={handleRewrite}
                 disabled={isProcessing}
-                className="primer-btn text-xs py-1.5"
+                className="kw-btn kw-btn-ghost text-xs py-2 px-3.5 active:scale-95"
               >
-                <RefreshCw className="w-3.5 h-3.5 text-[var(--muted)]" />
-                <span>Write it again</span>
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Rewrite with Gemma</span>
               </button>
               <button
                 onClick={handleSaveProfile}
                 disabled={isProcessing}
-                className="primer-btn primer-btn-primary text-xs py-1.5"
+                className="kw-btn kw-btn-gold text-xs py-2 px-5 font-semibold active:scale-95 shadow-md"
               >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Looks good, find my matches</span>
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Save & Find My Matches</span>
               </button>
             </div>
           ) : STEPS[stepIndex]?.isPhoto ? (
-            <div className="flex flex-wrap gap-2 items-center justify-between">
+            <div className="flex flex-wrap gap-2.5 items-center justify-between">
               <div className="flex gap-2">
-                <label className="primer-btn primer-btn-primary text-xs py-1.5 cursor-pointer">
-                  <Camera className="w-3.5 h-3.5" />
-                  <span>Take a selfie</span>
+                <label className="kw-btn kw-btn-gold text-xs py-2 px-4 cursor-pointer active:scale-95">
+                  <Camera className="w-4 h-4" />
+                  <span>Take selfie</span>
                   <input
                     type="file"
                     accept="image/*"
@@ -405,23 +526,24 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted, onC
                     hidden
                   />
                 </label>
-                <label className="primer-btn text-xs py-1.5 cursor-pointer">
-                  <Upload className="w-3.5 h-3.5 text-[var(--muted)]" />
+                <label className="kw-btn text-xs py-2 px-4 cursor-pointer active:scale-95">
+                  <Upload className="w-4 h-4 text-[var(--fg-muted)]" />
                   <span>Upload photo</span>
                   <input type="file" accept="image/*" onChange={handlePhotoUpload} hidden />
                 </label>
               </div>
               <button
                 onClick={() => generateGemmaProfile(formData)}
-                className="primer-btn text-xs py-1.5"
+                className="kw-btn kw-btn-ghost text-xs py-2 px-3"
               >
                 Skip photo
               </button>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
+              {/* Contextual Suggestion Chips */}
               {STEPS[stepIndex] && STEP_SUGGESTIONS[STEPS[stepIndex].key] && (
-                <div className="flex flex-wrap gap-1.5 pb-1">
+                <div className="flex flex-wrap gap-1.5">
                   {STEP_SUGGESTIONS[STEPS[stepIndex].key].map(sug => (
                     <button
                       key={sug}
@@ -430,13 +552,16 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted, onC
                         setInputText(sug);
                         inputRef.current?.focus();
                       }}
-                      className="primer-btn text-[11px] py-0.5 px-2 bg-[var(--subtle)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)] transition-colors rounded-full"
+                      className="inline-flex items-center gap-1 text-[11px] font-medium py-1 px-2.5 rounded-lg bg-[var(--bg-subtle)] border border-[var(--card-border)] hover:border-[var(--gold)] text-[var(--fg-muted)] hover:text-[var(--fg)] active:scale-95 transition-all cursor-pointer"
                     >
-                      + {sug}
+                      <span className="text-[var(--gold)] font-bold">+</span>
+                      <span>{sug}</span>
                     </button>
                   ))}
                 </div>
               )}
+
+              {/* Chat Composer Input Form */}
               <form
                 onSubmit={e => {
                   e.preventDefault();
@@ -444,19 +569,21 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted, onC
                 }}
                 className="flex gap-2 items-center"
               >
-                <input
-                  ref={inputRef}
-                  type="text"
-                  placeholder={STEPS[stepIndex]?.placeholder || 'Your response...'}
-                  value={inputText}
-                  onChange={e => setInputText(e.target.value)}
-                  disabled={isProcessing}
-                  className="primer-input flex-1 text-xs"
-                />
+                <div className="relative flex-1">
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    placeholder={STEPS[stepIndex]?.placeholder || 'Type your response...'}
+                    value={inputText}
+                    onChange={e => setInputText(e.target.value)}
+                    disabled={isProcessing || isBotTyping}
+                    className="w-full bg-[var(--bg-subtle)] border border-[var(--card-border)] focus:border-[var(--gold)] focus:bg-[var(--card)] text-xs sm:text-sm text-[var(--fg)] placeholder:text-[var(--fg-subtle)] rounded-xl px-3.5 py-2.5 transition-all focus:outline-none focus:ring-2 focus:ring-[var(--gold-subtle)]"
+                  />
+                </div>
                 <button
                   type="submit"
-                  disabled={isProcessing || (STEPS[stepIndex]?.required && !inputText.trim())}
-                  className="primer-btn primer-btn-primary text-xs px-3"
+                  disabled={isProcessing || isBotTyping || (STEPS[stepIndex]?.required && !inputText.trim())}
+                  className="kw-btn kw-btn-gold text-xs sm:text-sm px-4 py-2.5 font-semibold active:scale-95 shadow-sm flex items-center gap-1.5"
                 >
                   <span>Send</span>
                   <ArrowRight className="w-3.5 h-3.5" />
@@ -465,13 +592,26 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted, onC
                   <button
                     type="button"
                     onClick={() => handleNextStep('')}
-                    disabled={isProcessing}
-                    className="primer-btn text-xs px-2.5"
+                    disabled={isProcessing || isBotTyping}
+                    className="kw-btn kw-btn-ghost text-xs py-2.5 px-3"
                   >
                     Skip
                   </button>
                 )}
               </form>
+
+              {/* WhatsApp Privacy Notice & Toggle */}
+              {STEPS[stepIndex]?.key === 'whatsapp' && (
+                <label className="flex items-center gap-2 pt-1 text-xs text-[var(--fg-muted)] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={whatsappVisible}
+                    onChange={e => setWhatsappVisible(e.target.checked)}
+                    className="rounded border-[var(--card-border)] text-[var(--gold)] focus:ring-[var(--gold)]"
+                  />
+                  <span>Visible to other signed-in members for one-tap WhatsApp connect</span>
+                </label>
+              )}
             </div>
           )}
         </div>

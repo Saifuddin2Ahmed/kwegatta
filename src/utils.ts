@@ -101,3 +101,13 @@ export function resizeImageFile(file: File): Promise<string> {
     img.src = url;
   });
 }
+
+export function safeExternalUrl(url: string | null | undefined): string | null {
+  if (!url || typeof url !== 'string') return null;
+  const trimmed = url.trim();
+  if (/^https?:\/\//i.test(trimmed) || /^mailto:/i.test(trimmed) || /^tel:/i.test(trimmed)) {
+    return trimmed;
+  }
+  return null;
+}
+

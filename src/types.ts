@@ -31,6 +31,8 @@ export interface Profile {
   github?: string;
   linkedin?: string;
   whatsapp?: string;
+  hide_whatsapp?: boolean;
+  has_whatsapp?: boolean;
   avatar?: string;
   status?: string;
   is_demo?: boolean;
