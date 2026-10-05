@@ -1,6 +1,7 @@
 # Kwegatta 🤝
 
 [![Hacktoberfest 2026](https://img.shields.io/badge/Hacktoberfest-2026-ff7a00.svg?style=flat-square&logo=hacktoberfest)](https://hacktoberfest.com/)
+[![Award: 2nd Place Hack Day Kampala](https://img.shields.io/badge/Award-2nd_Place_·_Hack_Day_Kampala-ffd700.svg?style=flat-square&logo=trophy)](https://github.com/Saifuddin2Ahmed/kwegatta)
 [![Entry: Best Open-Source AI Project](https://img.shields.io/badge/Entry-Best_Open--Source_AI_Project-238636.svg?style=flat-square)](https://www.mlh.com/opensource-ai)
 [![Open-Weight Model: Gemma 4 31B IT](https://img.shields.io/badge/Model-gemma--4--31b--it-4493f8.svg?style=flat-square)](https://ai.google.dev/gemma/docs/core)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](./LICENSE)
@@ -9,7 +10,7 @@
 [![Design: GitHub Primer](https://img.shields.io/badge/Design-GitHub_Primer-21262d.svg?style=flat-square&logo=github)](https://primer.style/)
 
 > **"Find the people you should build and learn with."**  
-> Kwegatta comes from the Luganda word okwegatta, meaning to unite or come together. As the saying goes, Okwegatta ge maanyi: unity is strength. First launched for **Hacktoberfest 2026 Hack Day Kampala x MUBS** (Makerere University Business School).
+> Kwegatta comes from the Luganda word okwegatta, meaning to unite or come together. As the saying goes, Okwegatta ge maanyi: unity is strength. Built for **Hacktoberfest 2026 Hack Day Kampala x MUBS** (Makerere University Business School) where it was named one of the two winning teams (2nd place).
 
 * **Live Application**: [https://kwegatta.ai.studio](https://kwegatta.ai.studio)
 * **GitHub Repository**: [https://github.com/Saifuddin2Ahmed/kwegatta](https://github.com/Saifuddin2Ahmed/kwegatta)
@@ -68,6 +69,7 @@ Traditional networking fails because:
 * **Hosts**: Web3 Club MUBS and GDG on Campus MUBS
 * **Organizers**: Hacktoberfest 2026 is powered by **Major League Hacking (MLH)** and **DEV**, presented by **DigitalOcean**. Theme: *"AI belongs to everyone"*.
 * **Challenge Entered**: **Best Open-Source AI Project** ([https://www.mlh.com/opensource-ai](https://www.mlh.com/opensource-ai))
+* **Result**: Named one of the two winning teams (**2nd place · Hacktoberfest 2026 Hack Day Kampala**).
 * **Designated Model**: **`gemma-4-31b-it`** (Google DeepMind, Apache 2.0 open-weight model with 31 billion parameters, qualifying as a large language model under challenge rules).
 
 ---
@@ -142,6 +144,7 @@ Detailed architectural documentation is available in [docs/ARCHITECTURE.md](docs
 
 ## Core Features
 
+* **Minimalist Hero & Award Context**: Clean single-line award notice linking to the Kampala story, authentic WebP team photo, and 60-second onboarding.
 * **Chat Onboarding**: Progressive, friendly step-by-step assistant asking one question at a time.
 * **GitHub Repository Enrichment**: Unauthenticated inspection of public repos, languages, and stars.
 * **Open-Weight AI Profile Writer**: Headline, bio, tags, skills, and role synthesized with human review options (**Looks good** or **Write it again**).
@@ -151,6 +154,7 @@ Detailed architectural documentation is available in [docs/ARCHITECTURE.md](docs
 * **Community Social Feed**: Post asks, offers, and questions with Gemma auto-tagging and helper recommendations.
 * **Projector Wall (`/wall`)**: High-contrast, real-time auditorium projector display.
 * **User Data Sovereignty**: One-click **Export my data (JSON)** and permanent **Delete my profile** buttons.
+* **Organiser Dashboard & Photo Manager (`/admin`)**: Authenticated admin control room for live room announcements, attendee moderation, Gemma 4 latency monitoring, and instant event photo replacement (hero, hall, and team photos).
 
 ---
 

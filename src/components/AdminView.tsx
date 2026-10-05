@@ -22,10 +22,14 @@ import {
   Award,
   ExternalLink,
   ChevronRight,
-  Settings
+  Settings,
+  Camera,
+  Upload
 } from 'lucide-react';
 import { Profile, Post } from '../types';
 import { SetupView } from './SetupView';
+import { EventPhotosModal } from './EventPhotosModal';
+import { useEventPhotos } from '../hooks/useEventPhotos';
 import { callGemma, GEMMA_MODEL_ID } from '../services/api';
 
 interface AdminOverviewData {
@@ -69,7 +73,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [isVerifying, setIsVerifying] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'members' | 'posts' | 'ai' | 'tools' | 'setup' | 'audit'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'members' | 'posts' | 'photos' | 'ai' | 'tools' | 'setup' | 'audit'>('overview');
+  const photos = useEventPhotos();
   const [overview, setOverview] = useState<AdminOverviewData | null>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [posts, setPosts] = useState<any[]>([]);
@@ -87,6 +92,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   // Test Gemma State
   const [gemmaTestStatus, setGemmaTestStatus] = useState<string | null>(null);
   const [isTestingGemma, setIsTestingGemma] = useState(false);
+  const [isPhotosModalOpen, setIsPhotosModalOpen] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -247,11 +253,14 @@ export const AdminView: React.FC<AdminViewProps> = ({
               type="password"
               value={passcode}
               onChange={e => setPasscode(e.target.value)}
-              placeholder="••••••••••••"
+              placeholder="Enter passcode (e.g. kwegatta2026)"
               required
               autoFocus
               className="kw-input font-mono"
             />
+            <p className="text-[11px] text-[var(--fg-subtle)]">
+              Default passcode: <code className="text-[var(--gold)] font-mono">kwegatta2026</code> (or your <code className="text-[var(--fg-muted)]">ADMIN_CODE</code> env variable).
+            </p>
           </div>
 
           <div className="flex gap-2">
@@ -295,6 +304,21 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setIsPhotosModalOpen(true)}
+            className="kw-btn kw-btn-gold text-xs py-1.5 px-3 font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm"
+            title="Manage and upload authentic event photos"
+          >
+            <Camera className="w-3.5 h-3.5" />
+            <span>Manage Photos</span>
+          </button>
+          <button
+            onClick={() => { window.location.hash = '#/wall'; }}
+            className="kw-btn kw-btn-teal text-xs py-1.5 px-3 font-semibold"
+            title="Open Live Projector Wall"
+          >
+            <span>Open Live Wall</span>
+          </button>
+          <button
             onClick={fetchAdminData}
             disabled={isLoadingData}
             className="kw-btn text-xs py-1.5 px-3"
@@ -318,6 +342,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
           { id: 'overview', label: 'Overview & Insights', icon: BarChart3 },
           { id: 'members', label: `Members (${overview?.members_count || 0})`, icon: Users },
           { id: 'posts', label: `Feed Posts (${overview?.posts_count || 0})`, icon: MessageSquare },
+          { id: 'photos', label: 'Event Photos', icon: Camera },
           { id: 'ai', label: 'AI Health (Gemma 4)', icon: Cpu },
           { id: 'tools', label: 'Broadcast & Export', icon: Download },
           { id: 'setup', label: 'Setup Diagnostics', icon: Settings },
@@ -574,6 +599,116 @@ export const AdminView: React.FC<AdminViewProps> = ({
         </div>
       )}
 
+      {/* TAB: EVENT PHOTOS MANAGER */}
+      {activeTab === 'photos' && (
+        <div className="p-6 kw-card space-y-6">
+          <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--card-border)] pb-4">
+            <div>
+              <div className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--gold)] mb-1">
+                <Camera className="w-4 h-4" />
+                <span>Authentic Event Photography &amp; Assets</span>
+              </div>
+              <h3 className="text-lg font-bold font-display text-[var(--fg)]">
+                Manage Hack Day Kampala Event Photos
+              </h3>
+              <p className="text-xs text-[var(--fg-muted)] mt-1 max-w-2xl">
+                Upload or replace original photos taken at the event. Images are saved to disk with zero cloud latency and instantly update across the hero, story narrative, and about sections.
+              </p>
+            </div>
+            <button
+              onClick={() => setIsPhotosModalOpen(true)}
+              className="kw-btn kw-btn-gold text-xs py-2 px-4 flex items-center gap-2 font-semibold shadow-sm cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>Upload Photos Modal</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Slot 1: Hero Team Coding */}
+            <div className="p-4 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] space-y-3 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="aspect-[16/10] rounded-lg overflow-hidden border border-[var(--card-border)] bg-[var(--card)]">
+                  <img
+                    src={photos.hero}
+                    alt="Hero Team Coding"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-[var(--fg)]">Hero Team Photo</h4>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--gold-subtle)] text-[var(--gold)] font-bold">Slot 1</span>
+                </div>
+                <p className="text-xs text-[var(--fg-muted)]">
+                  Displayed on the home landing page hero right beside the headline and 60-second onboarding button.
+                </p>
+              </div>
+              <button
+                onClick={() => setIsPhotosModalOpen(true)}
+                className="kw-btn kw-btn-ghost text-xs py-2 px-3 w-full flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Upload className="w-3.5 h-3.5 text-[var(--gold)]" />
+                <span>Change Hero Photo</span>
+              </button>
+            </div>
+
+            {/* Slot 2: Event Hall */}
+            <div className="p-4 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] space-y-3 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="aspect-[16/10] rounded-lg overflow-hidden border border-[var(--card-border)] bg-[var(--card)]">
+                  <img
+                    src={photos.hall}
+                    alt="Event Hall EIIC MUBS"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-[var(--fg)]">Event Hall (EIIC MUBS)</h4>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--teal-subtle)] text-[var(--teal)] font-bold">Slot 2</span>
+                </div>
+                <p className="text-xs text-[var(--fg-muted)]">
+                  Displayed inside the "Built in one day in Kampala" story section to showcase the venue.
+                </p>
+              </div>
+              <button
+                onClick={() => setIsPhotosModalOpen(true)}
+                className="kw-btn kw-btn-ghost text-xs py-2 px-3 w-full flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Upload className="w-3.5 h-3.5 text-[var(--gold)]" />
+                <span>Change Hall Photo</span>
+              </button>
+            </div>
+
+            {/* Slot 3: Collaborators & Attendees */}
+            <div className="p-4 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] space-y-3 flex flex-col justify-between">
+              <div className="space-y-2">
+                <div className="aspect-[16/10] rounded-lg overflow-hidden border border-[var(--card-border)] bg-[var(--card)]">
+                  <img
+                    src={photos.team}
+                    alt="Collaborators and Attendees"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-[var(--fg)]">Collaborating Team</h4>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 font-bold">Slot 3</span>
+                </div>
+                <p className="text-xs text-[var(--fg-muted)]">
+                  Displayed alongside the event hall photo in the story narrative section.
+                </p>
+              </div>
+              <button
+                onClick={() => setIsPhotosModalOpen(true)}
+                className="kw-btn kw-btn-ghost text-xs py-2 px-3 w-full flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Upload className="w-3.5 h-3.5 text-[var(--gold)]" />
+                <span>Change Team Photo</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* TAB 4: AI HEALTH (GEMMA 4) */}
       {activeTab === 'ai' && overview && (
         <div className="p-5 kw-card space-y-6">
@@ -745,6 +880,16 @@ export const AdminView: React.FC<AdminViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Event Photos Upload & Manager Modal */}
+      <EventPhotosModal
+        isOpen={isPhotosModalOpen}
+        onClose={() => setIsPhotosModalOpen(false)}
+        onPhotoUploaded={() => {
+          fetchAdminData();
+          onRefreshGlobalData();
+        }}
+      />
     </div>
   );
 };

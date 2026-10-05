@@ -1,52 +1,50 @@
 @import "tailwindcss";
 
 :root {
-  --font-display: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
 }
 
 /* =========================================================================
-   KWEGATTA PRODUCTION DESIGN SYSTEM (DARK THEME - DEFAULT)
-   Inspirations: Linear, Stripe, Vercel, Notion, Airbnb
-   Theme: "Two people connecting" (#090D16 Ink, #F5B700 Gold, #14B8A6 Teal)
+   KWEGATTA FINTECH-GRADE GLOBAL PRODUCT DESIGN SYSTEM
+   Aesthetic: High-Converting, Deep Obsidian, Crisp Hairline Borders, Radiant Accents
+   Palette: Deep Obsidian (#070B12), Radiant Gold (#F5B700), Crisp Emerald/Teal (#10B981 / #14B8A6)
    ========================================================================= */
 :root,
 [data-theme="dark"] {
-  /* Surface Layers */
-  --bg: #090D16;                   /* Deep Ink Obsidian Background */
-  --bg-subtle: #0F172A;            /* Subtle Secondary Surface */
-  --card: #111C30;                 /* Production Card Background */
-  --card-hover: #16243D;           /* Card Hover Surface */
-  --card-border: #1E2D48;          /* Crisp Hairline Border */
-  --border-muted: #162238;
-
-  /* Aliases for universal compatibility */
-  --border: #1E2D48;
-  --subtle: #0F172A;
-  --header: #090D16;
+  /* Deep Obsidian Glass Surfaces */
+  --bg: #070B12;                   /* Deep Obsidian Foundation */
+  --bg-subtle: #0D1526;            /* Secondary Container */
+  --card: #0F182E;                 /* Primary High-Contrast Surface */
+  --card-hover: #14203D;           /* Interactive Hover Surface */
+  --card-border: rgba(255, 255, 255, 0.08); /* Hairline Razor Border */
+  --border-muted: rgba(255, 255, 255, 0.04);
+  --border: rgba(255, 255, 255, 0.08);
+  --subtle: #0D1526;
+  --header: #070B12;
   --underline: #F5B700;
 
-  /* Text & Foreground */
-  --fg: #F8FAFC;                   /* Crisp Heading & Primary Text */
-  --fg-muted: #94A3B8;             /* Slate Muted Secondary Text */
-  --fg-subtle: #64748B;            /* De-emphasized Caption Text */
+  /* Typography & Foreground */
+  --fg: #F8FAFC;                   /* High-contrast pure white/slate */
+  --fg-muted: #94A3B8;             /* Slate muted secondary text */
+  --fg-subtle: #64748B;            /* De-emphasized caption/helper text */
   --muted: #94A3B8;
 
-  /* Accent Colors */
-  --gold: #F5B700;                 /* Kwegatta Gold (Primary Action / Matches) */
+  /* Radiant Accents */
+  --gold: #F5B700;                 /* Radiant Kwegatta Gold */
   --gold-hover: #E0A600;
   --gold-subtle: rgba(245, 183, 0, 0.12);
-  --gold-glow: rgba(245, 183, 0, 0.22);
+  --gold-glow: 0 0 24px -2px rgba(245, 183, 0, 0.35);
 
-  --teal: #14B8A6;                 /* Kwegatta Teal (Learning / Mentorship) */
-  --teal-hover: #0D9488;
-  --teal-subtle: rgba(20, 184, 166, 0.12);
+  --teal: #10B981;                 /* High-Converting Emerald/Teal */
+  --teal-hover: #059669;
+  --teal-subtle: rgba(16, 185, 129, 0.12);
 
   --accent: #F5B700;
   --accent-subtle: rgba(245, 183, 0, 0.12);
 
-  /* Status Colors */
+  /* Status */
   --success: #10B981;
   --success-subtle: rgba(16, 185, 129, 0.14);
   --danger: #EF4444;
@@ -54,49 +52,47 @@
   --attention: #F59E0B;
   --attention-subtle: rgba(245, 158, 11, 0.14);
 
-  /* Controls & Navbar */
-  --btn: #142036;
-  --btn-hover: #1C2E4D;
-  --btn-border: #233758;
-  --header-bg: rgba(9, 13, 22, 0.88);
-  --shadow-card: 0 4px 20px -2px rgba(0, 0, 0, 0.4), 0 2px 6px -1px rgba(0, 0, 0, 0.3);
-  --shadow-dropdown: 0 12px 32px -4px rgba(0, 0, 0, 0.5), 0 4px 12px -2px rgba(0, 0, 0, 0.3);
+  /* Controls */
+  --btn: #131E36;
+  --btn-hover: #192747;
+  --btn-border: rgba(255, 255, 255, 0.12);
+  --header-bg: rgba(7, 11, 18, 0.88);
+  --shadow-card: 0 4px 20px -2px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-dropdown: 0 20px 48px -8px rgba(0, 0, 0, 0.75);
   color-scheme: dark;
 }
 
 /* =========================================================================
-   LIGHT THEME (High Contrast & Clean Daylight Polish)
+   LIGHT THEME (Clean High-Contrast Daylight)
    ========================================================================= */
 [data-theme="light"] {
-  --bg: #F8FAFC;                   /* Soft Pristine Slate Background */
-  --bg-subtle: #F1F5F9;            /* Secondary Container */
-  --card: #FFFFFF;                 /* Crisp Pure White Card */
+  --bg: #FAFAFC;
+  --bg-subtle: #F1F4F9;
+  --card: #FFFFFF;
   --card-hover: #F8FAFC;
-  --card-border: #E2E8F0;          /* Subtle Hairline Border */
-  --border-muted: #CBD5E1;
-
-  /* Aliases for universal compatibility */
-  --border: #E2E8F0;
-  --subtle: #F1F5F9;
+  --card-border: rgba(0, 0, 0, 0.08);
+  --border-muted: rgba(0, 0, 0, 0.04);
+  --border: rgba(0, 0, 0, 0.08);
+  --subtle: #F1F4F9;
   --header: #FFFFFF;
   --underline: #D97706;
 
-  --fg: #0F172A;                   /* Deep Slate High-Contrast Text */
-  --fg-muted: #475569;             /* Slate Muted Text */
+  --fg: #0B132B;
+  --fg-muted: #475569;
   --fg-subtle: #64748B;
   --muted: #475569;
 
-  --gold: #D97706;                 /* Accessible Amber/Gold for Light Backgrounds */
+  --gold: #D97706;
   --gold-hover: #B45309;
-  --gold-subtle: rgba(217, 119, 6, 0.12);
-  --gold-glow: rgba(217, 119, 6, 0.2);
+  --gold-subtle: rgba(217, 119, 6, 0.1);
+  --gold-glow: 0 0 20px -2px rgba(217, 119, 6, 0.25);
 
-  --teal: #0D9488;                 /* Crisp Deep Teal */
-  --teal-hover: #0F766E;
-  --teal-subtle: rgba(13, 148, 136, 0.12);
+  --teal: #059669;
+  --teal-hover: #047857;
+  --teal-subtle: rgba(5, 150, 105, 0.1);
 
   --accent: #D97706;
-  --accent-subtle: rgba(217, 119, 6, 0.12);
+  --accent-subtle: rgba(217, 119, 6, 0.1);
 
   --success: #059669;
   --success-subtle: #ECFDF5;
@@ -105,12 +101,12 @@
   --attention: #D97706;
   --attention-subtle: #FFFBEB;
 
-  --btn: #F1F5F9;
+  --btn: #F1F4F9;
   --btn-hover: #E2E8F0;
-  --btn-border: #CBD5E1;
-  --header-bg: rgba(248, 250, 252, 0.9);
-  --shadow-card: 0 4px 20px -2px rgba(15, 23, 42, 0.06), 0 2px 6px -1px rgba(15, 23, 42, 0.03);
-  --shadow-dropdown: 0 12px 32px -4px rgba(15, 23, 42, 0.12), 0 4px 12px -2px rgba(15, 23, 42, 0.06);
+  --btn-border: rgba(0, 0, 0, 0.1);
+  --header-bg: rgba(250, 250, 252, 0.9);
+  --shadow-card: 0 4px 20px -2px rgba(11, 19, 43, 0.05), 0 1px 3px rgba(11, 19, 43, 0.03);
+  --shadow-dropdown: 0 20px 48px -8px rgba(11, 19, 43, 0.12);
   color-scheme: light;
 }
 
@@ -118,7 +114,6 @@
   box-sizing: border-box;
 }
 
-/* Accessibility & Keyboard Navigation */
 :focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 2px;
@@ -135,15 +130,18 @@ body {
   color: var(--fg);
   font-family: var(--font-body);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.6;
   padding-bottom: env(safe-area-inset-bottom, 0);
   transition: background-color 0.2s ease, color 0.2s ease;
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 h1, h2, h3, h4, h5, h6, .font-display {
   font-family: var(--font-display);
-  letter-spacing: -0.025em;
+  letter-spacing: -0.028em;
+  font-weight: 700;
 }
 
 a {
@@ -151,30 +149,29 @@ a {
   text-decoration: none;
 }
 
-/* Tabular numbers for clean stats and counters */
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
 
 /* =========================================================================
-   PRODUCTION CARD & CONTAINER SYSTEM
+   HIGH-GRADE CARDS & PANELS
    ========================================================================= */
 .kw-card {
   background: var(--card);
   border: 1px solid var(--card-border);
   border-radius: 14px;
   box-shadow: var(--shadow-card);
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.2s ease;
 }
 
 .kw-card-interactive:hover {
   border-color: rgba(245, 183, 0, 0.4);
+  background-color: var(--card-hover);
   transform: translateY(-2px);
-  box-shadow: 0 8px 30px -4px rgba(0, 0, 0, 0.35);
 }
 
 /* =========================================================================
-   PRODUCTION BUTTON SYSTEM
+   BUTTON SYSTEM (Tactile, High-Intent, Radiant)
    ========================================================================= */
 .kw-btn {
   display: inline-flex;
@@ -182,10 +179,10 @@ a {
   justify-content: center;
   gap: 0.5rem;
   font-size: 0.8125rem;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.25rem;
-  padding: 0.5rem 0.875rem;
-  border-radius: 0.625rem;
+  padding: 0.5rem 1rem;
+  border-radius: 10px;
   border: 1px solid var(--btn-border);
   background-color: var(--btn);
   color: var(--fg);
@@ -197,7 +194,7 @@ a {
 
 .kw-btn:hover:not(:disabled) {
   background-color: var(--btn-hover);
-  border-color: rgba(245, 183, 0, 0.3);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .kw-btn:active:not(:disabled) {
@@ -209,24 +206,39 @@ a {
   cursor: not-allowed;
 }
 
-/* Primary Gold Action Button */
+/* Radiant Gold CTA Button */
 .kw-btn-gold,
 .kw-btn-primary {
-  background: linear-gradient(135deg, #F5B700 0%, #E0A600 100%);
-  color: #090D16;
+  background: linear-gradient(135deg, #F5B700 0%, #E5A800 100%);
+  color: #070B12;
   border: 1px solid #F5B700;
-  font-weight: 600;
-  box-shadow: 0 2px 10px rgba(245, 183, 0, 0.25);
+  font-weight: 700;
+  box-shadow: 0 4px 16px -2px rgba(245, 183, 0, 0.35);
 }
 
 .kw-btn-gold:hover:not(:disabled),
 .kw-btn-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, #FFC21C 0%, #E8AC00 100%);
-  border-color: #FFC21C;
-  box-shadow: 0 4px 16px rgba(245, 183, 0, 0.35);
+  background: linear-gradient(135deg, #FFC41F 0%, #EDB100 100%);
+  border-color: #FFC41F;
+  box-shadow: 0 6px 22px -2px rgba(245, 183, 0, 0.5);
+  transform: translateY(-1px);
 }
 
-/* Ghost / Secondary Control */
+.kw-btn-teal {
+  background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+  color: #070B12;
+  border: 1px solid #10B981;
+  font-weight: 700;
+  box-shadow: 0 4px 16px -2px rgba(16, 185, 129, 0.35);
+}
+
+.kw-btn-teal:hover:not(:disabled) {
+  background: linear-gradient(135deg, #34D399 0%, #10B981 100%);
+  border-color: #34D399;
+  box-shadow: 0 6px 22px -2px rgba(16, 185, 129, 0.5);
+  transform: translateY(-1px);
+}
+
 .kw-btn-ghost {
   background: transparent;
   border-color: transparent;
@@ -241,7 +253,7 @@ a {
 
 .kw-btn-danger {
   background-color: var(--danger-subtle);
-  border-color: rgba(239, 68, 68, 0.3);
+  border-color: rgba(239, 68, 68, 0.25);
   color: var(--danger);
 }
 
@@ -251,7 +263,7 @@ a {
 }
 
 /* =========================================================================
-   FORM INPUTS & COMPOSER
+   FORM INPUTS & CONSOLE
    ========================================================================= */
 .kw-input,
 .kw-textarea {
@@ -259,11 +271,11 @@ a {
   background-color: var(--bg-subtle);
   border: 1px solid var(--card-border);
   color: var(--fg);
-  border-radius: 0.625rem;
-  padding: 0.5rem 0.75rem;
+  border-radius: 10px;
+  padding: 0.6rem 0.85rem;
   font-size: 0.8125rem;
   font-family: inherit;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .kw-input:focus,
@@ -280,29 +292,29 @@ a {
 }
 
 /* =========================================================================
-   BADGES & ACCENT LABELS
+   BADGES & PILLS
    ========================================================================= */
 .kw-badge {
   display: inline-flex;
   align-items: center;
-  gap: 0.375rem;
+  gap: 0.35rem;
   font-size: 0.6875rem;
-  font-weight: 500;
-  padding: 0.2rem 0.55rem;
-  border-radius: 9999px;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: 8px;
   border: 1px solid transparent;
   white-space: nowrap;
 }
 
 .kw-badge-gold {
   background-color: var(--gold-subtle);
-  border-color: rgba(245, 183, 0, 0.25);
+  border-color: rgba(245, 183, 0, 0.3);
   color: var(--gold);
 }
 
 .kw-badge-teal {
   background-color: var(--teal-subtle);
-  border-color: rgba(20, 184, 166, 0.25);
+  border-color: rgba(16, 185, 129, 0.3);
   color: var(--teal);
 }
 
@@ -330,7 +342,6 @@ a {
   40% { transform: scale(1.15); opacity: 1; }
 }
 
-/* Reduced Motion Support */
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after {
     animation-duration: 0.01ms !important;

@@ -23,7 +23,7 @@ app.use((_req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '50mb' }));
 
 /* =========================================================================
    RATE LIMITING MIDDLEWARE (Sliding window per IP)
@@ -420,6 +420,9 @@ const aiMetrics = {
   }
 };
 
+// Demo mode setting (default: false in production, true only when DEMO_MODE=true)
+const isDemoMode = process.env.DEMO_MODE === 'true';
+
 function loadStore(): StoreData {
   try {
     if (fs.existsSync(DATA_FILE)) {
@@ -427,6 +430,10 @@ function loadStore(): StoreData {
       if (parsed.profiles && Array.isArray(parsed.profiles)) {
         if (!parsed.audit_log || !Array.isArray(parsed.audit_log)) {
           parsed.audit_log = [];
+        }
+        // Cleanup any security test post with empty body or anonymous author
+        if (Array.isArray(parsed.posts)) {
+          parsed.posts = parsed.posts.filter((p: any) => p && p.body && String(p.body).trim().length > 0 && p.author_id !== 'anonymous');
         }
         return parsed;
       }
@@ -436,9 +443,9 @@ function loadStore(): StoreData {
   }
 
   const initial: StoreData = {
-    profiles: [...INITIAL_DEMO_MEMBERS],
+    profiles: isDemoMode ? [...INITIAL_DEMO_MEMBERS] : [],
     follows: [],
-    matches: [
+    matches: isDemoMode ? [
       {
         id: 'match-amina-brian',
         a_id: 'demo-amina',
@@ -466,9 +473,9 @@ function loadStore(): StoreData {
         spark: 'Gulu Grain Price Predictor: USSD & web grain price advisory for rural cooperatives.',
         created_at: new Date(Date.now() - 3600000 * 4).toISOString()
       }
-    ],
+    ] : [],
     notifications: [],
-    posts: [
+    posts: isDemoMode ? [
       {
         id: 'post-1',
         author_id: 'demo-amina',
@@ -496,13 +503,13 @@ function loadStore(): StoreData {
         tags: ['design', 'ui-ux', 'figma'],
         created_at: new Date(Date.now() - 3600000 * 0.8).toISOString()
       }
-    ],
+    ] : [],
     audit_log: [
       {
         id: 'audit-init',
         timestamp: new Date().toISOString(),
         action: 'SYSTEM_BOOT',
-        details: 'Kwegatta core system and demo cohort loaded.',
+        details: isDemoMode ? 'Kwegatta system loaded in Demo Mode with sample cohort.' : 'Kwegatta system loaded in clean production state.',
         admin: 'system'
       }
     ]
@@ -908,11 +915,22 @@ app.get('/api/admin/export', (req: Request, res: Response) => {
   }
 });
 
-// Explicit connect endpoint (records notification to peer)
+// Explicit connect endpoint (records notification to peer - requires session)
 app.post('/api/connect', (req: Request, res: Response) => {
-  const { requester_id, target_id, note, reason } = req.body || {};
-  if (!target_id) {
+  const authUserId = resolveAuthUserId(req);
+  const isAdmin = checkAdmin(req);
+
+  if (!authUserId && !isAdmin) {
+    return res.status(401).json({ error: 'Authentication required to send a connection request' });
+  }
+
+  const { target_id, note, reason } = req.body || {};
+  if (!target_id || typeof target_id !== 'string' || target_id.trim().length === 0) {
     return res.status(400).json({ error: 'Target member ID is required' });
+  }
+
+  if (target_id === authUserId) {
+    return res.status(400).json({ error: 'Cannot connect with yourself' });
   }
 
   const target = store.profiles.find((p: any) => p.id === target_id);
@@ -920,16 +938,16 @@ app.post('/api/connect', (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Target member not found' });
   }
 
-  const requester = store.profiles.find((p: any) => p.id === requester_id);
+  const requester = store.profiles.find((p: any) => p.id === authUserId);
   const requesterName = requester ? requester.name : 'A member';
 
   // Dispatch a notification to the target member
   const notif = {
-    id: 'notif-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+    id: 'notif-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
     to_id: target_id,
-    from_id: requester_id || 'anonymous',
+    from_id: authUserId || 'admin',
     type: 'connect',
-    body: `${requesterName} reached out to connect: "${reason || note || 'Let\'s collaborate!'}"`,
+    body: `${requesterName} reached out to connect: "${sanitizeText(reason || note || 'Let\'s collaborate!', 300)}"`,
     read: false,
     created_at: new Date().toISOString()
   };
@@ -951,6 +969,10 @@ app.delete('/api/profiles/:id', (req: Request, res: Response) => {
   const id = req.params.id;
   const authUserId = resolveAuthUserId(req);
   const isAdmin = checkAdmin(req);
+
+  if (!authUserId && !isAdmin) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
 
   if (!isAdmin && authUserId !== id) {
     return res.status(403).json({ error: 'Forbidden: You can only delete your own profile' });
@@ -977,6 +999,7 @@ app.get('/api/config', (_req: Request, res: Response) => {
     appName: 'Kwegatta',
     model: REQUIRED_OPEN_WEIGHT_MODEL,
     hasServerApiKey: Boolean(process.env.GEMINI_API_KEY),
+    isDemoMode,
     appUrl: process.env.APP_URL || ''
   });
 });
@@ -1041,7 +1064,7 @@ app.get('/api/data/:collection', (req: Request, res: Response) => {
   return res.json(sliced);
 });
 
-// Profile & Data Creation (Protected / Issues Auth Token)
+// Profile & Data Creation (Protected / Strict Validation / Session Required)
 app.post('/api/data/:collection', (req: Request, res: Response) => {
   const col = req.params.collection as keyof StoreData;
   if (!store[col]) {
@@ -1050,19 +1073,36 @@ app.post('/api/data/:collection', (req: Request, res: Response) => {
 
   const authUserId = resolveAuthUserId(req);
   const isAdmin = checkAdmin(req);
+  const raw = req.body || {};
 
   // If creating or updating a profile:
   if (col === 'profiles') {
-    const raw = req.body || {};
-    const id = sanitizeText(raw.id, 64) || ('user-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex'));
-    
-    // Strict Sanitization
+    const requestedId = raw.id ? sanitizeText(raw.id, 64) : null;
+    const isExisting = requestedId && store.profiles.some((p: any) => p.id === requestedId);
+
+    // Updating existing profile requires valid session
+    if (isExisting) {
+      if (!authUserId && !isAdmin) {
+        return res.status(401).json({ error: 'Authentication required to update profile' });
+      }
+      if (!isAdmin && authUserId !== requestedId) {
+        return res.status(403).json({ error: 'Forbidden: You can only edit your own profile' });
+      }
+    }
+
+    // Validate name
+    const rawName = typeof raw.name === 'string' ? raw.name.trim() : '';
+    if (!rawName || rawName.length < 2) {
+      return res.status(400).json({ error: 'A valid name (at least 2 characters) is required' });
+    }
+
     const validRoles = ['builder', 'business', 'design', 'other'];
     const role = validRoles.includes(raw.role) ? raw.role : 'builder';
-    
+    const id = (isExisting ? requestedId : null) || sanitizeText(raw.id, 64) || ('user-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex'));
+
     const row = {
       id,
-      name: sanitizeText(raw.name, 100) || 'Anonymous Member',
+      name: sanitizeText(rawName, 100),
       role,
       headline: sanitizeText(raw.headline, 200),
       bio: sanitizeText(raw.bio, 1000),
@@ -1085,9 +1125,6 @@ app.post('/api/data/:collection', (req: Request, res: Response) => {
 
     const existingIdx = store.profiles.findIndex((item: any) => item.id === row.id);
     if (existingIdx >= 0) {
-      if (!isAdmin && authUserId !== row.id) {
-        return res.status(403).json({ error: 'Forbidden: You can only edit your own profile' });
-      }
       store.profiles[existingIdx] = { ...store.profiles[existingIdx], ...row };
     } else {
       store.profiles.unshift(row);
@@ -1098,18 +1135,27 @@ app.post('/api/data/:collection', (req: Request, res: Response) => {
     return res.json({ ...row, token });
   }
 
-  // If creating posts/follows/notifications, prevent identity spoofing
+  // ALL other collections REQUIRE a valid active session
+  if (!authUserId && !isAdmin) {
+    return res.status(401).json({ error: 'Authentication required. Please log in or create a profile.' });
+  }
+
+  // Posts: author is strictly session user, body cannot be empty
   if (col === 'posts') {
-    const raw = req.body || {};
+    const rawBody = typeof raw.body === 'string' ? raw.body.trim() : '';
+    if (!rawBody || rawBody.length === 0) {
+      return res.status(400).json({ error: 'Post body cannot be empty' });
+    }
+
     const validKinds = ['idea', 'need', 'offer', 'question'];
     const kind = validKinds.includes(raw.kind) ? raw.kind : 'idea';
-    const authorId = authUserId || sanitizeText(raw.author_id, 64) || 'anonymous';
+    const authorId = authUserId || 'admin';
 
     const row = {
       id: sanitizeText(raw.id, 64) || ('post-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex')),
       author_id: authorId,
       title: sanitizeText(raw.title, 200),
-      body: sanitizeText(raw.body, 2000),
+      body: sanitizeText(rawBody, 2000),
       kind,
       tags: sanitizeArray(raw.tags, 10, 30),
       created_at: sanitizeText(raw.created_at, 50) || new Date().toISOString()
@@ -1120,25 +1166,78 @@ app.post('/api/data/:collection', (req: Request, res: Response) => {
     return res.json(row);
   }
 
-  const row = {
-    id: sanitizeText(req.body.id, 64) || ('id-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex')),
-    created_at: sanitizeText(req.body.created_at, 50) || new Date().toISOString(),
-    ...req.body
-  };
+  // Follows: follower is strictly session user
+  if (col === 'follows') {
+    const followingId = typeof raw.following_id === 'string' ? sanitizeText(raw.following_id, 64) : '';
+    if (!followingId || followingId === authUserId) {
+      return res.status(400).json({ error: 'Invalid following target' });
+    }
 
-  if (col === 'follows' && authUserId) {
-    row.follower_id = authUserId;
+    const row = {
+      id: sanitizeText(raw.id, 64) || ('follow-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex')),
+      follower_id: authUserId!,
+      following_id: followingId,
+      created_at: sanitizeText(raw.created_at, 50) || new Date().toISOString()
+    };
+
+    const existingIdx = store.follows.findIndex((f: any) => f.follower_id === row.follower_id && f.following_id === row.following_id);
+    if (existingIdx >= 0) {
+      return res.json(store.follows[existingIdx]);
+    }
+
+    store.follows.unshift(row);
+    saveStore(store);
+    return res.json(row);
   }
 
-  const existingIdx = store[col].findIndex((item: any) => item.id === row.id);
-  if (existingIdx >= 0) {
-    store[col][existingIdx] = { ...store[col][existingIdx], ...row };
-  } else {
-    store[col].unshift(row);
+  // Notifications: sender is session user, recipient must be valid
+  if (col === 'notifications') {
+    const toId = typeof raw.to_id === 'string' ? sanitizeText(raw.to_id, 64) : '';
+    const notifBody = typeof raw.body === 'string' ? sanitizeText(raw.body, 500) : '';
+    if (!toId || !notifBody) {
+      return res.status(400).json({ error: 'Recipient and notification body are required' });
+    }
+
+    const row = {
+      id: sanitizeText(raw.id, 64) || ('notif-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex')),
+      to_id: toId,
+      from_id: authUserId || 'system',
+      type: sanitizeText(raw.type, 30) || 'message',
+      body: notifBody,
+      read: false,
+      created_at: sanitizeText(raw.created_at, 50) || new Date().toISOString()
+    };
+
+    store.notifications.unshift(row);
+    saveStore(store);
+    return res.json(row);
   }
 
-  saveStore(store);
-  return res.json(row);
+  // Matches
+  if (col === 'matches') {
+    const aId = typeof raw.a_id === 'string' ? sanitizeText(raw.a_id, 64) : '';
+    const bId = typeof raw.b_id === 'string' ? sanitizeText(raw.b_id, 64) : '';
+    const score = typeof raw.score === 'number' ? Math.round(raw.score) : 0;
+    if (!aId || !bId || score <= 0) {
+      return res.status(400).json({ error: 'Valid matching pairs and score required' });
+    }
+
+    const row = {
+      id: sanitizeText(raw.id, 64) || ('match-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex')),
+      a_id: aId,
+      b_id: bId,
+      score,
+      reason: sanitizeText(raw.reason, 500),
+      spark: sanitizeText(raw.spark, 300),
+      created_at: sanitizeText(raw.created_at, 50) || new Date().toISOString()
+    };
+
+    store.matches.unshift(row);
+    saveStore(store);
+    return res.json(row);
+  }
+
+  return res.status(400).json({ error: `Unsupported collection ${col}` });
 });
 
 // Update Record (Ownership / Auth Check for All Collections)
@@ -1151,6 +1250,10 @@ app.patch('/api/data/:collection/:id', (req: Request, res: Response) => {
 
   const authUserId = resolveAuthUserId(req);
   const isAdmin = checkAdmin(req);
+
+  if (!authUserId && !isAdmin) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
 
   const index = store[col].findIndex((item: any) => item.id === id);
   if (index === -1) {
@@ -1173,7 +1276,15 @@ app.patch('/api/data/:collection/:id', (req: Request, res: Response) => {
     return res.status(403).json({ error: 'Forbidden: You can only modify your own notifications' });
   }
 
-  store[col][index] = { ...existing, ...req.body };
+  // Validate patch fields
+  const patch = req.body || {};
+  if (col === 'posts' && patch.body !== undefined) {
+    const rawBody = typeof patch.body === 'string' ? patch.body.trim() : '';
+    if (!rawBody) return res.status(400).json({ error: 'Post body cannot be empty' });
+    patch.body = sanitizeText(rawBody, 2000);
+  }
+
+  store[col][index] = { ...existing, ...patch };
   saveStore(store);
   return res.json(store[col][index]);
 });
@@ -1188,6 +1299,10 @@ app.delete('/api/data/:collection/:id', (req: Request, res: Response) => {
 
   const authUserId = resolveAuthUserId(req);
   const isAdmin = checkAdmin(req);
+
+  if (!authUserId && !isAdmin) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
 
   const existing = store[col].find((item: any) => item.id === id);
   if (!existing) {
@@ -1213,8 +1328,59 @@ app.delete('/api/data/:collection/:id', (req: Request, res: Response) => {
   return res.json({ success: true });
 });
 
-// Demo data operations
-app.post('/api/demo/seed', (_req: Request, res: Response) => {
+// Photo upload for authentic event photos (admin only)
+app.post('/api/upload-photo', (req: Request, res: Response) => {
+  if (!checkAdmin(req)) {
+    return res.status(401).json({ error: 'Admin session required' });
+  }
+  try {
+    const { slot, dataUrl } = req.body;
+    if (!slot || !dataUrl) {
+      return res.status(400).json({ error: 'Missing slot or dataUrl' });
+    }
+    const matches = dataUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+    if (!matches || matches.length !== 3) {
+      return res.status(400).json({ error: 'Invalid base64 dataUrl format' });
+    }
+    const buffer = Buffer.from(matches[2], 'base64');
+    
+    // Determine target filenames based on slot
+    const slotFilenames: Record<string, string[]> = {
+      hero: ['table-coding.jpg', 'kwegatta_table_coding_1791028315565.jpg', 'table-coding-800.webp', 'table-coding-1600.webp'],
+      hall: ['mubs-hall.jpg', 'mubs_hackathon_hall_1791028302284.jpg', 'mubs-hall-800.webp', 'mubs-hall-1600.webp'],
+      team: ['team-session.jpg', 'mubs_collaborators_session_1791028328078.jpg', 'winning-team.jpg', 'team-session-800.webp', 'team-session-1600.webp']
+    };
+    
+    const targets = slotFilenames[slot] || [`${slot}.jpg`];
+    const dirs = [
+      path.join(__dirname, 'public', 'images'),
+      path.join(__dirname, 'dist', 'images'),
+      path.join(__dirname, 'src', 'assets', 'images')
+    ];
+    
+    for (const dir of dirs) {
+      if (!fs.existsSync(dir)) {
+        try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+      }
+      for (const target of targets) {
+        try {
+          fs.writeFileSync(path.join(dir, target), buffer);
+        } catch (_) {}
+      }
+    }
+    
+    return res.json({ success: true, slot, targets });
+  } catch (err: any) {
+    console.error('Failed to save uploaded photo:', err);
+    return res.status(500).json({ error: err.message || 'Failed to save photo' });
+  }
+});
+
+// Demo data operations (Admin session required)
+app.post('/api/demo/seed', (req: Request, res: Response) => {
+  if (!checkAdmin(req)) {
+    return res.status(401).json({ error: 'Admin session required' });
+  }
   for (const demo of INITIAL_DEMO_MEMBERS) {
     if (!store.profiles.some(p => p.id === demo.id)) {
       store.profiles.push({ ...demo });
@@ -1224,7 +1390,10 @@ app.post('/api/demo/seed', (_req: Request, res: Response) => {
   return res.json({ success: true, count: store.profiles.length });
 });
 
-app.post('/api/demo/clear', (_req: Request, res: Response) => {
+app.post('/api/demo/clear', (req: Request, res: Response) => {
+  if (!checkAdmin(req)) {
+    return res.status(401).json({ error: 'Admin session required' });
+  }
   store.profiles = store.profiles.filter(p => !p.is_demo);
   saveStore(store);
   return res.json({ success: true, count: store.profiles.length });

@@ -1,22 +1,26 @@
 import React from 'react';
 import {
-  Sparkles,
   ExternalLink,
   Github,
-  Award,
-  Users,
-  MapPin,
-  Calendar,
-  Building,
-  HeartHandshake,
-  Cpu,
-  ShieldCheck,
   ArrowLeft,
-  Code,
-  GitPullRequest
+  ArrowUpRight,
+  Shield,
+  Cpu,
+  Sparkles,
+  Users,
+  Compass,
+  Code2,
+  ArrowRight,
+  Heart,
+  MessageCircle,
+  Zap,
+  Globe2,
+  BookOpen,
+  Lock,
+  CheckCircle2
 } from 'lucide-react';
 import { Avatar } from './Avatar';
-import { BrandLogo } from './BrandLogo';
+import { useEventPhotos } from '../hooks/useEventPhotos';
 
 interface AboutViewProps {
   onNavigateHome: () => void;
@@ -24,281 +28,483 @@ interface AboutViewProps {
 
 const TEAM_MEMBERS = [
   {
-    name: 'Saifuddin Ahmed',
-    affiliation: 'Future Stars Centre for Development and Capacity Building',
-    background: 'Engineer building digital and AI systems for NGOs and communities',
-    role: 'Team Lead & Engineering',
-    github: 'Saifuddin2Ahmed'
-  },
-  {
     name: 'Abubaker Mohamed Adam',
     affiliation: 'Sub-Saharan College',
-    background: 'Volunteer in NGOs',
-    role: 'Community & NGO Partnerships',
+    background: 'NGO volunteer',
+    role: 'Community and NGO partnerships',
     github: 'abubakermohammed092077-bit'
   },
   {
     name: 'Adinan Juuko',
     affiliation: 'Victoria University',
     background: 'Software Engineering',
-    role: 'Quality Assurance & Testing',
+    role: 'Testing and quality',
+    github: 'Aditech-191'
+  },
+  {
+    name: 'Amme Patience Esther',
+    affiliation: 'Makerere University Business School',
+    background: 'Bachelor of Marketing',
+    role: 'Marketing and communications',
     github: null
   },
   {
     name: 'Mupole Uwizeye Alexis',
     affiliation: 'Bugema University',
     background: 'Business Computing',
-    role: 'Product & Data',
+    role: 'Product and data',
     github: 'Alexis-Mupole'
   },
   {
     name: 'Nabagulanyi Prossy Sherry',
-    affiliation: 'Makerere University Business School (MUBS)',
+    affiliation: 'Makerere University Business School',
     background: 'Student',
-    role: 'User Research & Community Outreach',
+    role: 'User research and outreach',
     github: null
   },
   {
     name: 'Ojambo Emmanuel',
-    affiliation: 'Makerere University Business School (MUBS)',
+    affiliation: 'Makerere University Business School',
     background: 'Accounting',
-    role: 'Business & Sustainability',
-    github: 'ojambo9'
+    role: 'Business model and sustainability',
+    github: null
   },
   {
-    name: 'Amme Patience Esther',
-    affiliation: 'Makerere University Business School (MUBS)',
-    background: 'Bachelor of Marketing',
-    role: 'Marketing & Communications',
-    github: 'Aditech-191'
+    name: 'Saifuddin Ahmed',
+    affiliation: 'Future Stars Center for Development and Capacity Building (refugee-led NGO)',
+    background: 'Engineer',
+    role: 'Team lead and engineering',
+    github: 'Saifuddin2Ahmed'
   }
 ];
 
 export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
+  const photos = useEventPhotos();
   return (
-    <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in py-2">
+    <div className="max-w-4xl mx-auto py-6 sm:py-12 space-y-20 sm:space-y-28 animate-in fade-in">
       
-      {/* Hero Header */}
-      <div className="kw-card p-6 sm:p-8 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl space-y-4 shadow-lg">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <BrandLogo size="md" showText={true} />
-            <h1 className="text-xl sm:text-2xl font-display font-bold text-[var(--fg)]">
-              About &amp; Origins
-            </h1>
-          </div>
-          <span className="kw-badge kw-badge-teal text-xs font-semibold">
-            Open-Source AI Project
+      {/* 01. Hero Story Header */}
+      <section id="about-top" className="space-y-6">
+        <div className="flex items-center justify-between gap-4">
+          <button
+            onClick={onNavigateHome}
+            className="inline-flex items-center gap-2 text-xs font-medium text-[var(--fg-muted)] hover:text-[var(--fg)] transition-colors group"
+          >
+            <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-1 transition-transform" />
+            <span>Back to Matches</span>
+          </button>
+          <span className="text-xs font-medium text-[var(--gold)] tracking-wide uppercase">
+            Open-Source AI Matchmaking
           </span>
         </div>
 
-        {/* Meaning of Kwegatta Section */}
-        <div className="p-4 sm:p-5 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] space-y-2.5">
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[var(--gold)]">
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>The Meaning of Kwegatta</span>
-          </div>
-          <p className="text-xs sm:text-sm text-[var(--fg)] leading-relaxed">
-            <strong className="text-[var(--fg)] font-semibold">"Kwegatta"</strong> is a Luganda word meaning <em>"to unite"</em> or <em>"to come together."</em>
-          </p>
-          <p className="text-xs sm:text-sm text-[var(--fg-muted)] leading-relaxed">
-            That idea is at the heart of the platform: bringing the right people together based on what they can offer, what they need, what they can teach, and what they want to learn. As the saying goes, <em>Okwegatta ge maanyi: unity is strength.</em>
+        <div className="space-y-5 pt-3">
+          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-display font-bold text-[var(--fg)] tracking-tight leading-[1.08] text-balance">
+            Find the people you should build and learn with.
+          </h1>
+          <p className="text-base sm:text-xl text-[var(--fg-muted)] font-normal leading-relaxed max-w-2xl text-balance">
+            Kwegatta comes from the Luganda word <strong className="text-[var(--fg)] font-semibold">okwegatta</strong>, meaning to unite or come together. In East Africa, we say: <span className="text-[var(--fg)] font-medium">Okwegatta ge maanyi</span> — unity is strength.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 pt-2">
+        <div className="flex flex-wrap items-center gap-4 pt-4">
+          <button
+            onClick={onNavigateHome}
+            className="kw-btn kw-btn-gold text-xs py-2 px-4 inline-flex items-center gap-2 font-semibold shadow-sm"
+          >
+            <span>Start Matchmaking</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
           <a
             href="https://github.com/Saifuddin2Ahmed/kwegatta"
             target="_blank"
             rel="noopener noreferrer"
-            className="kw-btn kw-btn-gold text-xs py-2 px-3.5 inline-flex items-center gap-1.5 font-semibold"
+            className="kw-btn kw-btn-ghost text-xs py-2 px-3.5 inline-flex items-center gap-2 text-[var(--fg-muted)]"
           >
-            <Github className="w-3.5 h-3.5" />
-            <span>GitHub Repository</span>
-            <ExternalLink className="w-3 h-3 opacity-70" />
+            <Github className="w-4 h-4" />
+            <span>Explore Source Code</span>
+            <ArrowUpRight className="w-3.5 h-3.5 opacity-60" />
           </a>
-          <button
-            onClick={onNavigateHome}
-            className="kw-btn kw-btn-ghost text-xs py-2 px-3.5 inline-flex items-center gap-1.5"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Back to Matches</span>
-          </button>
         </div>
-      </div>
+      </section>
 
-      {/* The Open-Weight AI Architecture */}
-      <div className="kw-card p-5 sm:p-6 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl space-y-4">
-        <div className="flex items-center gap-2 font-bold text-sm text-[var(--fg)]">
-          <Cpu className="w-4 h-4 text-[var(--teal)]" />
-          <span>AI Architecture &amp; The Gemma 4 Model</span>
-        </div>
+      {/* 02. The Problem & Why Kwegatta Exists */}
+      <section id="challenge" className="space-y-8 border-t border-[var(--card-border)] pt-14 sm:pt-20">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-baseline">
+          <div className="md:col-span-4 space-y-1">
+            <span className="text-xs font-mono font-medium text-[var(--gold)]">01 / THE CHALLENGE</span>
+            <h2 className="text-xl sm:text-2xl font-display font-bold text-[var(--fg)] tracking-tight">
+              Complementary people never find each other.
+            </h2>
+          </div>
 
-        <p className="text-xs sm:text-sm text-[var(--fg-muted)] leading-relaxed">
-          Kwegatta runs strictly and solely on the open-weight model <strong className="text-[var(--fg)]">gemma-4-31b-it</strong>. Closed or proprietary models are prohibited to ensure technological sovereignty, privacy, and permanent open-source reproducibility.
-        </p>
-
-        <div className="p-3.5 bg-[var(--bg-subtle)] rounded-xl border border-[var(--card-border)] text-xs space-y-2.5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-[var(--fg-muted)]">Model Identifier:</span>
-            <code className="bg-[var(--card)] px-2 py-0.5 rounded border border-[var(--card-border)] font-mono text-[var(--gold)] font-semibold">
-              gemma-4-31b-it
-            </code>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-[var(--fg-muted)]">Parameter Scale:</span>
-            <span className="text-[var(--fg)] font-medium">31 Billion Parameters (Open-Weight LLM)</span>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-[var(--fg-muted)]">Licence:</span>
-            <a
-              href="https://ai.google.dev/gemma/docs/core"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[var(--gold)] hover:underline inline-flex items-center gap-1 font-medium"
-            >
-              <span>Apache 2.0 (Open-Weight Model Licence)</span>
-              <ExternalLink className="w-3 h-3" />
-            </a>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-[var(--fg-muted)]">Privacy Architecture:</span>
-            <span className="text-[var(--teal)] font-medium flex items-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5" />
-              <span>Executed strictly server-side; zero API keys in browser</span>
-            </span>
+          <div className="md:col-span-8 space-y-5 text-sm sm:text-base text-[var(--fg-muted)] leading-relaxed">
+            <p>
+              In hackathons, university campuses, research hubs, and developer meetups, software engineers with technical chops and entrepreneurs with market insight sit two desks apart and never speak.
+            </p>
+            <p>
+              Networking fails because it relies on serendipity, social extroversion, or vanity metrics. People talk only to the friends they arrived with, missing the collaborators who possess exactly what they need.
+            </p>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Team Table */}
-      <div className="kw-card bg-[var(--card)] border border-[var(--card-border)] rounded-2xl overflow-hidden">
-        <div className="p-4 sm:p-5 border-b border-[var(--card-border)] flex items-center justify-between">
-          <div className="flex items-center gap-2 font-bold text-sm text-[var(--fg)]">
-            <Users className="w-4 h-4 text-[var(--gold)]" />
-            <span>Our Team</span>
-          </div>
-          <span className="text-[11px] text-[var(--fg-muted)]">Core contributors</span>
+      {/* 03. The Visual Match Demonstration */}
+      <section id="how-it-works" className="space-y-8 border-t border-[var(--card-border)] pt-14 sm:pt-20">
+        <div className="space-y-2">
+          <span className="text-xs font-mono font-medium text-[var(--teal)]">02 / HOW IT WORKS</span>
+          <h2 className="text-xl sm:text-2xl font-display font-bold text-[var(--fg)] tracking-tight">
+            Matching needs with offers, not just keywords.
+          </h2>
+          <p className="text-xs sm:text-sm text-[var(--fg-muted)] max-w-xl">
+            Instead of matching two identical developers, Kwegatta synthesizes complementary pairs where one member's offer fulfills the other's need.
+          </p>
         </div>
 
-        <div className="p-4 sm:p-5 grid grid-cols-1 md:grid-cols-2 gap-3.5">
-          {TEAM_MEMBERS.map(member => (
+        {/* Visual Match Architecture Showcase */}
+        <div className="p-6 sm:p-8 rounded-2xl bg-[var(--bg-subtle)] border border-[var(--card-border)] space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-9 gap-4 sm:gap-6 items-center">
+            
+            {/* Person A */}
+            <div className="md:col-span-4 p-5 rounded-xl bg-[var(--card)] border border-[var(--card-border)] space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-[var(--gold)] text-[#090D16] font-bold text-sm grid place-items-center">
+                  SA
+                </div>
+                <div>
+                  <h4 className="font-semibold text-sm text-[var(--fg)]">Product Creator</h4>
+                  <p className="text-xs text-[var(--fg-muted)]">Future Stars Centre</p>
+                </div>
+              </div>
+              <div className="space-y-1.5 text-xs">
+                <div className="text-[var(--teal)] font-medium">Offers: System Architecture &amp; UI</div>
+                <div className="text-[var(--gold)] font-medium">Needs: Backend API &amp; Database</div>
+              </div>
+            </div>
+
+            {/* Match Engine Node */}
+            <div className="md:col-span-1 flex flex-col items-center justify-center text-center py-2 md:py-0">
+              <div className="w-10 h-10 rounded-full bg-[var(--teal-subtle)] border border-[var(--teal)]/40 text-[var(--teal)] grid place-items-center shadow-xs">
+                <Zap className="w-4 h-4" />
+              </div>
+              <span className="text-[10px] font-mono font-semibold text-[var(--teal)] mt-1.5">91% Match</span>
+            </div>
+
+            {/* Person B */}
+            <div className="md:col-span-4 p-5 rounded-xl bg-[var(--card)] border border-[var(--card-border)] space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-[var(--teal)] text-[#090D16] font-bold text-sm grid place-items-center">
+                  AM
+                </div>
+                <div>
+                  <h4 className="font-semibold text-sm text-[var(--fg)]">Cloud Developer</h4>
+                  <p className="text-xs text-[var(--fg-muted)]">Sub-Saharan College</p>
+                </div>
+              </div>
+              <div className="space-y-1.5 text-xs">
+                <div className="text-[var(--teal)] font-medium">Offers: Backend API &amp; Database</div>
+                <div className="text-[var(--gold)] font-medium">Needs: System Architecture &amp; UI</div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* Outcome Result */}
+          <div className="p-4 rounded-xl bg-[var(--card)] border border-[var(--card-border)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2.5">
+              <Sparkles className="w-4 h-4 text-[var(--gold)] flex-shrink-0" />
+              <span className="text-[var(--fg)]">
+                <strong>Synthesized Collaboration:</strong> Build a high-throughput mobile community portal together.
+              </span>
+            </div>
+            <span className="text-xs font-semibold text-[var(--gold)] shrink-0">1-Tap WhatsApp Connect</span>
+          </div>
+        </div>
+      </section>
+
+      {/* 04. The 60-Second Experience */}
+      <section id="experience" className="space-y-8 border-t border-[var(--card-border)] pt-14 sm:pt-20">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
+          <div className="md:col-span-4 space-y-1">
+            <span className="text-xs font-mono font-medium text-[var(--gold)]">03 / EXPERIENCE</span>
+            <h2 className="text-xl sm:text-2xl font-display font-bold text-[var(--fg)] tracking-tight">
+              Designed for speed on small phones.
+            </h2>
+          </div>
+
+          <div className="md:col-span-8 grid grid-cols-1 sm:grid-cols-2 gap-6 text-xs text-[var(--fg-muted)]">
+            <div className="space-y-2">
+              <span className="text-sm font-semibold text-[var(--fg)] block">1. 60-Second Conversational Onboarding</span>
+              <p className="leading-relaxed">
+                Members share public details via a quick 4-prompt chat on their smartphone. Zero lengthy forms or password barriers.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-sm font-semibold text-[var(--fg)] block">2. Fact-Based Synthesis</span>
+              <p className="leading-relaxed">
+                Gemma 4 synthesizes a crisp headline, role, and tags using only verified facts provided by the member. No hallucinated skills.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-sm font-semibold text-[var(--fg)] block">3. Peer Mentorship &amp; Study Buddies</span>
+              <p className="leading-relaxed">
+                Automatically finds one mentor teaching what you want to learn, and one study partner sharing the exact same goal.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-sm font-semibold text-[var(--fg)] block">4. Direct connection</span>
+              <p className="leading-relaxed">
+                Launch pre-composed WhatsApp icebreakers or connect with one tap.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 05. The Technology: Gemma 4 */}
+      <section id="engine" className="space-y-8 border-t border-[var(--card-border)] pt-14 sm:pt-20">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-baseline">
+          <div className="md:col-span-4 space-y-1">
+            <span className="text-xs font-mono font-medium text-[var(--teal)]">04 / THE ENGINE</span>
+            <h2 className="text-xl sm:text-2xl font-display font-bold text-[var(--fg)] tracking-tight">
+              AI as an engine for human connection.
+            </h2>
+          </div>
+
+          <div className="md:col-span-8 space-y-5 text-sm text-[var(--fg-muted)] leading-relaxed">
+            <p>
+              Kwegatta is powered strictly by the open-weight model <strong className="text-[var(--fg)]">gemma-4-31b-it</strong> from Google DeepMind. Closed proprietary APIs are excluded to ensure complete community sovereignty, permanent auditability, and zero vendor lock-in.
+            </p>
+            <p>
+              AI does not replace human relationship-building; it reduces the search friction so real people can connect faster.
+            </p>
+
+            <div className="pt-2 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-[var(--fg-subtle)] font-mono">
+              <span>Model: gemma-4-31b-it</span>
+              <span>·</span>
+              <span>Licence: Apache 2.0</span>
+              <span>·</span>
+              <span>Execution: Server-Side Proxy</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 06. The Team Behind Kwegatta */}
+      <section id="team" className="space-y-10 border-t border-[var(--card-border)] pt-14 sm:pt-20">
+        <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-2">
+          <div>
+            <span className="text-xs font-mono font-medium text-[var(--gold)]">05 / PEOPLE</span>
+            <h2 className="text-2xl sm:text-3xl font-display font-bold text-[var(--fg)] tracking-tight">
+              The Team
+            </h2>
+            <p className="text-xs sm:text-sm text-[var(--fg-muted)] mt-1">
+              Builders, researchers, and community organizers from Kampala, Uganda.
+            </p>
+          </div>
+        </div>
+
+        {/* Team Photo Gallery Showcase */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+          <div className="rounded-xl overflow-hidden border border-[var(--card-border)] shadow-md group">
+            <img
+              src={photos.hero}
+              alt="Kwegatta team at Hack Day Kampala"
+              className="w-full h-52 object-cover group-hover:scale-105 transition-transform duration-300"
+              referrerPolicy="no-referrer"
+            />
+            <div className="p-3 bg-[var(--card)] text-xs text-[var(--fg-muted)]">
+              Kwegatta team table · Hack Day Kampala x MUBS (Makerere University Business School)
+            </div>
+          </div>
+
+          <div className="rounded-xl overflow-hidden border border-[var(--card-border)] shadow-md group">
+            <img
+              src={photos.hall}
+              alt="Hack Day Kampala event room"
+              className="w-full h-52 object-cover group-hover:scale-105 transition-transform duration-300"
+              referrerPolicy="no-referrer"
+            />
+            <div className="p-3 bg-[var(--card)] text-xs text-[var(--fg-muted)]">
+              Event room · EIIC Innovation Centre at Makerere University Business School
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          {TEAM_MEMBERS.map((member, idx) => (
             <div
               key={member.name}
-              className="p-3.5 bg-[var(--bg-subtle)] rounded-xl border border-[var(--card-border)] flex items-start gap-3 hover:border-[var(--gold)]/40 transition-colors"
+              className="p-5 rounded-xl bg-[var(--card)] border border-[var(--card-border)] flex flex-col justify-between space-y-3 hover:border-[var(--card-border)]/80 transition-all"
             >
-              <Avatar
-                profile={{ name: member.name } as any}
-                className="w-10 h-10 flex-shrink-0"
-              />
-              <div className="space-y-1 min-w-0 flex-1">
-                <div className="font-semibold text-xs text-[var(--fg)] leading-snug flex items-center justify-between gap-2">
-                  <span className="truncate">{member.name}</span>
-                  {member.github ? (
+              <div className="space-y-2.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <Avatar
+                      profile={{ name: member.name } as any}
+                      className="w-10 h-10 flex-shrink-0"
+                    />
+                    <div>
+                      <h4 className="font-semibold text-sm sm:text-base text-[var(--fg)]">
+                        {member.name}
+                      </h4>
+                      <p className="text-xs text-[var(--teal)] font-medium">{member.role}</p>
+                    </div>
+                  </div>
+
+                  {member.github && (
                     <a
                       href={`https://github.com/${member.github}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-[10px] text-[var(--gold)] hover:underline inline-flex items-center gap-1 font-mono flex-shrink-0"
+                      className="text-[var(--fg-subtle)] hover:text-[var(--fg)] p-1 transition-colors"
+                      aria-label={`${member.name} on GitHub`}
                     >
-                      <span>@{member.github}</span>
-                      <ExternalLink className="w-2.5 h-2.5" />
+                      <Github className="w-4 h-4" />
                     </a>
-                  ) : (
-                    <span className="text-[10px] text-[var(--fg-subtle)] font-mono flex-shrink-0">none yet</span>
                   )}
                 </div>
-                <div className="text-[11px] text-[var(--fg-muted)] leading-tight">
-                  {member.affiliation}
-                </div>
-                <div className="flex flex-wrap gap-1 pt-1">
-                  <span className="kw-badge kw-badge-teal text-[10px]">
-                    {member.role}
-                  </span>
-                  <span className="kw-badge kw-badge-muted text-[10px]">
-                    {member.background}
-                  </span>
-                </div>
+
+                <p className="text-xs text-[var(--fg-muted)] leading-relaxed">
+                  {member.background}
+                </p>
+              </div>
+
+              <div className="pt-2 border-t border-[var(--card-border)]/50 text-[11px] text-[var(--fg-subtle)] truncate">
+                {member.affiliation}
               </div>
             </div>
           ))}
         </div>
+      </section>
 
-        {/* Want to build with us? CTA */}
-        <div className="p-4 sm:p-5 bg-[var(--bg-subtle)]/60 border-t border-[var(--card-border)] flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-          <div>
-            <p className="font-semibold text-[var(--fg)]">Want to build with us?</p>
-            <p className="text-[var(--fg-muted)] text-[11px]">Kwegatta is open source and welcomes contributors across engineering, product, and community.</p>
+      {/* 07. Open Source & Community Roots */}
+      <section id="story" className="space-y-6 border-t border-[var(--card-border)] pt-14 sm:pt-20">
+        <div id="hackathon" className="scroll-mt-24"></div>
+        <div id="awards" className="scroll-mt-24"></div>
+        <div className="p-8 rounded-2xl bg-[var(--bg-subtle)] border border-[var(--card-border)] space-y-6">
+          <div className="space-y-2">
+            <span className="text-xs font-mono font-medium text-[var(--teal)]">06 / OPEN SOURCE &amp; AWARDS</span>
+            <h2 className="text-xl sm:text-2xl font-display font-bold text-[var(--fg)] tracking-tight">
+              Built as a Digital Public Good for global communities.
+            </h2>
+            <p className="text-xs sm:text-sm text-[var(--fg-muted)] leading-relaxed max-w-2xl">
+              Kwegatta was built at <strong className="text-[var(--fg)]">Hacktoberfest 2026 Hack Day Kampala × MUBS</strong> (Makerere University Business School). We entered the Best Open-Source AI Project challenge, and Kwegatta was named one of the two winning teams (2nd place). Released under the MIT licence, it is designed for adaptation by universities, NGOs, and developer networks worldwide.
+            </p>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+
+          <div className="flex flex-wrap items-center gap-3 pt-2">
             <a
               href="https://github.com/Saifuddin2Ahmed/kwegatta"
               target="_blank"
               rel="noopener noreferrer"
-              className="kw-btn kw-btn-gold text-xs py-1.5 px-3 inline-flex items-center gap-1.5 font-semibold"
+              className="kw-btn kw-btn-gold text-xs py-2 px-4 inline-flex items-center gap-2 font-semibold"
             >
-              <GitPullRequest className="w-3.5 h-3.5" />
+              <Github className="w-4 h-4" />
               <span>Contribute on GitHub</span>
+              <ArrowUpRight className="w-3.5 h-3.5 opacity-80" />
             </a>
+            <button
+              onClick={onNavigateHome}
+              className="kw-btn kw-btn-ghost text-xs py-2 px-4"
+            >
+              Back to Matches
+            </button>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Community & Campus Origins */}
-      <div className="kw-card p-5 sm:p-6 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl space-y-4">
-        <div className="flex items-center gap-2 font-bold text-sm text-[var(--fg)]">
-          <Calendar className="w-4 h-4 text-[var(--gold)]" />
-          <span>Community &amp; Campus Roots</span>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
-          <div className="p-3.5 bg-[var(--bg-subtle)] border border-[var(--card-border)] rounded-xl space-y-1.5">
-            <span className="text-[var(--fg-muted)] font-medium">Event:</span>
-            <p className="font-semibold text-[var(--fg)]">
-              Hacktoberfest 2026 Hack Day Kampala x MUBS
-            </p>
-            <span className="text-[var(--fg-subtle)] block">Friday 2 October 2026</span>
+      {/* 08. Privacy & Data Sovereignty Policy */}
+      <section id="privacy" className="space-y-8 border-t border-[var(--card-border)] pt-14 sm:pt-20">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-baseline">
+          <div className="md:col-span-4 space-y-1">
+            <span className="text-xs font-mono font-medium text-[var(--gold)]">07 / PRIVACY &amp; DATA POLICY</span>
+            <h2 className="text-xl sm:text-2xl font-display font-bold text-[var(--fg)] tracking-tight">
+              Zero telemetry. Full member sovereignty.
+            </h2>
           </div>
 
-          <div className="p-3.5 bg-[var(--bg-subtle)] border border-[var(--card-border)] rounded-xl space-y-1.5">
-            <span className="text-[var(--fg-muted)] font-medium">Venue:</span>
-            <p className="font-semibold text-[var(--fg)] flex items-start gap-1">
-              <MapPin className="w-3.5 h-3.5 text-[var(--danger)] flex-shrink-0 mt-0.5" />
-              <span>Entrepreneurship, Innovation and Incubation Centre (EIIC), Makerere University Business School, Kampala, Uganda</span>
-            </p>
+          <div className="md:col-span-8 space-y-6 text-xs sm:text-sm text-[var(--fg-muted)] leading-relaxed">
+            <div className="p-5 rounded-xl bg-[var(--card)] border border-[var(--card-border)] space-y-4">
+              <div className="flex items-start gap-3">
+                <Shield className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h4 className="font-semibold text-sm text-[var(--fg)]">Zero Client-Side Telemetry</h4>
+                  <p className="text-xs text-[var(--fg-muted)]">
+                    No third-party trackers, no advertising cookies, and zero behavioral telemetry. Your browsing and profile activity is never sold or shared with analytics providers.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <Lock className="w-5 h-5 text-[var(--gold)] flex-shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h4 className="font-semibold text-sm text-[var(--fg)]">Fact-Based Open-Source AI Only</h4>
+                  <p className="text-xs text-[var(--fg-muted)]">
+                    All AI summaries use strictly the facts you supply during onboarding. The open-weight model Gemma 4 is instructed never to invent skills, degrees, or employers.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 text-[var(--teal)] flex-shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h4 className="font-semibold text-sm text-[var(--fg)]">Full Export &amp; Erasure Rights</h4>
+                  <p className="text-xs text-[var(--fg-muted)]">
+                    You can export all your data in standard JSON format or permanently delete your profile and all associated posts, matches, and notifications at any time from your profile page.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Digital Public Goods & Open-Source Integrity */}
-      <div className="kw-card p-5 space-y-3 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl text-xs">
-        <div className="flex items-center justify-between">
-          <span className="font-bold text-sm flex items-center gap-2 text-[var(--fg)]">
-            <HeartHandshake className="w-4 h-4 text-[var(--teal)]" />
-            <span>Digital Public Goods &amp; Privacy Standards</span>
-          </span>
-          <span className="kw-badge kw-badge-teal text-[10px]">DPG Aligned</span>
+      {/* 09. License & Open Source Terms */}
+      <section id="license" className="space-y-8 border-t border-[var(--card-border)] pt-14 sm:pt-20">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-baseline">
+          <div className="md:col-span-4 space-y-1">
+            <span className="text-xs font-mono font-medium text-[var(--teal)]">08 / LEGAL &amp; LICENCE</span>
+            <h2 className="text-xl sm:text-2xl font-display font-bold text-[var(--fg)] tracking-tight">
+              MIT License
+            </h2>
+            <p className="text-xs text-[var(--fg-muted)]">Free, open-source software.</p>
+          </div>
+
+          <div className="md:col-span-8 space-y-4 text-xs text-[var(--fg-muted)] leading-relaxed">
+            <div className="p-4 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] font-mono text-[11px] text-[var(--fg)] space-y-2">
+              <p className="font-bold">Copyright (c) 2026 Kwegatta Contributors</p>
+              <p>
+                Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software...
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <a
+                href="https://github.com/Saifuddin2Ahmed/kwegatta/blob/main/LICENSE"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="kw-btn kw-btn-ghost text-xs py-1.5 px-3 inline-flex items-center gap-1.5"
+              >
+                <span>Read Full LICENSE on GitHub</span>
+                <ExternalLink className="w-3 h-3 opacity-70" />
+              </a>
+              <a
+                href="https://ai.google.dev/gemma/docs/core"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="kw-btn kw-btn-ghost text-xs py-1.5 px-3 inline-flex items-center gap-1.5"
+              >
+                <span>Gemma Apache 2.0 Terms</span>
+                <ExternalLink className="w-3 h-3 opacity-70" />
+              </a>
+            </div>
+          </div>
         </div>
-
-        <p className="text-[var(--fg-muted)] leading-relaxed">
-          Kwegatta is designed to align with open, privacy-conscious, and community-oriented Digital Public Goods principles, advancing SDG 4 (Quality Education), SDG 8 (Decent Work &amp; Economic Growth), SDG 9 (Industry &amp; Innovation), and SDG 17 (Partnerships for the Goals).
-        </p>
-
-        <div className="flex flex-wrap gap-2 pt-1 text-[11px]">
-          <span className="px-2.5 py-1 rounded-lg bg-[var(--bg-subtle)] border border-[var(--card-border)] text-[var(--fg)]">
-            OSI-Approved MIT Licence
-          </span>
-          <span className="px-2.5 py-1 rounded-lg bg-[var(--bg-subtle)] border border-[var(--card-border)] text-[var(--fg)]">
-            Zero Telemetry / No Tracking
-          </span>
-          <span className="px-2.5 py-1 rounded-lg bg-[var(--bg-subtle)] border border-[var(--card-border)] text-[var(--fg)]">
-            User Data Export (JSON)
-          </span>
-          <span className="px-2.5 py-1 rounded-lg bg-[var(--bg-subtle)] border border-[var(--card-border)] text-[var(--fg)]">
-            Permanent Profile Deletion
-          </span>
-        </div>
-      </div>
+      </section>
 
     </div>
   );

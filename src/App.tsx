@@ -7,7 +7,7 @@ import { PeopleView } from './components/PeopleView';
 import { FeedView } from './components/FeedView';
 import { InboxView } from './components/InboxView';
 import { ProfileView } from './components/ProfileView';
-import { LivingNetworkHero } from './components/LivingNetworkHero';
+import { HeroSection, KampalaStorySection } from './components/LivingNetworkHero';
 import { OnboardingChat } from './components/OnboardingChat';
 import { WallView } from './components/WallView';
 import { SetupView } from './components/SetupView';
@@ -27,6 +27,8 @@ export default function App() {
   const [follows, setFollows] = useState<Follow[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
+  const [matches, setMatches] = useState<any[]>([]);
+  const [isDemoMode, setIsDemoMode] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
@@ -37,6 +39,14 @@ export default function App() {
     const savedTheme = (localStorage.getItem('kw_theme') as 'dark' | 'light') || 'dark';
     setTheme(savedTheme);
     document.documentElement.dataset.theme = savedTheme;
+
+    // Check system config
+    fetch('/api/config')
+      .then(res => res.json())
+      .then(cfg => {
+        if (cfg?.isDemoMode) setIsDemoMode(true);
+      })
+      .catch(() => {});
   }, []);
 
   const toggleTheme = () => {
@@ -65,17 +75,15 @@ export default function App() {
         }
       }
 
-      const [ps, pos] = await Promise.all([
+      const [ps, pos, ms] = await Promise.all([
         db.list<Profile>('profiles', { limit: 500 }),
-        db.list<Post>('posts', { limit: 100 })
+        db.list<Post>('posts', { limit: 100 }),
+        db.list<any>('matches', { limit: 100 })
       ]);
       
-      if (ps && ps.length > 0) {
-        setAllProfiles(ps);
-      }
-      if (pos) {
-        setPosts(pos);
-      }
+      setAllProfiles(ps || []);
+      setPosts(pos || []);
+      setMatches(ms || []);
 
       if (myId && ps && ps.length > 0) {
         const found = ps.find(p => p.id === myId);
@@ -238,6 +246,8 @@ export default function App() {
           if (activeTab !== 'people') navigateTo('people');
         }}
         onNavigate={navigateTo}
+        activeTab={activeTab}
+        isDemoMode={isDemoMode}
       />
 
       {/* Navigation tabs (visible when user is onboarded) */}
@@ -266,17 +276,27 @@ export default function App() {
       {/* Main Content Container with standard max-width and balanced vertical rhythm */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-8">
         
-        {/* Onboarding & Landing View (when visitor has no profile or explicitly opened onboarding) */}
-        {(!currentProfile && activeTab !== 'userProfile' && activeTab !== 'admin' && activeTab !== 'about') || activeTab === 'onboard' ? (
-          <div className="space-y-8">
-            <LivingNetworkHero
+        {/* Onboarding & Landing View (when visitor has no profile on home/onboard/me, or member explicitly opened onboard) */}
+        {(!currentProfile && (activeTab === 'home' || activeTab === 'onboard' || activeTab === 'me')) || (currentProfile && activeTab === 'onboard') ? (
+          <div className="space-y-12 sm:space-y-16">
+            {/* b) Hero, two columns */}
+            <HeroSection
               profiles={allProfiles}
+              matchesCount={matches.length}
               postsCount={posts.length}
               onJoinClick={() => {
                 const el = document.getElementById('onboarding-composer');
-                el?.scrollIntoView({ behavior: 'smooth' });
+                if (el) {
+                  el.scrollIntoView({ behavior: 'smooth' });
+                  setTimeout(() => {
+                    const input = el.querySelector('input:not([type="file"]), textarea') as HTMLInputElement | null;
+                    input?.focus();
+                  }, 350);
+                }
               }}
             />
+
+            {/* c) The onboarding chat, directly under the hero */}
             <div id="onboarding-composer">
               <OnboardingChat
                 onCompleted={newProfile => {
@@ -287,6 +307,9 @@ export default function App() {
                 }}
               />
             </div>
+
+            {/* d) "Built in one day in Kampala": story, the two other photos, four facts, team */}
+            <KampalaStorySection onNavigate={navigateTo} />
           </div>
         ) : activeTab === 'home' ? (
           <MatchesView
@@ -299,11 +322,12 @@ export default function App() {
           />
         ) : activeTab === 'learn' ? (
           <LearnView
-            currentProfile={currentProfile!}
+            currentProfile={currentProfile}
             allProfiles={allProfiles}
             followingIds={followingIds}
             onToggleFollow={handleToggleFollow}
             onViewProfile={navigateToProfile}
+            onJoinClick={() => navigateTo('onboard')}
           />
         ) : activeTab === 'people' ? (
           <PeopleView

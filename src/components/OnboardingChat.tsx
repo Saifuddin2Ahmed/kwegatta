@@ -64,7 +64,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted, onC
     {
       key: 'name',
       label: 'Name',
-      prompt: `Hi! I'm the ${APP_NAME} AI guide running on Gemma 4 (open-weight). I'll help you find builders, mentors and partners at Hack Day Kampala x MUBS. What is your full name?`,
+      prompt: `Hi, I'm the Kwegatta guide. I run on Gemma 4, an open-weight model. Let's set up your profile. What's your name?`,
       placeholder: 'e.g. Sandra Nabirye',
       required: true
     },
@@ -79,28 +79,28 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted, onC
     {
       key: 'offers',
       label: 'Offers',
-      prompt: 'What skills, resources, or knowledge do you OFFER a team? (e.g. Flutter mobile apps, financial modeling, UI design in Figma, business validation)',
+      prompt: 'What skills, resources, or knowledge do you offer a team? (e.g. Flutter mobile apps, financial modeling, UI design in Figma, business validation)',
       placeholder: 'e.g. Flutter apps, UI design, market research',
       required: true
     },
     {
       key: 'needs',
       label: 'Needs',
-      prompt: 'What do you NEED most right now? (e.g. a technical co-founder, a mobile developer, marketing help, pricing advice)',
+      prompt: 'What do you need most right now? (e.g. a technical co-founder, a mobile developer, marketing help, pricing advice)',
       placeholder: 'e.g. a developer to build our hackathon demo',
       required: true
     },
     {
       key: 'teaches',
       label: 'Teaches',
-      prompt: 'What skill or subject can you TEACH someone as a peer mentor?',
+      prompt: 'What skill or subject can you teach someone as a peer mentor?',
       placeholder: 'e.g. Dart & Flutter basics, pitch deck design, accounting',
       required: false
     },
     {
       key: 'learns',
       label: 'Learns',
-      prompt: 'What skill or topic do you WANT TO LEARN today? We will find you a study partner.',
+      prompt: 'What skill or topic do you want to learn? We will find you a study partner.',
       placeholder: 'e.g. Python data analysis, Figma auto-layout, grant writing',
       required: false
     },
@@ -114,7 +114,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted, onC
     {
       key: 'avatar',
       label: 'Photo',
-      prompt: 'Finally, add a profile picture or selfie so teammates can recognize you in the room.',
+      prompt: 'Finally, add a profile picture or selfie so teammates can recognize you.',
       placeholder: '',
       required: false,
       isPhoto: true

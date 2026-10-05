@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, QrCode, Zap, ArrowLeft, RefreshCw, Users, MessageSquare } from 'lucide-react';
+import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { Profile, Post } from '../types';
-import { db, APP_NAME } from '../services/api';
+import { db, PUBLIC_APP_URL } from '../services/api';
 import { generateQrCodeDataUrl } from '../utils';
 import { Avatar } from './Avatar';
 import { BrandLogo } from './BrandLogo';
@@ -22,12 +22,12 @@ export const WallView: React.FC<WallViewProps> = ({ onBack }) => {
     try {
       const [ps, ms, pos] = await Promise.all([
         db.list<Profile>('profiles', { limit: 500 }),
-        db.list<any>('matches', { limit: 30 }),
+        db.list<any>('matches', { limit: 50 }),
         db.list<Post>('posts', { limit: 200 })
       ]);
-      setProfiles(ps);
-      setMatches(ms);
-      setPosts(pos);
+      setProfiles(ps || []);
+      setMatches(ms || []);
+      setPosts(pos || []);
     } catch (e) {
       console.error('Error fetching wall data:', e);
     } finally {
@@ -36,197 +36,199 @@ export const WallView: React.FC<WallViewProps> = ({ onBack }) => {
   };
 
   useEffect(() => {
-    const joinUrl = window.location.origin + window.location.pathname;
-    generateQrCodeDataUrl(joinUrl, 280).then(setQrCodeUrl);
+    // Generate QR code using strictly PUBLIC_APP_URL
+    generateQrCodeDataUrl(PUBLIC_APP_URL, 360).then(setQrCodeUrl);
     fetchWallData();
 
     // Auto-refresh periodically for projector
-    const interval = setInterval(fetchWallData, 12000);
+    const interval = setInterval(fetchWallData, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  // Compute trending tags
-  const tagCounts: Record<string, number> = {};
-  profiles.forEach(p => {
-    (p.tags || []).forEach(t => {
-      tagCounts[t] = (tagCounts[t] || 0) + 1;
-    });
-  });
-  const topTags = Object.entries(tagCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 16);
+  const hasMembers = profiles.length > 0;
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)] p-4 sm:p-8 flex flex-col justify-between transition-colors">
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)] p-4 sm:p-8 lg:p-10 flex flex-col justify-between transition-colors">
       
-      {/* Top Bar with back button */}
-      <div className="max-w-7xl w-full mx-auto flex items-center justify-between pb-6 border-b border-[var(--card-border)]">
+      {/* Top Projector Header Bar */}
+      <div className="max-w-7xl w-full mx-auto flex items-center justify-between gap-4 pb-6 border-b border-[var(--card-border)]">
         <div className="flex items-center gap-4">
           <button
             onClick={onBack}
-            className="kw-btn kw-btn-ghost text-xs py-2 px-3 flex items-center gap-1.5"
-            title="Return to app"
+            className="kw-btn kw-btn-ghost text-xs py-2 px-3 flex items-center gap-1.5 active:scale-95"
+            title="Return to application"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>Back to app</span>
           </button>
           
-          <div className="flex items-center gap-3">
-            <BrandLogo size="md" showText={true} />
-            <span className="text-[var(--fg-muted)] font-normal text-sm hidden sm:inline">
-              | Hack Day Kampala x MUBS
-            </span>
-          </div>
+          <BrandLogo size="md" showText={true} />
         </div>
 
-        <div className="flex items-center gap-3">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--teal-subtle)] border border-[var(--teal)]/30 text-[var(--teal)] text-xs font-semibold">
-            <span className="w-2 h-2 rounded-full bg-[var(--teal)] animate-pulse" />
-            Live Room Projector
-          </span>
-          <button
-            onClick={fetchWallData}
-            disabled={isRefreshing}
-            className="kw-btn kw-btn-ghost text-xs p-2"
-            title="Refresh data"
-          >
-            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-          </button>
-        </div>
+        <button
+          onClick={fetchWallData}
+          disabled={isRefreshing}
+          className="kw-btn kw-btn-ghost text-xs p-2 rounded-lg"
+          title="Refresh data"
+          aria-label="Refresh wall data"
+        >
+          <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+        </button>
       </div>
 
-      {/* Main Stats and Columns */}
-      <div className="max-w-7xl w-full mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8 py-8 flex-1">
-        
-        {/* Left 2 Columns: Big Metrics and Match Ticker */}
-        <div className="lg:col-span-2 space-y-6">
+      {/* Main Content Area */}
+      {!hasMembers ? (
+        /* Empty state: Large Centered QR Code */
+        <div className="flex-1 flex flex-col items-center justify-center py-12 sm:py-20 text-center space-y-6 max-w-xl mx-auto">
+          <div className="space-y-2">
+            <h1 className="text-3xl sm:text-5xl font-display font-bold text-[var(--fg)] tracking-tight">
+              Scan to join. Be the first.
+            </h1>
+            <p className="text-base sm:text-xl text-[var(--fg-muted)] font-mono">
+              {PUBLIC_APP_URL}
+            </p>
+          </div>
+
+          {qrCodeUrl ? (
+            <div className="p-4 bg-white rounded-3xl shadow-2xl inline-block">
+              <img
+                src={qrCodeUrl}
+                alt="Scan to join Kwegatta"
+                className="w-64 h-64 sm:w-80 sm:h-80 mx-auto rounded-xl"
+              />
+            </div>
+          ) : (
+            <div className="w-64 h-64 sm:w-80 sm:h-80 bg-[var(--card)] rounded-3xl animate-pulse" />
+          )}
+
+          <p className="text-sm text-[var(--fg-muted)] max-w-md">
+            Open your phone camera to create your profile in 60 seconds.
+          </p>
+        </div>
+      ) : (
+        /* Populated state: Counters + Full-Height Match List + Large Text (>= 20px) */
+        <div className="max-w-7xl w-full mx-auto flex-1 flex flex-col py-6 sm:py-8 space-y-8">
           
-          {/* Big Statistics Counter */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="kw-card p-6 bg-[var(--card)] text-center sm:text-left space-y-1">
-              <div className="text-4xl sm:text-5xl font-extrabold text-[var(--gold)] tabular-nums tracking-tight">
+          {/* Three Counters */}
+          <div className="grid grid-cols-3 gap-4 sm:gap-8 pb-6 border-b border-[var(--card-border)]">
+            <div className="space-y-1">
+              <div className="text-4xl sm:text-6xl font-bold text-[var(--fg)] tabular-nums tracking-tight">
                 {profiles.length}
               </div>
-              <div className="text-xs sm:text-sm text-[var(--fg-muted)] font-medium">
-                Builders & Students Joined
+              <div className="text-sm sm:text-base text-[var(--fg-muted)] font-medium">
+                People here
               </div>
             </div>
 
-            <div className="kw-card p-6 bg-[var(--card)] text-center sm:text-left space-y-1">
-              <div className="text-4xl sm:text-5xl font-extrabold text-[var(--teal)] tabular-nums tracking-tight">
+            <div className="space-y-1 border-l border-[var(--card-border)] pl-4 sm:pl-8">
+              <div className="text-4xl sm:text-6xl font-bold text-[var(--gold)] tabular-nums tracking-tight">
                 {matches.length}
               </div>
-              <div className="text-xs sm:text-sm text-[var(--fg-muted)] font-medium">
-                AI Complementary Pairs
+              <div className="text-sm sm:text-base text-[var(--fg-muted)] font-medium">
+                Matches made
               </div>
             </div>
 
-            <div className="kw-card p-6 bg-[var(--card)] text-center sm:text-left space-y-1">
-              <div className="text-4xl sm:text-5xl font-extrabold text-purple-400 tabular-nums tracking-tight">
+            <div className="space-y-1 border-l border-[var(--card-border)] pl-4 sm:pl-8">
+              <div className="text-4xl sm:text-6xl font-bold text-[var(--teal)] tabular-nums tracking-tight">
                 {posts.length}
               </div>
-              <div className="text-xs sm:text-sm text-[var(--fg-muted)] font-medium">
-                Project Asks & Offers
+              <div className="text-sm sm:text-base text-[var(--fg-muted)] font-medium">
+                Asks and offers
               </div>
             </div>
           </div>
 
-          {/* Latest Matches Stream */}
-          <div className="kw-card p-6 bg-[var(--card)] space-y-4">
-            <h3 className="font-bold text-base flex items-center gap-2 text-[var(--fg)]">
-              <Zap className="w-4 h-4 text-[var(--gold)]" />
-              <span>Latest Room Matches</span>
-            </h3>
+          {/* Main Display Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start flex-1">
+            
+            {/* Left: Latest Matches List (Text >= 20px) */}
+            <div className="lg:col-span-8 space-y-6">
+              <h2 className="text-2xl sm:text-3xl font-display font-bold text-[var(--fg)] tracking-tight">
+                Latest matches
+              </h2>
 
-            {matches.length === 0 ? (
-              <p className="text-sm text-[var(--fg-muted)] py-6 text-center">
-                Matches are synthesized live by Gemma 4 as participants join...
+              {matches.length === 0 ? (
+                <div className="py-12 text-center text-lg text-[var(--fg-muted)] border border-dashed border-[var(--card-border)] rounded-2xl">
+                  Matches appear as people join...
+                </div>
+              ) : (
+                <div className="divide-y divide-[var(--card-border)]">
+                  {matches.slice(0, 7).map(m => {
+                    const a = profiles.find(p => p.id === m.a_id);
+                    const b = profiles.find(p => p.id === m.b_id);
+                    if (!a || !b) return null;
+
+                    const firstNameA = a.name.trim().split(' ')[0];
+                    const firstNameB = b.name.trim().split(' ')[0];
+
+                    return (
+                      <div
+                        key={m.id}
+                        className="py-4 sm:py-5 flex items-center justify-between gap-4"
+                      >
+                        {/* Member A + Member B (First names and avatars only) */}
+                        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                          <Avatar profile={a} className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0" />
+                          <span className="text-xl sm:text-2xl font-bold text-[var(--fg)] truncate">
+                            {firstNameA}
+                          </span>
+                          <span className="text-lg sm:text-xl text-[var(--fg-subtle)] font-mono px-1">
+                            &amp;
+                          </span>
+                          <Avatar profile={b} className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0" />
+                          <span className="text-xl sm:text-2xl font-bold text-[var(--fg)] truncate">
+                            {firstNameB}
+                          </span>
+                        </div>
+
+                        {/* Match Score */}
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className="text-xl sm:text-2xl font-extrabold text-[var(--gold)] font-mono tabular-nums">
+                            {m.score}%
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Right: Scan to join QR Code */}
+            <div className="lg:col-span-4 p-6 sm:p-8 rounded-2xl bg-[var(--bg-subtle)] border border-[var(--card-border)] flex flex-col items-center justify-center text-center space-y-4">
+              <h3 className="text-xl sm:text-2xl font-display font-bold text-[var(--fg)]">
+                Scan to join
+              </h3>
+
+              {qrCodeUrl ? (
+                <div className="p-3 bg-white rounded-2xl shadow-md inline-block">
+                  <img
+                    src={qrCodeUrl}
+                    alt="Scan to join"
+                    className="w-48 h-48 sm:w-56 sm:h-56 mx-auto rounded-lg"
+                  />
+                </div>
+              ) : (
+                <div className="w-48 h-48 sm:w-56 sm:h-56 bg-[var(--card)] rounded-2xl animate-pulse" />
+              )}
+
+              <p className="text-xs sm:text-sm font-mono text-[var(--fg-muted)]">
+                {PUBLIC_APP_URL}
               </p>
-            ) : (
-              <div className="divide-y divide-[var(--card-border)]">
-                {matches.slice(0, 6).map(m => {
-                  const a = profiles.find(p => p.id === m.a_id);
-                  const b = profiles.find(p => p.id === m.b_id);
-                  if (!a || !b) return null;
-
-                  return (
-                    <div key={m.id} className="py-3.5 flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <Avatar profile={a} className="w-8 h-8" />
-                        <strong className="text-sm font-semibold truncate text-[var(--fg)]">{a.name.split(' ')[0]}</strong>
-                        <span className="text-xs text-[var(--fg-muted)]">with</span>
-                        <Avatar profile={b} className="w-8 h-8" />
-                        <strong className="text-sm font-semibold truncate text-[var(--fg)]">{b.name.split(' ')[0]}</strong>
-                      </div>
-
-                      <div className="flex items-center gap-3">
-                        <span className="hidden md:inline text-xs text-[var(--fg-muted)] max-w-xs truncate">
-                          {m.spark || m.reason}
-                        </span>
-                        <span className="px-2 py-0.5 rounded-full bg-[var(--gold-subtle)] border border-[var(--gold)]/30 text-[var(--gold)] font-bold text-xs tabular-nums">
-                          {m.score}%
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-        </div>
-
-        {/* Right Column: Scan to Join QR & Trending tags */}
-        <div className="space-y-6">
-          <div className="kw-card p-8 bg-[var(--card)] text-center space-y-4 flex flex-col items-center justify-center">
-            <h3 className="font-bold text-lg text-[var(--fg)]">
-              Scan to Join in 60 Seconds
-            </h3>
-
-            {qrCodeUrl ? (
-              <div className="p-4 bg-white rounded-2xl shadow-xl inline-block">
-                <img src={qrCodeUrl} alt="Join QR Code" className="w-56 h-56 mx-auto" />
-              </div>
-            ) : (
-              <div className="w-56 h-56 bg-[var(--bg-subtle)] rounded-2xl animate-pulse" />
-            )}
-
-            <p className="text-xs font-mono text-[var(--fg-subtle)] break-all max-w-xs">
-              {window.location.origin + window.location.pathname}
-            </p>
-            <p className="text-xs text-[var(--fg-muted)] max-w-xs">
-              Open your phone camera, scan the code, and tell Gemma 4 what you need and offer.
-            </p>
-          </div>
-
-          {/* Trending In Room Today */}
-          {topTags.length > 0 && (
-            <div className="kw-card p-5 bg-[var(--card)] space-y-3">
-              <h4 className="text-xs font-bold text-[var(--fg-muted)] uppercase tracking-wider">
-                Trending In Room Today
-              </h4>
-              <div className="flex flex-wrap gap-1.5">
-                {topTags.map(([tag, count]) => (
-                  <span
-                    key={tag}
-                    className="inline-flex items-center gap-1 text-[11px] font-medium py-1 px-2.5 rounded-lg bg-[var(--bg-subtle)] border border-[var(--card-border)] text-[var(--fg)]"
-                  >
-                    <span>#{tag}</span>
-                    <span className="text-[var(--fg-subtle)] text-[10px]">({count})</span>
-                  </span>
-                ))}
-              </div>
             </div>
-          )}
+
+          </div>
+
         </div>
+      )}
 
-      </div>
-
-      {/* Clean Footer Bar */}
+      {/* Footer */}
       <div className="max-w-7xl w-full mx-auto pt-6 border-t border-[var(--card-border)] flex items-center justify-between text-xs text-[var(--fg-subtle)]">
-        <span>Powered by Gemma 4 (open-weight, Apache 2.0)</span>
-        <span>Hacktoberfest 2026 — Makerere University Business School</span>
+        <span>Powered by Gemma 4 (open-weight)</span>
+        <span>{PUBLIC_APP_URL}</span>
       </div>
+
     </div>
   );
 };

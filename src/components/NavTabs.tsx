@@ -10,11 +10,11 @@ interface NavTabsProps {
 export const NavTabs: React.FC<NavTabsProps> = ({ activeTab, unreadCount, onTabChange }) => {
   const tabs = [
     { id: 'home', label: 'Matches', icon: Zap },
-    { id: 'learn', label: 'Learn', icon: BookOpen },
-    { id: 'people', label: 'People', icon: Users },
-    { id: 'feed', label: 'Feed', icon: MessageSquare },
+    { id: 'learn', label: 'Peer Learning', icon: BookOpen },
+    { id: 'people', label: 'Directory', icon: Users },
+    { id: 'feed', label: 'Project Wall', icon: MessageSquare },
     { id: 'inbox', label: 'Inbox', icon: Bell, badge: unreadCount },
-    { id: 'me', label: 'Profile', icon: User },
+    { id: 'me', label: 'My Profile', icon: User },
     { id: 'about', label: 'About', icon: Info }
   ];
 
@@ -29,22 +29,22 @@ export const NavTabs: React.FC<NavTabsProps> = ({ activeTab, unreadCount, onTabC
             <button
               key={tab.id}
               onClick={() => onTabChange(tab.id)}
-              className={`relative flex items-center gap-2 py-3.5 px-3 sm:px-4 text-xs sm:text-[13px] whitespace-nowrap transition-all rounded-t-lg hover:bg-[var(--card-hover)] focus-visible:ring-2 focus-visible:ring-[var(--gold)] ${
-                isActive ? 'font-bold text-[var(--fg)]' : 'font-medium text-[var(--fg-muted)] hover:text-[var(--fg)]'
+              className={`relative flex items-center gap-2 py-3 px-3 text-xs font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:ring-[var(--gold)] ${
+                isActive ? 'text-[var(--fg)] font-semibold' : 'text-[var(--fg-muted)] hover:text-[var(--fg)]'
               }`}
             >
-              <Icon className={`w-4 h-4 ${isActive ? 'text-[var(--gold)] stroke-[2.2]' : 'text-[var(--fg-muted)]'}`} />
+              <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-[var(--gold)]' : 'text-[var(--fg-muted)]'}`} />
               <span>{tab.label}</span>
               {tab.badge && tab.badge > 0 ? (
-                <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-[var(--gold)] text-[#090D16]">
+                <span className="ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-[var(--gold)] text-[#090D16]">
                   {tab.badge}
                 </span>
               ) : null}
 
-              {/* Active indicator bar */}
+              {/* Minimalist Bottom Indicator */}
               {isActive && (
                 <span
-                  className="absolute bottom-0 left-2 right-2 h-[2.5px] bg-[var(--gold)] rounded-t-full shadow-sm"
+                  className="absolute bottom-0 left-0 right-0 h-[2px] bg-[var(--gold)]"
                   aria-hidden="true"
                 />
               )}

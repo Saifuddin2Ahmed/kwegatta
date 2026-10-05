@@ -8,6 +8,7 @@ import { Profile, MatchResult, LearnMatchResult, Post, NotificationItem, Follow,
 export const GEMMA_MODEL_ID = 'gemma-4-31b-it';
 
 export const APP_NAME = 'Kwegatta';
+export const PUBLIC_APP_URL = 'https://kwegatta.ai.studio';
 
 const STOP_WORDS = new Set(
   'the and for with that this from have need needs want looking who can are you your our some any into about more help someone person people good new also just like make made building build work working'.split(' ')
@@ -476,6 +477,12 @@ export function getAuthHeaders(existingHeaders: Record<string, string> = {}): Re
   const headers: Record<string, string> = { ...existingHeaders };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
+  }
+  if (typeof window !== 'undefined') {
+    const adminToken = sessionStorage.getItem('kw_admin_token');
+    if (adminToken) {
+      headers['x-admin-token'] = adminToken;
+    }
   }
   return headers;
 }

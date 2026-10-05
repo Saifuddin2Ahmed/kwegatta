@@ -33,7 +33,6 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
   const filtered = allProfiles
     .filter(p => !currentProfile || p.id !== currentProfile.id)
     .filter(p => {
-      // Role / relationship filter
       if (roleFilter === 'following') return followingIds.has(p.id);
       if (roleFilter === 'followers') return followerIds.has(p.id);
       if (roleFilter === 'builder') return p.role === 'builder';
@@ -62,162 +61,172 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
     });
 
   const filterButtons = [
-    { id: 'all', label: 'Everyone' },
+    { id: 'all', label: 'All Members' },
     { id: 'following', label: 'Following' },
     { id: 'followers', label: 'Followers' },
-    { id: 'builder', label: 'Builders' },
-    { id: 'business', label: 'Business' },
-    { id: 'design', label: 'Design' }
+    { id: 'builder', label: 'Engineering' },
+    { id: 'business', label: 'Business & Venture' },
+    { id: 'design', label: 'Product & Design' }
   ];
 
   return (
-    <div className="max-w-4xl mx-auto space-y-4">
-      {/* Search and filters bar */}
-      <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-[var(--muted)]" />
-          <input
-            type="search"
-            placeholder="Search by name, skill, need, offer..."
-            value={searchQuery}
-            onChange={e => onSearchChange(e.target.value)}
-            className="primer-input pl-8 text-xs py-1.5"
-            aria-label="Search people"
-          />
+    <div className="max-w-4xl mx-auto space-y-6">
+      
+      {/* Header & Filter Controls */}
+      <div className="space-y-4 border-b border-[var(--card-border)] pb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-display font-bold text-[var(--fg)] tracking-tight">
+              Community Directory
+            </h2>
+            <p className="text-xs text-[var(--fg-muted)] mt-0.5">
+              Showing {filtered.length} {filtered.length === 1 ? 'builder' : 'builders and collaborators'}
+            </p>
+          </div>
+
+          <div className="relative w-full sm:w-72">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg-subtle)]" />
+            <input
+              type="search"
+              placeholder="Filter by name, skill, need..."
+              value={searchQuery}
+              onChange={e => onSearchChange(e.target.value)}
+              className="kw-input pl-8 text-xs py-1.5"
+              aria-label="Filter directory"
+            />
+          </div>
         </div>
 
-        <div className="flex flex-wrap gap-1 items-center">
+        {/* Role Segmented Controls */}
+        <div className="flex flex-wrap gap-1.5 items-center pt-1">
           {filterButtons.map(fb => (
             <button
               key={fb.id}
               onClick={() => setRoleFilter(fb.id as any)}
-              className={`primer-btn text-xs py-1 px-2.5 ${
-                roleFilter === fb.id ? 'primer-btn-primary' : ''
+              className={`text-xs py-1 px-2.5 rounded-md transition-colors ${
+                roleFilter === fb.id
+                  ? 'bg-[var(--fg)] text-[var(--bg)] font-semibold shadow-xs'
+                  : 'text-[var(--fg-muted)] hover:text-[var(--fg)] hover:bg-[var(--bg-subtle)]'
               }`}
             >
               {fb.label}
             </button>
           ))}
+
+          {selectedTag && (
+            <span className="inline-flex items-center gap-1.5 text-xs text-[var(--gold)] ml-2">
+              <span>#{selectedTag}</span>
+              <button
+                onClick={() => onSelectTag(null)}
+                className="hover:opacity-80 p-0.5"
+                aria-label="Clear tag"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Active tag indicator */}
-      {selectedTag && (
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-[var(--muted)]">Filtered by tag:</span>
-          <span className="primer-tag flex items-center gap-1">
-            <span>#{selectedTag}</span>
-            <button
-              onClick={() => onSelectTag(null)}
-              className="hover:text-red-400"
-              aria-label="Clear tag filter"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          </span>
-        </div>
-      )}
-
-      {/* People Count */}
-      <div className="text-xs text-[var(--muted)]">
-        Found {filtered.length} {filtered.length === 1 ? 'member' : 'members'}
-      </div>
-
-      {/* Grid of People Cards */}
+      {/* Directory Grid */}
       {filtered.length === 0 ? (
-        <div className="primer-box p-12 text-center space-y-3">
-          <h3 className="font-semibold text-sm">No members match your current filters</h3>
-          <p className="text-xs text-[var(--muted)]">Try clearing the search or tag filter to discover more builders.</p>
+        <div className="py-16 text-center space-y-3 border border-dashed border-[var(--card-border)] rounded-xl">
+          <h3 className="font-semibold text-sm text-[var(--fg)]">No members match your criteria</h3>
+          <p className="text-xs text-[var(--fg-muted)]">Try adjusting your keywords or clearing the active filter.</p>
           <button
             onClick={() => {
               onSearchChange('');
               setRoleFilter('all');
               onSelectTag(null);
             }}
-            className="primer-btn text-xs py-1 px-3"
+            className="kw-btn kw-btn-ghost text-xs py-1.5 px-3"
           >
-            Clear filters
+            Reset Filters
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filtered.map(person => {
             const isFollowing = followingIds.has(person.id);
 
             return (
               <div
                 key={person.id}
-                className="primer-box p-3.5 flex flex-col justify-between space-y-2.5 hover:border-[var(--accent)] transition-colors"
+                className="p-5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] hover:border-[var(--card-border)]/80 transition-all flex flex-col justify-between space-y-4"
               >
-                <div>
-                  <div className="flex items-start gap-3">
-                    <button
-                      onClick={() => onViewProfile(person.id)}
-                      className="flex-shrink-0"
-                    >
-                      <Avatar profile={person} className="w-10 h-10" />
-                    </button>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <button
+                        onClick={() => onViewProfile(person.id)}
+                        className="flex-shrink-0"
+                      >
+                        <Avatar profile={person} className="w-10 h-10" />
+                      </button>
+                      <div className="min-w-0">
                         <button
                           onClick={() => onViewProfile(person.id)}
-                          className="font-semibold text-xs hover:text-[var(--accent)] text-left truncate"
+                          className="font-semibold text-sm text-[var(--fg)] hover:text-[var(--gold)] transition-colors text-left truncate block"
                         >
                           {person.name}
                         </button>
-                        <span className="primer-label primer-label-blue text-[10px]">
+                        <span className="text-xs text-[var(--teal)] font-medium">
                           {person.role}
                         </span>
                       </div>
-                      <div className="text-[11px] text-[var(--muted)] truncate">
-                        {person.headline || person.offers}
-                      </div>
                     </div>
+
+                    <button
+                      onClick={() => onToggleFollow(person.id)}
+                      className="kw-btn kw-btn-ghost text-xs py-1 px-2.5 flex-shrink-0"
+                    >
+                      {isFollowing ? (
+                        <>
+                          <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Following</span>
+                        </>
+                      ) : (
+                        <>
+                          <UserPlus className="w-3.5 h-3.5" />
+                          <span>Follow</span>
+                        </>
+                      )}
+                    </button>
                   </div>
 
-                  {/* Needs summary */}
-                  <div className="mt-2.5 text-xs text-[var(--muted)] bg-[var(--subtle)] p-2 rounded border border-[var(--border-muted)] line-clamp-2">
-                    <strong className="text-[var(--fg)]">Needs:</strong> {person.needs}
-                  </div>
+                  {/* Bio / Headline */}
+                  <p className="text-xs text-[var(--fg-muted)] leading-relaxed line-clamp-2">
+                    {person.headline || person.offers}
+                  </p>
 
-                  {/* Tags */}
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {person.tags?.slice(0, 4).map(t => (
+                  {/* Looking for */}
+                  {person.needs && (
+                    <div className="text-xs text-[var(--fg-muted)] bg-[var(--bg-subtle)] p-2.5 rounded-lg">
+                      <span className="text-[var(--fg)] font-medium">Looking for: </span>
+                      <span>{person.needs}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer tags and profile link */}
+                <div className="flex items-center justify-between gap-2 pt-2 border-t border-[var(--card-border)]/50 text-xs">
+                  <div className="flex flex-wrap gap-2 text-[11px] text-[var(--fg-subtle)]">
+                    {person.tags?.slice(0, 3).map(t => (
                       <button
                         key={t}
                         onClick={() => onSelectTag(t)}
-                        className="primer-tag text-[10px]"
+                        className="hover:text-[var(--fg)] transition-colors"
                       >
                         #{t}
                       </button>
                     ))}
                   </div>
-                </div>
 
-                {/* Follow Button & Profile link */}
-                <div className="flex items-center justify-between pt-2 border-t border-[var(--border-muted)]">
                   <button
                     onClick={() => onViewProfile(person.id)}
-                    className="text-xs text-[var(--accent)] hover:underline"
+                    className="text-xs font-medium text-[var(--gold)] hover:underline"
                   >
                     View profile
-                  </button>
-
-                  <button
-                    onClick={() => onToggleFollow(person.id)}
-                    className="primer-btn text-xs py-1 px-3"
-                  >
-                    {isFollowing ? (
-                      <>
-                        <UserCheck className="w-3.5 h-3.5 text-[var(--success)]" />
-                        <span>Following</span>
-                      </>
-                    ) : (
-                      <>
-                        <UserPlus className="w-3.5 h-3.5 text-[var(--muted)]" />
-                        <span>Follow</span>
-                      </>
-                    )}
                   </button>
                 </div>
               </div>
