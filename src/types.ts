@@ -1,4 +1,14 @@
-export type Role = 'builder' | 'business' | 'design' | 'other';
+export type Role =
+  | 'Founder'
+  | 'Business'
+  | 'Developer'
+  | 'Designer'
+  | 'Domain expert'
+  | 'Mentor'
+  | 'Student'
+  | 'builder'
+  | 'design'
+  | 'other';
 
 export interface GitHubRepo {
   name: string;
@@ -19,7 +29,12 @@ export interface GitHubData {
 export interface Profile {
   id: string;
   name: string;
-  role: Role;
+  role: Role | string;
+  roles?: string[];
+  intent?: string;
+  stage?: string;
+  location?: string;
+  hours_per_week?: string;
   headline: string;
   bio: string;
   offers: string;
@@ -30,6 +45,7 @@ export interface Profile {
   skills: string[];
   github?: string;
   linkedin?: string;
+  website?: string;
   whatsapp?: string;
   hide_whatsapp?: boolean;
   has_whatsapp?: boolean;
@@ -38,6 +54,20 @@ export interface Profile {
   is_demo?: boolean;
   created_at: string;
   gh?: GitHubData | null;
+  blocked_ids?: string[];
+  hidden?: boolean;
+}
+
+export interface ReportItem {
+  id: string;
+  reporter_id: string;
+  reporter_name: string;
+  reported_id: string;
+  reported_name: string;
+  reason: string;
+  details?: string;
+  created_at: string;
+  status?: 'pending' | 'resolved' | 'dismissed';
 }
 
 export interface MatchResult {
@@ -46,6 +76,7 @@ export interface MatchResult {
   reason: string;
   spark?: string;
   icebreaker?: string;
+  matchType?: 'quick' | 'ai';
 }
 
 export interface LearnMatchResult {

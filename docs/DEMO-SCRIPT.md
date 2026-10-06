@@ -16,11 +16,11 @@
 
 > *(Presenter opens https://kwegatta.ai.studio on a phone or screen)*
 >
-> *"Joining Kwegatta takes under 60 seconds. Our conversational guide asks one question at a time: your name, what you offer, what you need, what you can teach, and what you want to learn. You can also paste your GitHub username.*
+> *"Joining Kwegatta takes about 2 minutes. Our conversational guide asks one question at a time: your name, what you offer, what you need, what you can teach, and what you want to learn. You can also paste your GitHub username.*
 >
 > *(Demonstrates typing: 'Amina Nakato', Offers: 'Market research, financial modeling, B2B sales', Needs: 'Flutter mobile developer')*
 >
-> *Watch what happens next: The open-weight model **gemma-4-31b-it** processes these facts on our server. It writes a crisp headline, a two-sentence first-person bio, tags, and role. Notice our hard constraint: **Gemma uses only the facts Amina provided**. It never invents degrees, awards, or fake companies. Amina can click 'Looks good' or ask Gemma to rewrite it."*
+> *Watch what happens next: The open-weight model **gemma-4-26b-a4b-it** processes these facts on our server. It writes a crisp headline, a two-sentence first-person bio, tags, and role. Notice our hard constraint: **Gemma uses only the facts Amina provided**. It never invents degrees, awards, or fake companies. Amina can click 'Looks good' or ask Gemma to rewrite it."*
 
 ---
 

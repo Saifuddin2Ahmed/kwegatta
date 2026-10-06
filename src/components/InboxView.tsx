@@ -85,7 +85,7 @@ export const InboxView: React.FC<InboxViewProps> = ({
             <Bell className="w-8 h-8 text-[var(--muted)] mx-auto opacity-40" />
             <h3 className="font-semibold text-sm">No notifications yet</h3>
             <p className="text-xs text-[var(--muted)]">
-              You will get an alert here when a new builder matches your needs, follows you, or reaches out to collaborate.
+              You will get an alert here when another member matches your needs, follows you, or reaches out to collaborate.
             </p>
           </div>
         ) : (

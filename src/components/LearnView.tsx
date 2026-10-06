@@ -89,8 +89,8 @@ export const LearnView: React.FC<LearnViewProps> = ({
           </h2>
           <p className="text-xs text-[var(--fg-muted)] mt-0.5">
             {currentProfile
-              ? `Matched based on what you teach and your stated learning goals (${currentProfile.learns || 'general engineering'})`
-              : 'Discover what builders in the community are teaching and looking to learn.'}
+              ? `Matched based on what you teach and your stated learning goals (${currentProfile.learns || 'your goals'})`
+              : 'Discover what people in the community are teaching and looking to learn.'}
           </p>
         </div>
 
@@ -119,7 +119,7 @@ export const LearnView: React.FC<LearnViewProps> = ({
                   Find your personal mentor &amp; study partner
                 </h3>
                 <p className="text-xs sm:text-sm text-[var(--fg-muted)] leading-relaxed">
-                  Join Kwegatta in 60 seconds. Our open-weight Gemma 4 model matches you with one peer who teaches what you want to learn, and one study buddy sharing your exact goal.
+                  Join Kwegatta in about 2 minutes. Our open-weight Gemma 4 model matches you with one peer who teaches what you want to learn, and one study buddy sharing your exact goal.
                 </p>
               </div>
             </div>
@@ -132,7 +132,7 @@ export const LearnView: React.FC<LearnViewProps> = ({
                 }}
                 className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold"
               >
-                Join &amp; Get Matched in 60s
+                Get matched in about 2 minutes
               </button>
             </div>
           </div>
@@ -153,7 +153,7 @@ export const LearnView: React.FC<LearnViewProps> = ({
                     <Avatar profile={profile} className="w-9 h-9" />
                     <div className="min-w-0">
                       <p className="font-semibold text-xs text-[var(--fg)] truncate">{profile.name}</p>
-                      <p className="text-[11px] text-[var(--fg-muted)] truncate">{profile.role || 'Builder'}</p>
+                      <p className="text-[11px] text-[var(--fg-muted)] truncate">{profile.role || 'Member'}</p>
                     </div>
                   </div>
                   <div className="text-xs bg-[var(--teal-subtle)] text-[var(--teal)] p-2 rounded-lg font-medium border border-[var(--teal)]/20">

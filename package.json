@@ -1,6 +1,6 @@
 {
   "name": "kwegatta",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Network where students and builders match by what they need and offer using the open-weight Gemma 4 model.",
   "license": "MIT",
   "repository": {
@@ -31,6 +31,7 @@
     "canvas-confetti": "^1.9.4",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "firebase-admin": "^14.5.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "qrcode": "^1.5.4",

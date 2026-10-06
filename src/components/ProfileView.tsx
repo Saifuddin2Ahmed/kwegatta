@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles,
   Link as LinkIcon,
@@ -14,6 +14,7 @@ import {
   UserCheck,
   Zap,
   Camera,
+  Upload,
   Share2,
   Award,
   Maximize2,
@@ -21,7 +22,14 @@ import {
   GitFork,
   Download,
   Trash2,
-  AlertCircle
+  AlertCircle,
+  Flag,
+  Ban,
+  Globe,
+  MapPin,
+  Clock,
+  Compass,
+  Layers
 } from 'lucide-react';
 import { Profile, MatchResult } from '../types';
 import {
@@ -30,7 +38,8 @@ import {
   db,
   exportMemberData,
   deleteMemberProfile,
-  requestMemberConnect
+  requestMemberConnect,
+  reportMember
 } from '../services/api';
 import { generateQrCodeDataUrl, formatWhatsAppUrl, resizeImageFile } from '../utils';
 import { Avatar } from './Avatar';
@@ -69,6 +78,23 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmDeleteInput, setConfirmDeleteInput] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
+
+  // Photo state machine: preview at once -> processing -> photo saved -> error with try again
+  const [photoStatus, setPhotoStatus] = useState<'idle' | 'processing' | 'saved' | 'error'>('idle');
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const [photoErrorMsg, setPhotoErrorMsg] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const selfieInputRef = useRef<HTMLInputElement>(null);
+
+  // Safety: Report & Block state
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState('Inappropriate content or offensive language');
+  const [reportDetails, setReportDetails] = useState('');
+  const [isReporting, setIsReporting] = useState(false);
+  const [showBlockModal, setShowBlockModal] = useState(false);
+  const isBlocked = Boolean(currentProfile?.blocked_ids?.includes(profile.id));
+  const isBlockedByThem = Boolean(currentProfile && profile.blocked_ids?.includes(currentProfile.id));
 
   // Edit form state
   const [editHeadline, setEditHeadline] = useState(profile.headline || '');
@@ -137,18 +163,86 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     }
   };
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+  const handlePhotoFile = async (file: File) => {
     if (!file) return;
 
+    // 1. Show preview at once
+    const tempUrl = URL.createObjectURL(file);
+    setPhotoPreviewUrl(tempUrl);
+    setPhotoStatus('processing');
+    setPhotoErrorMsg(null);
+
     try {
+      // 2. Resize and store with profile in Firestore
       const resized = await resizeImageFile(file);
-      const updated = { ...profile, avatar: resized };
+      URL.revokeObjectURL(tempUrl);
+      setPhotoPreviewUrl(resized);
+
+      const updated: Profile = { ...profile, avatar: resized };
       await db.update('profiles', profile.id, { avatar: resized });
       onUpdateProfile(updated);
-      onToast('Profile photo updated');
-    } catch (err) {
-      onToast('Failed to update photo');
+      setPhotoStatus('saved');
+      onToast('Photo saved');
+    } catch (err: any) {
+      setPhotoStatus('error');
+      setPhotoErrorMsg('Could not save photo. Try again.');
+      onToast('Failed to process image. Try again.');
+    }
+  };
+
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handlePhotoFile(file);
+    }
+    // reset input value so re-selecting same photo triggers onChange
+    e.target.value = '';
+  };
+
+  const handleSubmitReport = async () => {
+    if (!reportReason) return;
+    setIsReporting(true);
+    try {
+      const res = await reportMember(profile.id, reportReason, reportDetails);
+      if (res.success) {
+        onToast('Report submitted to admin for review.');
+        setShowReportModal(false);
+        setReportDetails('');
+      } else {
+        onToast(res.error || 'Failed to submit report');
+      }
+    } catch (err: any) {
+      onToast('Error submitting report: ' + err.message);
+    } finally {
+      setIsReporting(false);
+    }
+  };
+
+  const handleConfirmBlock = async () => {
+    if (!currentProfile) return;
+    try {
+      const existingBlocked = currentProfile.blocked_ids || [];
+      const updatedBlocked = Array.from(new Set([...existingBlocked, profile.id]));
+      await db.update('profiles', currentProfile.id, { blocked_ids: updatedBlocked });
+      onUpdateProfile({ ...currentProfile, blocked_ids: updatedBlocked });
+      setShowBlockModal(false);
+      onToast(`${profile.name.split(' ')[0]} has been blocked.`);
+      window.location.hash = '#/people';
+    } catch (err: any) {
+      onToast('Failed to block member');
+    }
+  };
+
+  const handleUnblock = async () => {
+    if (!currentProfile) return;
+    try {
+      const existingBlocked = currentProfile.blocked_ids || [];
+      const updatedBlocked = existingBlocked.filter(id => id !== profile.id);
+      await db.update('profiles', currentProfile.id, { blocked_ids: updatedBlocked });
+      onUpdateProfile({ ...currentProfile, blocked_ids: updatedBlocked });
+      onToast(`${profile.name.split(' ')[0]} unblocked.`);
+    } catch (err: any) {
+      onToast('Failed to unblock member');
     }
   };
 
@@ -361,7 +455,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           <div className="flex flex-col items-center md:items-start text-center md:text-left">
             <div className="relative group">
               <Avatar
-                profile={profile}
+                profile={photoPreviewUrl ? { ...profile, avatar: photoPreviewUrl } : profile}
                 size="3xl"
                 className="w-40 h-40 md:w-56 md:h-56 shadow-md"
               />
@@ -377,6 +471,50 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </label>
               )}
             </div>
+
+            {/* Requirement 4: On "My profile", make "Change photo" a visible button */}
+            {isMine && (
+              <div className="mt-2.5">
+                <label className="primer-btn text-xs py-1.5 px-3.5 flex items-center gap-1.5 cursor-pointer font-medium hover:border-[var(--gold)] active:scale-95 transition-all">
+                  <Camera className="w-3.5 h-3.5 text-[var(--gold)]" />
+                  <span>Change photo</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handlePhotoUpload}
+                    hidden
+                  />
+                </label>
+              </div>
+            )}
+
+            {/* Photo upload status feedback */}
+            {photoStatus === 'processing' && (
+              <div className="mt-2 text-xs font-semibold text-[var(--accent)] flex items-center gap-1.5 animate-pulse">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>Processing…</span>
+              </div>
+            )}
+            {photoStatus === 'saved' && (
+              <div className="mt-2 text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                <Check className="w-3.5 h-3.5" />
+                <span>Photo saved</span>
+              </div>
+            )}
+            {photoStatus === 'error' && (
+              <div className="mt-2 text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-2">
+                <span>{photoErrorMsg || 'Could not save photo.'}</span>
+                <label className="underline hover:no-underline font-bold cursor-pointer">
+                  <span>Try again</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handlePhotoUpload}
+                    hidden
+                  />
+                </label>
+              </div>
+            )}
 
             <div className="mt-3">
               <h1 className="text-xl font-bold text-[var(--fg)] leading-snug">{profile.name}</h1>
@@ -430,40 +568,125 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </button>
               </div>
             ) : (
-              <div className="flex gap-2">
-                <button
-                  onClick={handleConnectWhatsApp}
-                  disabled={isConnecting}
-                  className="primer-btn primer-btn-primary text-xs py-1.5 flex-1"
-                >
-                  <MessageCircle className="w-3.5 h-3.5" />
-                  <span>
-                    {isConnecting
-                      ? 'Connecting...'
-                      : profile.whatsapp || (profile as any).has_whatsapp
-                      ? 'Connect (WhatsApp)'
-                      : profile.linkedin
-                      ? 'Connect (LinkedIn)'
-                      : 'Connect'}
-                  </span>
-                </button>
+              <div className="space-y-2">
+                {isBlocked && (
+                  <div className="p-2.5 rounded-xl bg-[var(--danger-subtle)] border border-[var(--danger)]/30 text-xs flex items-center justify-between text-[var(--danger)]">
+                    <span className="font-medium">You have blocked this member</span>
+                    <button onClick={handleUnblock} className="underline font-bold cursor-pointer">
+                      Unblock
+                    </button>
+                  </div>
+                )}
 
-                <button
-                  onClick={onToggleFollow}
-                  className="primer-btn text-xs py-1.5 px-3"
-                >
-                  {isFollowing ? (
-                    <>
-                      <UserCheck className="w-3.5 h-3.5 text-[var(--success)]" />
-                      <span>Following</span>
-                    </>
-                  ) : (
-                    <>
-                      <UserPlus className="w-3.5 h-3.5 text-[var(--muted)]" />
-                      <span>Follow</span>
-                    </>
-                  )}
-                </button>
+                <div className="flex items-center gap-2 relative">
+                  <button
+                    onClick={handleConnectWhatsApp}
+                    disabled={isConnecting}
+                    className="primer-btn primer-btn-primary text-xs py-1.5 flex-1"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    <span>
+                      {isConnecting
+                        ? 'Connecting...'
+                        : profile.whatsapp || (profile as any).has_whatsapp
+                        ? 'Connect (WhatsApp)'
+                        : profile.linkedin
+                        ? 'Connect (LinkedIn)'
+                        : 'Connect'}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={onToggleFollow}
+                    className="primer-btn text-xs py-1.5 px-3"
+                  >
+                    {isFollowing ? (
+                      <>
+                        <UserCheck className="w-3.5 h-3.5 text-[var(--success)]" />
+                        <span>Following</span>
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus className="w-3.5 h-3.5 text-[var(--muted)]" />
+                        <span>Follow</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Requirement 1: "More" menu next to Connect and Follow with Report and Block */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowMoreMenu(!showMoreMenu)}
+                      className="primer-btn text-xs py-1.5 px-2.5 flex items-center gap-1 cursor-pointer"
+                      title="More actions"
+                      aria-label="More actions"
+                    >
+                      <span>More</span>
+                      <span className="text-[10px]">▾</span>
+                    </button>
+
+                    {showMoreMenu && (
+                      <div className="absolute right-0 top-full mt-1.5 w-44 bg-[var(--card)] border border-[var(--card-border)] rounded-xl shadow-2xl z-40 py-1.5 text-xs animate-in fade-in zoom-in-95">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            handleShareLink();
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-[var(--fg)] cursor-pointer"
+                        >
+                          <Share2 className="w-3.5 h-3.5 text-[var(--fg-muted)]" />
+                          <span>Share profile</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            setShowReportModal(true);
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-red-500 hover:text-red-600 font-medium cursor-pointer"
+                        >
+                          <Flag className="w-3.5 h-3.5 text-red-500" />
+                          <span>Report profile</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMoreMenu(false);
+                            if (isBlocked) handleUnblock();
+                            else setShowBlockModal(true);
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-[var(--fg-muted)] hover:text-red-500 cursor-pointer"
+                        >
+                          <Ban className="w-3.5 h-3.5" />
+                          <span>{isBlocked ? 'Unblock member' : 'Block member'}</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Direct visible safety actions */}
+                <div className="flex items-center gap-3 pt-1 text-[11px] text-[var(--fg-muted)]">
+                  <button
+                    type="button"
+                    onClick={() => setShowReportModal(true)}
+                    className="hover:text-red-500 flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <Flag className="w-3 h-3 text-red-500/80" />
+                    <span>Report profile</span>
+                  </button>
+                  <span>·</span>
+                  <button
+                    type="button"
+                    onClick={() => isBlocked ? handleUnblock() : setShowBlockModal(true)}
+                    className="hover:text-red-500 flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <Ban className="w-3 h-3" />
+                    <span>{isBlocked ? 'Unblock' : 'Block'}</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -776,7 +999,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       <option>Looking for a co-founder</option>
                       <option>Looking for a team</option>
                       <option>Looking for a mentor</option>
-                      <option>Hiring builders</option>
+                      <option>Looking for collaborators</option>
                     </select>
                   </div>
                   <div>
@@ -975,6 +1198,133 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* Report Modal */}
+      {showReportModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="kw-card p-6 max-w-md w-full bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+              <div className="flex items-center gap-2 text-[var(--danger)] font-bold text-sm">
+                <Flag className="w-4 h-4 text-red-500" />
+                <span>Report {profile.name}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReportModal(false)}
+                className="text-[var(--fg-muted)] hover:text-[var(--fg)] p-1 rounded-md cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-[var(--fg-muted)] leading-relaxed">
+              Reports are sent directly to the organizer dashboard for review. False reports or harassment violate our Code of Conduct.
+            </p>
+
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-[var(--fg)]">Reason for report</label>
+              <select
+                value={reportReason}
+                onChange={e => setReportReason(e.target.value)}
+                className="w-full p-2.5 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] text-xs text-[var(--fg)] focus:outline-none focus:border-[var(--gold)]"
+              >
+                <option>Inappropriate content or offensive language</option>
+                <option>Spam, advertising, or unsolicited promotion</option>
+                <option>Fake identity, impersonation, or deceptive credentials</option>
+                <option>Harassment, threats, or safety concern</option>
+                <option>Other policy violation</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-[var(--fg)]">Additional context (optional)</label>
+              <textarea
+                value={reportDetails}
+                onChange={e => setReportDetails(e.target.value)}
+                placeholder="Describe what occurred or paste relevant details..."
+                rows={3}
+                className="w-full p-2.5 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] text-xs text-[var(--fg)] focus:outline-none focus:border-[var(--gold)] resize-none"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-[var(--card-border)]">
+              <button
+                type="button"
+                onClick={() => setShowReportModal(false)}
+                className="kw-btn kw-btn-ghost text-xs py-2 px-3.5 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isReporting}
+                onClick={handleSubmitReport}
+                className="kw-btn text-xs py-2 px-4 bg-red-600 hover:bg-red-700 text-white font-semibold flex items-center gap-1.5 cursor-pointer"
+              >
+                {isReporting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Submitting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Flag className="w-3.5 h-3.5" />
+                    <span>Submit Report</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Block Modal */}
+      {showBlockModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="kw-card p-6 max-w-md w-full bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+              <div className="flex items-center gap-2 text-[var(--fg)] font-bold text-sm">
+                <Ban className="w-4 h-4 text-red-500" />
+                <span>Block {profile.name}?</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBlockModal(false)}
+                className="text-[var(--fg-muted)] hover:text-[var(--fg)] p-1 rounded-md cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-[var(--fg-muted)] leading-relaxed">
+              When you block <strong>{profile.name}</strong>:
+            </p>
+            <ul className="text-xs text-[var(--fg-muted)] list-disc pl-5 space-y-1">
+              <li>They will not appear in your recommended matches.</li>
+              <li>They cannot connect with you via WhatsApp or notifications.</li>
+              <li>Their posts will be filtered from your collaborative feed.</li>
+            </ul>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-[var(--card-border)]">
+              <button
+                type="button"
+                onClick={() => setShowBlockModal(false)}
+                className="kw-btn kw-btn-ghost text-xs py-2 px-3.5 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBlock}
+                className="kw-btn text-xs py-2 px-4 bg-red-600 hover:bg-red-700 text-white font-semibold flex items-center gap-1.5 cursor-pointer"
+              >
+                <Ban className="w-3.5 h-3.5" />
+                <span>Block Member</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,6 +1,6 @@
 {
   "name": "kwegatta-gemma-proxy",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Secure server proxy for Gemma 4 open-weight model",
   "main": "index.js",
   "license": "MIT",

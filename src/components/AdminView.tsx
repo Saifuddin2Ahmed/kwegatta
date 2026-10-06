@@ -24,7 +24,8 @@ import {
   ChevronRight,
   Settings,
   Camera,
-  Upload
+  Upload,
+  Flag
 } from 'lucide-react';
 import { Profile, Post } from '../types';
 import { SetupView } from './SetupView';
@@ -73,16 +74,19 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [isVerifying, setIsVerifying] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'members' | 'posts' | 'photos' | 'ai' | 'tools' | 'setup' | 'audit'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'members' | 'reports' | 'posts' | 'photos' | 'ai' | 'tools' | 'setup' | 'audit'>('overview');
   const photos = useEventPhotos();
   const [overview, setOverview] = useState<AdminOverviewData | null>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [posts, setPosts] = useState<any[]>([]);
+  const [reports, setReports] = useState<any[]>([]);
   const [auditLog, setAuditLog] = useState<any[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
 
   // Search & Filter state
   const [memberSearch, setMemberSearch] = useState('');
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [isImporting, setIsImporting] = useState(false);
   const [revealedPhones, setRevealedPhones] = useState<Set<string>>(new Set());
 
   // Announcement state
@@ -133,11 +137,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
     try {
       const headers = { 'x-admin-token': adminToken };
-      const [ovRes, memRes, postRes, logRes] = await Promise.all([
+      const [ovRes, memRes, postRes, logRes, repRes] = await Promise.all([
         fetch('/api/admin/overview', { headers }),
         fetch('/api/admin/members', { headers }),
         fetch('/api/admin/posts', { headers }),
-        fetch('/api/admin/audit-log', { headers })
+        fetch('/api/admin/audit-log', { headers }),
+        fetch('/api/admin/reports', { headers })
       ]);
 
       if (ovRes.status === 401 || memRes.status === 401) {
@@ -149,6 +154,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       if (memRes.ok) setMembers(await memRes.json());
       if (postRes.ok) setPosts(await postRes.json());
       if (logRes.ok) setAuditLog(await logRes.json());
+      if (repRes.ok) setReports(await repRes.json());
     } catch (err: any) {
       setErrorMsg(err.message);
     } finally {
@@ -223,6 +229,59 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const handleExport = (type: 'members' | 'matches', format: 'csv' | 'json') => {
     if (!adminToken) return;
     window.open(`/api/admin/export?type=${type}&format=${format}&token=${encodeURIComponent(adminToken)}`, '_blank');
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsImporting(true);
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+
+      const res = await fetch('/api/admin/import', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': adminToken || ''
+        },
+        body: JSON.stringify(parsed)
+      });
+
+      const result = await res.json();
+      if (!res.ok) {
+        throw new Error(result.error || 'Import failed');
+      }
+
+      onToast(`✅ Successfully restored ${result.count} member profiles!`);
+      onRefreshGlobalData();
+    } catch (err: any) {
+      onToast(`❌ Import error: ${err.message}`);
+    } finally {
+      setIsImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleReportAction = async (reportId: string, action: 'dismiss' | 'resolve') => {
+    if (!adminToken) return;
+    try {
+      const res = await fetch(`/api/admin/reports/${reportId}/action`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': adminToken
+        },
+        body: JSON.stringify({ action })
+      });
+      if (res.ok) {
+        onToast(`Report marked as ${action}d`);
+        setReports(prev => prev.map(r => r.id === reportId ? { ...r, status: action === 'dismiss' ? 'dismissed' : 'resolved' } : r));
+      }
+    } catch (e: any) {
+      onToast('Action failed: ' + e.message);
+    }
   };
 
   // 1. Passcode Login View if unauthenticated
@@ -341,6 +400,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         {[
           { id: 'overview', label: 'Overview & Insights', icon: BarChart3 },
           { id: 'members', label: `Members (${overview?.members_count || 0})`, icon: Users },
+          { id: 'reports', label: `Safety Reports (${reports.filter(r => r.status === 'pending').length})`, icon: Flag },
           { id: 'posts', label: `Feed Posts (${overview?.posts_count || 0})`, icon: MessageSquare },
           { id: 'photos', label: 'Event Photos', icon: Camera },
           { id: 'ai', label: 'AI Health (Gemma 4)', icon: Cpu },
@@ -566,6 +626,113 @@ export const AdminView: React.FC<AdminViewProps> = ({
         </div>
       )}
 
+      {/* TAB: SAFETY & ABUSE REPORTS */}
+      {activeTab === 'reports' && (
+        <div className="p-5 kw-card space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[var(--card-border)] pb-3">
+            <div>
+              <h3 className="font-bold font-display text-sm text-[var(--fg)]">Safety & Abuse Reports</h3>
+              <p className="text-xs text-[var(--fg-muted)]">
+                Reports submitted by members with reasons and contextual details.
+              </p>
+            </div>
+            <span className="kw-badge kw-badge-gold text-xs">
+              {reports.filter(r => r.status === 'pending').length} Pending
+            </span>
+          </div>
+
+          {reports.length === 0 ? (
+            <div className="p-8 text-center space-y-2 border border-dashed border-[var(--card-border)] rounded-xl">
+              <ShieldCheck className="w-8 h-8 text-emerald-400 mx-auto" />
+              <h4 className="text-xs font-semibold text-[var(--fg)]">No safety reports recorded</h4>
+              <p className="text-[11px] text-[var(--fg-muted)]">All community interactions are running smoothly.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-[var(--card-border)]">
+              {reports.map((report: any) => {
+                const reported = members.find(m => m.id === report.reported_id);
+                return (
+                  <div key={report.id} className="py-4 flex flex-col md:flex-row md:items-start justify-between gap-4">
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                          report.status === 'pending'
+                            ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20'
+                            : report.status === 'resolved'
+                            ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                            : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20'
+                        }`}>
+                          {report.status || 'pending'}
+                        </span>
+                        <span className="font-semibold text-xs text-[var(--fg)]">
+                          Reason: <strong className="text-[var(--gold)]">{report.reason}</strong>
+                        </span>
+                        <span className="text-[11px] text-[var(--fg-muted)]">
+                          · {new Date(report.created_at).toLocaleString()}
+                        </span>
+                      </div>
+
+                      <div className="text-xs text-[var(--fg-muted)] flex items-center gap-2">
+                        <span>Reported Member:</span>
+                        {reported ? (
+                          <span className="font-semibold text-[var(--fg)]">
+                            {reported.name} ({reported.role})
+                          </span>
+                        ) : (
+                          <span className="font-mono text-[var(--fg-subtle)]">{report.reported_id}</span>
+                        )}
+                        {report.reporter_name && (
+                          <span>· Reported by: {report.reporter_name}</span>
+                        )}
+                      </div>
+
+                      {report.details && (
+                        <div className="p-2.5 rounded-lg bg-[var(--bg-subtle)] border border-[var(--card-border)] text-xs text-[var(--fg)] font-sans">
+                          {report.details}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {report.status === 'pending' && (
+                        <>
+                          <button
+                            onClick={() => handleReportAction(report.id, 'resolve')}
+                            className="kw-btn kw-btn-teal text-xs py-1 px-2.5 flex items-center gap-1"
+                          >
+                            <span>Resolve</span>
+                          </button>
+                          <button
+                            onClick={() => handleReportAction(report.id, 'dismiss')}
+                            className="kw-btn text-xs py-1 px-2.5"
+                          >
+                            <span>Dismiss</span>
+                          </button>
+                        </>
+                      )}
+                      {reported && (
+                        <button
+                          onClick={() => {
+                            if (confirm(`Delete reported member ${reported.name} and purge their data?`)) {
+                              handleAdminAction('delete_member', { id: reported.id });
+                              handleReportAction(report.id, 'resolve');
+                            }
+                          }}
+                          className="kw-btn kw-btn-danger text-xs py-1 px-2.5 flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>Delete Member</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* TAB 3: POSTS MODERATION */}
       {activeTab === 'posts' && (
         <div className="p-5 kw-card space-y-4">
@@ -640,7 +807,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--gold-subtle)] text-[var(--gold)] font-bold">Slot 1</span>
                 </div>
                 <p className="text-xs text-[var(--fg-muted)]">
-                  Displayed on the home landing page hero right beside the headline and 60-second onboarding button.
+                  Displayed on the home landing page hero right beside the headline and 2-minute onboarding button.
                 </p>
               </div>
               <button
@@ -832,6 +999,36 @@ export const AdminView: React.FC<AdminViewProps> = ({
               >
                 Export Matches (JSON)
               </button>
+            </div>
+          </div>
+
+          {/* Import Data */}
+          <div className="p-5 kw-card space-y-3">
+            <h3 className="font-bold font-display text-sm flex items-center gap-2">
+              <Upload className="w-4 h-4 text-[var(--teal)]" />
+              <span>Organiser Member Import</span>
+            </h3>
+            <p className="text-xs text-[var(--fg-muted)]">
+              Restore member profiles with preserved IDs from a previously exported <code className="px-1 py-0.5 rounded bg-[var(--gold-subtle)] text-[11px]">kwegatta-members.json</code> backup file.
+            </p>
+            <div className="pt-2">
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept=".json,application/json"
+                onChange={handleImportFile}
+                className="hidden"
+                id="admin-import-file-input"
+              />
+              <label
+                htmlFor="admin-import-file-input"
+                className={`kw-btn text-xs py-1.5 px-3 inline-flex items-center gap-1.5 cursor-pointer ${
+                  isImporting ? 'opacity-50 pointer-events-none' : ''
+                }`}
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>{isImporting ? 'Importing members...' : 'Import Members (JSON Backup)'}</span>
+              </label>
             </div>
           </div>
         </div>

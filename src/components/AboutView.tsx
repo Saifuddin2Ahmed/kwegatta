@@ -276,14 +276,16 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
 
           <div className="md:col-span-8 space-y-5 text-sm text-[var(--fg-muted)] leading-relaxed">
             <p>
-              Kwegatta is powered strictly by the open-weight model <strong className="text-[var(--fg)]">gemma-4-31b-it</strong> from Google DeepMind. Closed proprietary APIs are excluded to ensure complete community sovereignty, permanent auditability, and zero vendor lock-in.
+              Kwegatta is powered strictly by open-weight models from Google DeepMind, with <strong className="text-[var(--fg)]">gemma-4-26b-a4b-it</strong> as the default production model for sub-second profile synthesis and matchmaking, and <strong className="text-[var(--fg)]">gemma-4-31b-it</strong> as the designated high-capacity alternative. Closed proprietary APIs are excluded to ensure complete community sovereignty, permanent auditability, and zero vendor lock-in.
             </p>
             <p>
               AI does not replace human relationship-building; it reduces the search friction so real people can connect faster.
             </p>
 
             <div className="pt-2 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-[var(--fg-subtle)] font-mono">
-              <span>Model: gemma-4-31b-it</span>
+              <span>Default: gemma-4-26b-a4b-it</span>
+              <span>·</span>
+              <span>Alternative: gemma-4-31b-it</span>
               <span>·</span>
               <span>Licence: Apache 2.0</span>
               <span>·</span>
@@ -302,7 +304,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
               The Team
             </h2>
             <p className="text-xs sm:text-sm text-[var(--fg-muted)] mt-1">
-              Builders, researchers, and community organizers from Kampala, Uganda.
+              Founders, creators, researchers, and community organizers from Kampala, Uganda.
             </p>
           </div>
         </div>

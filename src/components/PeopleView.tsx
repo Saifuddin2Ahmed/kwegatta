@@ -28,17 +28,16 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
   selectedTag,
   onSelectTag
 }) => {
-  const [roleFilter, setRoleFilter] = useState<'all' | 'following' | 'followers' | 'builder' | 'business' | 'design'>('all');
+  const [roleFilter, setRoleFilter] = useState<'all' | 'following' | 'followers' | 'Founder' | 'Business' | 'Developer' | 'Designer' | 'Domain expert' | 'Mentor' | 'Student' | string>('all');
 
   const filtered = allProfiles
     .filter(p => !currentProfile || p.id !== currentProfile.id)
     .filter(p => {
+      if (roleFilter === 'all') return true;
       if (roleFilter === 'following') return followingIds.has(p.id);
       if (roleFilter === 'followers') return followerIds.has(p.id);
-      if (roleFilter === 'builder') return p.role === 'builder';
-      if (roleFilter === 'business') return p.role === 'business';
-      if (roleFilter === 'design') return p.role === 'design';
-      return true;
+      const memberRoles = (p.roles && p.roles.length > 0) ? p.roles : [p.role];
+      return memberRoles.some(r => r?.toLowerCase() === roleFilter.toLowerCase() || (roleFilter === 'Developer' && r?.toLowerCase() === 'builder'));
     })
     .filter(p => {
       if (!selectedTag) return true;
@@ -52,8 +51,12 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
         p.headline,
         p.offers,
         p.needs,
+        p.intent || '',
+        p.stage || '',
+        p.location || '',
         p.teaches || '',
         p.learns || '',
+        ...(p.roles || []),
         ...(p.tags || []),
         ...(p.skills || [])
       ].join(' ').toLowerCase();
@@ -61,12 +64,16 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
     });
 
   const filterButtons = [
-    { id: 'all', label: 'All Members' },
+    { id: 'all', label: 'All People' },
     { id: 'following', label: 'Following' },
     { id: 'followers', label: 'Followers' },
-    { id: 'builder', label: 'Engineering' },
-    { id: 'business', label: 'Business & Venture' },
-    { id: 'design', label: 'Product & Design' }
+    { id: 'Founder', label: 'Founders' },
+    { id: 'Business', label: 'Business' },
+    { id: 'Developer', label: 'Developers' },
+    { id: 'Designer', label: 'Designers' },
+    { id: 'Mentor', label: 'Mentors' },
+    { id: 'Domain expert', label: 'Domain Experts' },
+    { id: 'Student', label: 'Students' }
   ];
 
   return (
@@ -80,7 +87,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
               Community Directory
             </h2>
             <p className="text-xs text-[var(--fg-muted)] mt-0.5">
-              Showing {filtered.length} {filtered.length === 1 ? 'builder' : 'builders and collaborators'}
+              Showing {filtered.length} {filtered.length === 1 ? 'person' : 'people and collaborators'}
             </p>
           </div>
 

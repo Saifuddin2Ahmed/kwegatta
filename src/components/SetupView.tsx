@@ -15,7 +15,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
 }) => {
   const [testResult, setTestResult] = useState<string | null>(null);
   const [isTesting, setIsTesting] = useState(false);
-  const [serverConfig, setServerConfig] = useState<{ model?: string; hasServerApiKey?: boolean } | null>(null);
+  const [serverConfig, setServerConfig] = useState<{ model?: string; hasServerApiKey?: boolean; storage?: string } | null>(null);
 
   useEffect(() => {
     fetch('/api/config')
@@ -108,6 +108,15 @@ export const SetupView: React.FC<SetupViewProps> = ({
               {serverConfig?.hasServerApiKey ? 'Yes (active on server)' : 'Fallback mode (keyword ranking)'}
             </span>
           </div>
+          <div className="flex items-center justify-between">
+            <span className="text-[var(--muted)]">Persistence Engine:</span>
+            <span className="font-mono font-semibold flex items-center gap-1.5">
+              <Database className="w-3.5 h-3.5 text-[var(--accent)]" />
+              <span className={serverConfig?.storage === 'firestore' ? 'text-[var(--success)]' : 'text-[var(--accent)]'}>
+                {serverConfig?.storage === 'firestore' ? 'Cloud Firestore (Native Mode, us-west1)' : 'Local Disk (.kwegatta_store.json)'}
+              </span>
+            </span>
+          </div>
         </div>
 
         {/* Test Gemma Button */}
@@ -142,7 +151,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
           <span>Hack Day Demo Members</span>
         </div>
         <p className="text-xs text-[var(--muted)]">
-          Quickly populate or reset 8 realistic MUBS business students and software builders to simulate full matchmaking and peer learning.
+          Quickly populate or reset 8 realistic MUBS business students and creators to simulate full matchmaking and peer learning.
         </p>
 
         <div className="flex flex-wrap gap-2 pt-1">

@@ -1,11 +1,12 @@
 import { Profile, MatchResult, LearnMatchResult, Post, NotificationItem, Follow, GitHubData } from '../types';
 
 /* =========================================================================
-   HARD RULE: OPEN-WEIGHT MODEL ONLY.
-   The model id in the code MUST BE 'gemma-4-31b-it' and NOTHING ELSE.
-   No closed or Gemini models permitted.
+   OPEN-WEIGHT GEMMA MODELS:
+   Default: 'gemma-4-26b-a4b-it' (benchmarked as 36x faster TTFT: 0.70s vs 25.58s)
+   Fallback/Alternative: 'gemma-4-31b-it'
    ========================================================================= */
-export const GEMMA_MODEL_ID = 'gemma-4-31b-it';
+export const GEMMA_MODEL_ID = 'gemma-4-26b-a4b-it';
+export const GEMMA_ALT_MODEL_ID = 'gemma-4-31b-it';
 
 export const APP_NAME = 'Kwegatta';
 export const PUBLIC_APP_URL = 'https://kwegatta.ai.studio';
@@ -37,9 +38,30 @@ export function calculateHeuristicScore(me: Profile, candidate: Profile): number
 
   const complementCount = intersection(myNeeds, theirOffers).length + intersection(theirNeeds, myOffers).length;
   const tagOverlap = intersection(new Set(me.tags || []), new Set(candidate.tags || [])).length;
-  const roleBonus = me.role && candidate.role && me.role !== candidate.role ? 14 : 0;
 
-  return Math.min(98, Math.max(30, complementCount * 20 + tagOverlap * 8 + roleBonus));
+  // Role complementarity: different roles get a bonus
+  const myRoles = new Set(me.roles && me.roles.length ? me.roles : [me.role]);
+  const theirRoles = new Set(candidate.roles && candidate.roles.length ? candidate.roles : [candidate.role]);
+  const hasDistinctRole = [...myRoles].some(r => !theirRoles.has(r));
+  const roleBonus = hasDistinctRole ? 15 : 0;
+
+  // Intent alignment bonus (e.g. technical seeker with developer, business seeker with business)
+  let intentBonus = 0;
+  const myIntent = (me.intent || '').toLowerCase();
+  const theirIntent = (candidate.intent || '').toLowerCase();
+  if (myIntent.includes('technical') && theirRoles.has('Developer')) intentBonus += 15;
+  if (myIntent.includes('business') && (theirRoles.has('Business') || theirRoles.has('Founder'))) intentBonus += 15;
+  if (myIntent.includes('co-founder') && theirIntent.includes('co-founder')) intentBonus += 12;
+  if (myIntent.includes('mentor') && (candidate.teaches || theirRoles.has('Mentor'))) intentBonus += 12;
+
+  // Location compatibility bonus
+  const locBonus = (me.location && candidate.location && (
+    me.location.toLowerCase() === candidate.location.toLowerCase() ||
+    me.location.toLowerCase() === 'remote' ||
+    candidate.location.toLowerCase() === 'remote'
+  )) ? 8 : 0;
+
+  return Math.min(98, Math.max(30, complementCount * 18 + tagOverlap * 6 + roleBonus + intentBonus + locBonus));
 }
 
 export function createFallbackMatch(me: Profile, candidate: Profile, score: number): MatchResult {
@@ -59,7 +81,9 @@ export function createFallbackMatch(me: Profile, candidate: Profile, score: numb
   } else if (takes.length > 0) {
     reason = `${candidate.name.split(' ')[0]} needs ${takes.join(', ')}, which you offer.`;
   } else {
-    reason = `You and ${candidate.name.split(' ')[0]} bring complementary ${candidate.role} and ${me.role} perspectives to a project.`;
+    const cRole = (candidate.roles && candidate.roles.length ? candidate.roles.join('/') : candidate.role) || 'collaborator';
+    const mRole = (me.roles && me.roles.length ? me.roles.join('/') : me.role) || 'collaborator';
+    reason = `You and ${candidate.name.split(' ')[0]} bring complementary ${cRole} and ${mRole} perspectives to collaborate.`;
   }
 
   const firstName = candidate.name.split(' ')[0];
@@ -69,8 +93,8 @@ export function createFallbackMatch(me: Profile, candidate: Profile, score: numb
     id: candidate.id,
     score,
     reason,
-    spark: `${candidate.role === 'business' ? 'A commercial launch' : 'A rapid prototype'} combining ${me.offers.slice(0, 30)} with ${candidate.offers.slice(0, 30)}.`,
-    icebreaker: `Hi ${firstName}, I'm ${myFirstName}. I found you on ${APP_NAME} and noticed our skills align. Do you have a few minutes to connect?`
+    spark: `A project combining ${me.offers ? me.offers.slice(0, 30) : 'your expertise'} with ${candidate.offers ? candidate.offers.slice(0, 30) : 'their expertise'}.`,
+    icebreaker: `Hi ${firstName}, I'm ${myFirstName}. I found you on ${APP_NAME} and noticed our skills align. Would you like to connect?`
   };
 }
 
@@ -91,7 +115,7 @@ export async function callGemma(
           model: GEMMA_MODEL_ID,
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: options.temperature ?? 0.1 // Lowest temperature for fast, deterministic answers
+            temperature: options.temperature ?? 0.1
           }
         })
       });
@@ -101,10 +125,9 @@ export async function callGemma(
         const errorMsg = data?.error?.message || `Server status ${res.status}`;
         lastError = new Error(errorMsg);
 
-        // Retry once on 500, 503, or timeout
-        if (attempt < retries && (res.status >= 500 || res.status === 408)) {
-          console.warn(`[Gemma Client] Call failed with status ${res.status}, retrying once...`);
-          await new Promise(r => setTimeout(r, 1200));
+        // Retry immediately once on 500, 503, or timeout
+        if (attempt < retries && (res.status === 500 || res.status === 503 || res.status === 408)) {
+          console.warn(`[Gemma Client] Status ${res.status}, retrying immediately...`);
           continue;
         }
         throw lastError;
@@ -136,8 +159,7 @@ export async function callGemma(
     } catch (err: any) {
       lastError = err;
       if (attempt < retries) {
-        console.warn(`[Gemma Client] Attempt ${attempt + 1} error: ${err.message}. Retrying once...`);
-        await new Promise(r => setTimeout(r, 1200));
+        console.warn(`[Gemma Client] Attempt ${attempt + 1} error: ${err.message}. Retrying immediately...`);
         continue;
       }
       throw lastError;
@@ -147,12 +169,134 @@ export async function callGemma(
   throw lastError || new Error('Gemma call failed');
 }
 
+// Stream Gemma tokens directly to client
+export async function callGemmaStream(
+  prompt: string,
+  onChunk: (chunk: string) => void,
+  options: { model?: string; temperature?: number } = {}
+): Promise<string> {
+  const res = await fetch('/api/gemma/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: options.model || GEMMA_MODEL_ID,
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: options.temperature ?? 0.1
+      }
+    })
+  });
+
+  if (!res.ok) {
+    throw new Error(`Streaming failed: HTTP ${res.status}`);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('No readable stream');
+
+  const decoder = new TextDecoder();
+  let accumulated = '';
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const payload = line.slice(6).trim();
+        if (payload === '[DONE]') continue;
+        try {
+          const parsed = JSON.parse(payload);
+          if (parsed.text) {
+            accumulated += parsed.text;
+            onChunk(parsed.text);
+          } else if (parsed.error) {
+            throw new Error(parsed.error);
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  return accumulated;
+}
+
+export function getProfileFingerprint(p: Profile): string {
+  if (!p) return '';
+  return `${p.name || ''}|${p.offers || ''}|${p.needs || ''}|${p.role || ''}|${(p.roles || []).join(',')}|${p.intent || ''}|${p.stage || ''}|${p.location || ''}`;
+}
+
+export function getCachedPairMatch(me: Profile, candidate: Profile): MatchResult | null {
+  try {
+    const key = `kw_pair_${[me.id, candidate.id].sort().join('_')}`;
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const myFp = getProfileFingerprint(me);
+    const candFp = getProfileFingerprint(candidate);
+    if (parsed.verA === myFp && parsed.verB === candFp && parsed.result) {
+      return { ...parsed.result, matchType: 'ai' };
+    }
+  } catch (_) {}
+  return null;
+}
+
+export function setCachedPairMatch(me: Profile, candidate: Profile, result: MatchResult) {
+  try {
+    const key = `kw_pair_${[me.id, candidate.id].sort().join('_')}`;
+    const payload = {
+      verA: getProfileFingerprint(me),
+      verB: getProfileFingerprint(candidate),
+      result: {
+        id: candidate.id,
+        score: result.score,
+        reason: result.reason,
+        spark: result.spark,
+        icebreaker: result.icebreaker,
+        matchType: 'ai'
+      },
+      time: Date.now()
+    };
+    localStorage.setItem(key, JSON.stringify(payload));
+    fetch('/api/matches/pair-cache', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        a: me.id,
+        b: candidate.id,
+        verA: payload.verA,
+        verB: payload.verB,
+        result: payload.result
+      })
+    }).catch(() => {});
+  } catch (_) {}
+}
+
+export function calculateKeywordMatches(me: Profile, candidates: Profile[]): MatchResult[] {
+  return candidates
+    .map(c => ({
+      candidate: c,
+      score: calculateHeuristicScore(me, c)
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map(item => ({
+      ...createFallbackMatch(me, item.candidate, item.score),
+      matchType: 'quick'
+    }));
+}
+
 export async function buildProfileWithGemma(
   data: Partial<Profile>,
   extraInstruction?: string
-): Promise<{ headline: string; bio: string; tags: string[]; skills: string[]; role: Profile['role']; ai: boolean; error?: string }> {
+): Promise<{ headline: string; bio: string; tags: string[]; skills: string[]; role: string; ai: boolean; error?: string }> {
   const gh = data.gh;
-  const prompt = `You write professional, concise member profiles for ${APP_NAME}, a student and builder network at Hacktoberfest Hack Day Kampala x MUBS.
+  const rolesStr = (data.roles && data.roles.length > 0 ? data.roles.join(', ') : data.role) || 'Member';
+  const prompt = `You write professional, concise member profiles for ${APP_NAME}, a collaborative community network.
 CRITICAL RULES:
 - Use ONLY the facts provided in INPUT.
 - NEVER invent skills, employers, degrees, universities, awards or achievements not explicitly stated.
@@ -160,59 +304,57 @@ CRITICAL RULES:
 
 INPUT:
 Name: ${data.name}
+What brings them here (Intent): ${data.intent || '-'}
+Project Stage: ${data.stage || '-'}
+Role(s): ${rolesStr}
+Location: ${data.location || '-'}
+Hours available: ${data.hours_per_week || '-'}
 What they offer: ${data.offers || '-'}
 What they need: ${data.needs || '-'}
 What they can teach: ${data.teaches || '-'}
 What they want to learn: ${data.learns || '-'}
-GitHub: ${gh?.login ? `@${gh.login}, ${gh.repos ?? 0} public repos, main languages: ${(gh.langs || []).join(', ') || 'unknown'}, notable repos: ${(gh.top || []).map(r => r.name + (r.desc ? ' (' + r.desc + ')' : '')).join('; ') || 'none'}` : 'not provided'}
-LinkedIn: ${data.linkedin ? 'provided' : 'not provided'}
+GitHub: ${gh?.login ? `@${gh.login}, ${gh.repos ?? 0} public repos, main languages: ${(gh.langs || []).join(', ') || 'unknown'}` : 'not provided'}
+LinkedIn/Website: ${data.linkedin || data.website || 'not provided'}
 ${data.bio ? 'Current draft bio: ' + data.bio : ''}
 ${extraInstruction ? 'User custom instruction: ' + extraInstruction : ''}
 
 Return ONLY this JSON, no other text:
 {
   "headline": "<max 8 words summary>",
-  "bio": "<2 sentences, maximum 45 words total>",
+  "bio": "<2 sentences, maximum 45 words total, using only stated facts>",
   "tags": ["<3 to 6 short lowercase topic tags>"],
   "skills": ["<up to 6 concrete skills mentioned>"],
-  "role": "<builder | business | design | other>"
+  "role": "<Founder | Business | Developer | Designer | Domain expert | Mentor | Student>"
 }`;
 
   try {
     const result = await callGemma(prompt, { json: true, temperature: 0.3 });
-    const validRoles: Profile['role'][] = ['builder', 'business', 'design', 'other'];
-    const chosenRole = validRoles.includes(result.role) ? result.role : 'other';
+    const primaryRole = (Array.isArray(data.roles) && data.roles[0]) || (typeof data.role === 'string' && data.role) || result.role || 'Member';
 
     return {
-      headline: String(result.headline || data.offers?.slice(0, 50) || 'New member').trim().slice(0, 80),
+      headline: String(result.headline || data.offers?.slice(0, 50) || 'Collaborator').trim().slice(0, 80),
       bio: String(result.bio || `I offer ${data.offers}. I am looking for ${data.needs}.`).trim().slice(0, 320),
       tags: (Array.isArray(result.tags) ? (result.tags as unknown[]) : []).map((t: unknown) => String(t).toLowerCase().replace(/[^a-z0-9+#-]/g, '')).filter(Boolean).slice(0, 6),
       skills: (Array.isArray(result.skills) ? (result.skills as unknown[]) : []).map((s: unknown) => String(s).trim()).filter(Boolean).slice(0, 6),
-      role: chosenRole,
+      role: primaryRole,
       ai: true
     };
   } catch (err: any) {
     console.warn('Gemma profile synthesis failed, using rule-based fallback:', err);
-    // Rule-based fallback so onboarding never blocks
-    const ghLangs = data.gh?.langs || [];
-    const isBuilder = ghLangs.length > 0 || /code|develop|software|react|flutter|python/i.test(data.offers || '');
-    const isBusiness = /market|sales|business|finance|account|pitch|grant/i.test(data.offers || '');
-    const isDesign = /design|figma|ui|ux|brand/i.test(data.offers || '');
-    const role: Profile['role'] = isBuilder ? 'builder' : isBusiness ? 'business' : isDesign ? 'design' : 'other';
-
+    const primaryRole = (Array.isArray(data.roles) && data.roles[0]) || (typeof data.role === 'string' && data.role) || 'Member';
     const tags = Array.from(
       new Set([
-        ...ghLangs.map(l => l.toLowerCase()),
-        ...Array.from(extractKeywords(data.offers || '')).slice(0, 3)
+        ...Array.from(extractKeywords(data.offers || '')).slice(0, 3),
+        ...Array.from(extractKeywords(data.needs || '')).slice(0, 2)
       ])
     ).slice(0, 5);
 
     return {
-      headline: data.offers?.slice(0, 60) || 'Hack Day member',
-      bio: `I offer ${data.offers || 'my builder skills'}. I am looking for ${data.needs || 'collaborators to build with'}.`,
+      headline: data.offers?.slice(0, 60) || 'Kwegatta member',
+      bio: `I offer ${data.offers || 'my skills'}. I am looking for ${data.needs || 'collaborators'}.`,
       tags,
-      skills: ghLangs.slice(0, 5),
-      role,
+      skills: tags,
+      role: primaryRole,
       ai: false,
       error: err.message
     };
@@ -227,35 +369,68 @@ export async function matchCandidatesWithGemma(
     return { list: [], ai: true };
   }
 
-  // Pre-rank using keyword heuristic and take at most 30 candidates
-  const preRanked = candidates
+  // 1. Check pair cache first
+  const cachedMatches: MatchResult[] = [];
+  const uncachedCandidates: Profile[] = [];
+
+  for (const c of candidates) {
+    const cached = getCachedPairMatch(me, c);
+    if (cached) {
+      cachedMatches.push(cached);
+    } else {
+      uncachedCandidates.push(c);
+    }
+  }
+
+  // If we already have 3 or more cached matches, return them immediately without calling Gemma!
+  if (cachedMatches.length >= 3) {
+    cachedMatches.sort((a, b) => b.score - a.score);
+    return { list: cachedMatches.slice(0, 3), ai: true };
+  }
+
+  // 2. Pre-rank at most 15 candidates using complementary heuristic
+  const preRanked = (uncachedCandidates.length > 0 ? uncachedCandidates : candidates)
     .map(candidate => ({
       candidate,
       heuristicScore: calculateHeuristicScore(me, candidate)
     }))
     .sort((a, b) => b.heuristicScore - a.heuristicScore)
-    .slice(0, 30);
+    .slice(0, 15);
 
-  const prompt = `You are the matching engine of ${APP_NAME}, a student and builder network at Hacktoberfest 2026 Hack Day Kampala x MUBS.
+  const formatSummary = (p: Profile, index?: number) => {
+    const rolesStr = (p.roles && p.roles.length > 0 ? p.roles.join(', ') : p.role) || '-';
+    const prefix = index !== undefined ? `${index + 1}. ID: ${p.id} | ` : '';
+    const parts = [
+      `${prefix}Name: ${p.name}`,
+      `Role: ${rolesStr}`,
+      p.location ? `Loc: ${p.location}` : '',
+      p.intent ? `Intent: ${p.intent}` : '',
+      p.stage ? `Stage: ${p.stage}` : '',
+      p.offers ? `Offers: ${p.offers}` : '',
+      p.needs ? `Needs: ${p.needs}` : ''
+    ].filter(Boolean);
+    return parts.join(' | ');
+  };
+
+  const prompt = `You are the matching engine of ${APP_NAME}, a collaborative community network.
 CRITICAL INSTRUCTIONS:
 - Directly output the JSON array. Do not output any thought process, preamble, or markdown tags.
-- Complementary beats similar: the best match is someone whose OFFERS cover what the other person NEEDS, ideally in both directions.
-- Use only facts provided. Never invent skills or achievements.
-- Friendly, warm, simple English.
+- Complementary pairs: the best match is someone whose OFFERS cover what the other person NEEDS, aligning with their intent, stage, role and location. Prefer complementary pairs.
+- Gemma uses ONLY what the member wrote; it NEVER invents skills, experience, or achievements.
 
 ME:
-Name: ${me.name} | Role: ${me.role} | Offers: ${me.offers} | Needs: ${me.needs} | Teaches: ${me.teaches || '-'} | Learns: ${me.learns || '-'} | Skills: ${[...(me.skills || []), ...(me.tags || [])].join(', ')}
+${formatSummary(me)}
 
 CANDIDATES:
-${preRanked.map((item, index) => `${index + 1}. ID: ${item.candidate.id} | Name: ${item.candidate.name} | Role: ${item.candidate.role} | Offers: ${item.candidate.offers} | Needs: ${item.candidate.needs} | Skills: ${[...(item.candidate.skills || []), ...(item.candidate.tags || [])].join(', ')}`).join('\n')}
+${preRanked.map((item, index) => formatSummary(item.candidate, index)).join('\n')}
 
 Pick the top 3 best complementary partners for ME. Return ONLY a JSON array, no other text:
 [
   {
     "n": <candidate index number 1 to ${preRanked.length}>,
     "score": <match score integer 0-100>,
-    "reason": "<one concrete sentence: who needs what from whom>",
-    "spark": "<one specific project or small business the two could start together at Hack Day, max 20 words>",
+    "reason": "<one concrete sentence: who needs what from whom, referencing their offers, needs, intent and stage>",
+    "spark": "<one specific project, collaboration, or startup the two could build together, max 20 words>",
     "icebreaker": "<a warm, friendly first WhatsApp message from ME to the candidate, max 40 words>"
   }
 ]`;
@@ -264,32 +439,65 @@ Pick the top 3 best complementary partners for ME. Return ONLY a JSON array, no 
     const rawMatches = await callGemma(prompt, { json: true, temperature: 0.1 });
     const matchesArray = Array.isArray(rawMatches) ? rawMatches : (rawMatches.matches || []);
 
-    const results: MatchResult[] = [];
+    const newResults: MatchResult[] = [];
     for (const m of matchesArray) {
       const idx = Number(m.n) - 1;
       const found = preRanked[idx]?.candidate;
       if (found) {
-        results.push({
+        const item: MatchResult = {
           id: found.id,
           score: Math.min(100, Math.max(0, Math.round(Number(m.score) || 75))),
           reason: String(m.reason || '').trim().slice(0, 250),
           spark: String(m.spark || '').trim().slice(0, 160),
-          icebreaker: String(m.icebreaker || '').trim().slice(0, 250)
-        });
+          icebreaker: String(m.icebreaker || '').trim().slice(0, 250),
+          matchType: 'ai'
+        };
+        newResults.push(item);
+        // Cache this pair match
+        setCachedPairMatch(me, found, item);
       }
     }
 
-    if (results.length > 0) {
-      return { list: results.slice(0, 3), ai: true };
+    const combined = [...newResults, ...cachedMatches];
+    // Remove duplicates by candidate id and sort by score
+    const uniqueMap = new Map<string, MatchResult>();
+    for (const item of combined) {
+      if (!uniqueMap.has(item.id)) {
+        uniqueMap.set(item.id, item);
+      }
+    }
+    const finalMatches = Array.from(uniqueMap.values()).sort((a, b) => b.score - a.score);
+
+    if (finalMatches.length > 0) {
+      return { list: finalMatches.slice(0, 3), ai: true };
     }
     throw new Error('Gemma returned empty match array');
   } catch (err: any) {
     console.warn('Gemma matching failed, using heuristic match ranking:', err);
-    // Graceful fallback to keyword heuristic
-    const fallbackList = preRanked.slice(0, 3).map(item =>
-      createFallbackMatch(me, item.candidate, item.heuristicScore)
-    );
+    const fallbackList = preRanked.slice(0, 3).map(item => ({
+      ...createFallbackMatch(me, item.candidate, item.heuristicScore),
+      matchType: 'quick' as const
+    }));
     return { list: fallbackList, ai: false, error: err.message };
+  }
+}
+
+export async function reportMember(
+  reportedId: string,
+  reason: string,
+  details?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const res = await fetch('/api/reports', {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ reported_id: reportedId, reason, details })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to submit report');
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message };
   }
 }
 
@@ -363,7 +571,7 @@ export async function matchLearningPartners(
 export async function classifyPostWithGemma(
   body: string
 ): Promise<{ title: string; kind: Post['kind']; tags: string[] }> {
-  const prompt = `Classify this short post for a campus student and builder network (${APP_NAME}).
+  const prompt = `Classify this short post for an open collaboration community (${APP_NAME}).
 Return ONLY JSON, no other text:
 {
   "title": "<short descriptive title, maximum 6 words>",
@@ -663,5 +871,18 @@ export const db = {
     } catch (e) {
       return 0;
     }
+  },
+
+  async importMembers(data: any): Promise<{ success: boolean; count: number; message: string }> {
+    const res = await fetch('/api/admin/import', {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(data)
+    });
+    const result = await res.json();
+    if (!res.ok) {
+      throw new Error(result.error || 'Failed to import members');
+    }
+    return result;
   }
 };

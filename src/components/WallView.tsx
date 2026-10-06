@@ -102,7 +102,7 @@ export const WallView: React.FC<WallViewProps> = ({ onBack }) => {
           )}
 
           <p className="text-sm text-[var(--fg-muted)] max-w-md">
-            Open your phone camera to create your profile in 60 seconds.
+            Open your phone camera to create your profile in about 2 minutes.
           </p>
         </div>
       ) : (

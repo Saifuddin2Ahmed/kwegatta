@@ -4,6 +4,8 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import { initializeApp, getApps, type App } from 'firebase-admin/app';
+import { getFirestore, Firestore } from 'firebase-admin/firestore';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -311,7 +313,12 @@ const INITIAL_DEMO_MEMBERS = [
   }
 ];
 
-// In-memory data store with disk persistence for multi-device sync
+// Persistence Configuration & Mode (Cloud Firestore with fallback to Local Disk in non-production)
+const FIREBASE_PROJECT_ID = 'kwegatta';
+let firestoreDb: Firestore | null = null;
+let storageMode: 'firestore' | 'disk' = 'disk';
+const firestoreUnsubscribers: Array<() => void> = [];
+
 const DATA_FILE = path.join(__dirname, '.kwegatta_store.json');
 
 interface StoreData {
@@ -320,6 +327,7 @@ interface StoreData {
   matches: any[];
   notifications: any[];
   posts: any[];
+  reports: any[];
   audit_log: Array<{
     id: string;
     timestamp: string;
@@ -339,17 +347,53 @@ const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 // Clean expired tokens every 10 minutes
 setInterval(() => {
   const now = Date.now();
+  const expiredTokens: string[] = [];
   for (const [token, data] of userTokens.entries()) {
-    if (now - data.createdAt > TOKEN_TTL_MS) userTokens.delete(token);
+    if (now - data.createdAt > TOKEN_TTL_MS) {
+      userTokens.delete(token);
+      expiredTokens.push(token);
+    }
   }
   for (const [token, createdAt] of activeAdminTokens.entries()) {
-    if (now - createdAt > TOKEN_TTL_MS) activeAdminTokens.delete(token);
+    if (now - createdAt > TOKEN_TTL_MS) {
+      activeAdminTokens.delete(token);
+      expiredTokens.push(token);
+    }
+  }
+  if (expiredTokens.length > 0 && storageMode === 'firestore' && firestoreDb) {
+    batchRemoveDocs('sessions', expiredTokens).catch(() => {});
   }
 }, 600000);
 
 function issueUserToken(userId: string): string {
   const token = 'kw_usr_' + crypto.randomBytes(24).toString('hex');
-  userTokens.set(token, { userId, createdAt: Date.now() });
+  const now = Date.now();
+  userTokens.set(token, { userId, createdAt: now });
+  if (storageMode === 'firestore' && firestoreDb) {
+    firestoreDb.collection('sessions').doc(token).set({
+      token,
+      userId,
+      createdAt: now
+    }).catch(err => {
+      console.error('[Firestore] Failed to persist user session:', err?.message || err);
+    });
+  }
+  return token;
+}
+
+function issueAdminToken(): string {
+  const token = 'kw_adm_' + crypto.randomBytes(24).toString('hex');
+  const now = Date.now();
+  activeAdminTokens.set(token, now);
+  if (storageMode === 'firestore' && firestoreDb) {
+    firestoreDb.collection('sessions').doc(token).set({
+      token,
+      isAdmin: true,
+      createdAt: now
+    }).catch(err => {
+      console.error('[Firestore] Failed to persist admin session:', err?.message || err);
+    });
+  }
   return token;
 }
 
@@ -368,6 +412,9 @@ function resolveAuthUserId(req: Request): string | null {
       return session.userId;
     } else {
       userTokens.delete(token);
+      if (storageMode === 'firestore' && firestoreDb) {
+        removeDoc('sessions', token).catch(() => {});
+      }
     }
   }
   return null;
@@ -379,6 +426,9 @@ function checkAdmin(req: Request): boolean {
   const createdAt = activeAdminTokens.get(token)!;
   if (Date.now() - createdAt < TOKEN_TTL_MS) return true;
   activeAdminTokens.delete(token);
+  if (storageMode === 'firestore' && firestoreDb) {
+    removeDoc('sessions', token).catch(() => {});
+  }
   return false;
 }
 
@@ -395,6 +445,22 @@ function sanitizeUrl(val: any): string {
   const trimmed = val.trim();
   if (/^(https?:\/\/|mailto:|tel:)/i.test(trimmed)) {
     return trimmed.slice(0, 500);
+  }
+  return '';
+}
+
+function sanitizeAvatar(val: any): string {
+  if (typeof val !== 'string') return '';
+  const trimmed = val.trim();
+  // Safe base64 image data URL (JPEG, PNG, WebP, GIF) up to 1MB
+  if (/^data:image\/(jpeg|jpg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(trimmed)) {
+    if (trimmed.length <= 1024 * 1024) {
+      return trimmed;
+    }
+  }
+  // Standard HTTPS or HTTP image URL
+  if (/^https?:\/\//i.test(trimmed) && trimmed.length <= 1000) {
+    return trimmed;
   }
   return '';
 }
@@ -428,6 +494,9 @@ function loadStore(): StoreData {
     if (fs.existsSync(DATA_FILE)) {
       const parsed = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
       if (parsed.profiles && Array.isArray(parsed.profiles)) {
+        if (!parsed.reports || !Array.isArray(parsed.reports)) {
+          parsed.reports = [];
+        }
         if (!parsed.audit_log || !Array.isArray(parsed.audit_log)) {
           parsed.audit_log = [];
         }
@@ -504,6 +573,7 @@ function loadStore(): StoreData {
         created_at: new Date(Date.now() - 3600000 * 0.8).toISOString()
       }
     ] : [],
+    reports: [],
     audit_log: [
       {
         id: 'audit-init',
@@ -519,15 +589,308 @@ function loadStore(): StoreData {
   return initial;
 }
 
-function saveStore(store: StoreData) {
+function saveStore(storeData: StoreData) {
   try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf-8');
+    fs.writeFileSync(DATA_FILE, JSON.stringify(storeData, null, 2), 'utf-8');
   } catch (err) {
     console.error('Failed to write store file:', err);
   }
 }
 
-let store = loadStore();
+let store: StoreData = loadStore();
+
+/* =========================================================================
+   FIRESTORE PERSISTENCE HELPERS & SNAPSHOT REAL-TIME LISTENERS
+   Protect the free quota: All reads served from memory; all writes to Firestore.
+   Snapshot listeners keep memory synchronized with Firestore across all instances.
+   ========================================================================= */
+
+async function persistDoc(collectionName: string, id: string, docData: any): Promise<void> {
+  if (storageMode === 'firestore' && firestoreDb) {
+    try {
+      await firestoreDb.collection(collectionName).doc(id).set(docData);
+    } catch (err: any) {
+      console.error(`[Firestore] Failed to write document ${id} to ${collectionName}:`, err?.message || err);
+      throw err;
+    }
+  } else {
+    saveStore(store);
+  }
+}
+
+async function removeDoc(collectionName: string, id: string): Promise<void> {
+  if (storageMode === 'firestore' && firestoreDb) {
+    try {
+      await firestoreDb.collection(collectionName).doc(id).delete();
+    } catch (err: any) {
+      console.error(`[Firestore] Failed to delete document ${id} from ${collectionName}:`, err?.message || err);
+      throw err;
+    }
+  } else {
+    saveStore(store);
+  }
+}
+
+async function batchPersistDocs(collectionName: string, items: Array<{ id: string; data: any }>): Promise<void> {
+  if (storageMode === 'firestore' && firestoreDb) {
+    const BATCH_SIZE = 400;
+    for (let i = 0; i < items.length; i += BATCH_SIZE) {
+      const batch = firestoreDb.batch();
+      const chunk = items.slice(i, i + BATCH_SIZE);
+      for (const item of chunk) {
+        const ref = firestoreDb.collection(collectionName).doc(item.id);
+        batch.set(ref, item.data);
+      }
+      await batch.commit();
+    }
+  } else {
+    saveStore(store);
+  }
+}
+
+async function batchRemoveDocs(collectionName: string, ids: string[]): Promise<void> {
+  if (storageMode === 'firestore' && firestoreDb) {
+    const BATCH_SIZE = 400;
+    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
+      const batch = firestoreDb.batch();
+      const chunk = ids.slice(i, i + BATCH_SIZE);
+      for (const id of chunk) {
+        const ref = firestoreDb.collection(collectionName).doc(id);
+        batch.delete(ref);
+      }
+      await batch.commit();
+    }
+  } else {
+    saveStore(store);
+  }
+}
+
+async function setupFirestoreListeners(): Promise<void> {
+  if (!firestoreDb) return;
+
+  while (firestoreUnsubscribers.length > 0) {
+    const unsub = firestoreUnsubscribers.pop();
+    try { unsub?.(); } catch (_) {}
+  }
+
+  const initialLoadPromises: Promise<void>[] = [];
+
+  // 1. Profiles listener
+  initialLoadPromises.push(new Promise((resolve) => {
+    let initial = true;
+    const unsub = firestoreDb!.collection('profiles').onSnapshot((snap) => {
+      const list: any[] = [];
+      snap.forEach(doc => {
+        const d = doc.data();
+        list.push({ ...d, id: d.id || doc.id });
+      });
+      store.profiles = list;
+      if (initial) { initial = false; resolve(); }
+    }, (err) => {
+      console.error('[Firestore] profiles listener error:', err?.message || err);
+      if (initial) { initial = false; resolve(); }
+    });
+    firestoreUnsubscribers.push(unsub);
+  }));
+
+  // 2. Posts listener
+  initialLoadPromises.push(new Promise((resolve) => {
+    let initial = true;
+    const unsub = firestoreDb!.collection('posts').onSnapshot((snap) => {
+      const list: any[] = [];
+      snap.forEach(doc => {
+        const d = doc.data();
+        list.push({ ...d, id: d.id || doc.id });
+      });
+      store.posts = list;
+      if (initial) { initial = false; resolve(); }
+    }, (err) => {
+      console.error('[Firestore] posts listener error:', err?.message || err);
+      if (initial) { initial = false; resolve(); }
+    });
+    firestoreUnsubscribers.push(unsub);
+  }));
+
+  // 3. Follows listener
+  initialLoadPromises.push(new Promise((resolve) => {
+    let initial = true;
+    const unsub = firestoreDb!.collection('follows').onSnapshot((snap) => {
+      const list: any[] = [];
+      snap.forEach(doc => {
+        const d = doc.data();
+        list.push({ ...d, id: d.id || doc.id });
+      });
+      store.follows = list;
+      if (initial) { initial = false; resolve(); }
+    }, (err) => {
+      console.error('[Firestore] follows listener error:', err?.message || err);
+      if (initial) { initial = false; resolve(); }
+    });
+    firestoreUnsubscribers.push(unsub);
+  }));
+
+  // 4. Matches listener
+  initialLoadPromises.push(new Promise((resolve) => {
+    let initial = true;
+    const unsub = firestoreDb!.collection('matches').onSnapshot((snap) => {
+      const list: any[] = [];
+      snap.forEach(doc => {
+        const d = doc.data();
+        list.push({ ...d, id: d.id || doc.id });
+      });
+      store.matches = list;
+      if (initial) { initial = false; resolve(); }
+    }, (err) => {
+      console.error('[Firestore] matches listener error:', err?.message || err);
+      if (initial) { initial = false; resolve(); }
+    });
+    firestoreUnsubscribers.push(unsub);
+  }));
+
+  // 5. Notifications listener
+  initialLoadPromises.push(new Promise((resolve) => {
+    let initial = true;
+    const unsub = firestoreDb!.collection('notifications').onSnapshot((snap) => {
+      const list: any[] = [];
+      snap.forEach(doc => {
+        const d = doc.data();
+        list.push({ ...d, id: d.id || doc.id });
+      });
+      store.notifications = list;
+      if (initial) { initial = false; resolve(); }
+    }, (err) => {
+      console.error('[Firestore] notifications listener error:', err?.message || err);
+      if (initial) { initial = false; resolve(); }
+    });
+    firestoreUnsubscribers.push(unsub);
+  }));
+
+  // 6. Sessions listener (Restores active member sessions so they survive restarts)
+  initialLoadPromises.push(new Promise((resolve) => {
+    let initial = true;
+    const unsub = firestoreDb!.collection('sessions').onSnapshot((snap) => {
+      const now = Date.now();
+      userTokens.clear();
+      activeAdminTokens.clear();
+      snap.forEach(doc => {
+        const d = doc.data();
+        const token = doc.id;
+        const createdAt = typeof d.createdAt === 'number' ? d.createdAt : now;
+        if (now - createdAt < TOKEN_TTL_MS) {
+          if (d.userId) {
+            userTokens.set(token, { userId: d.userId, createdAt });
+          }
+          if (d.isAdmin) {
+            activeAdminTokens.set(token, createdAt);
+          }
+        }
+      });
+      if (initial) { initial = false; resolve(); }
+    }, (err) => {
+      console.error('[Firestore] sessions listener error:', err?.message || err);
+      if (initial) { initial = false; resolve(); }
+    });
+    firestoreUnsubscribers.push(unsub);
+  }));
+
+  // 7. Audit Log listener
+  initialLoadPromises.push(new Promise((resolve) => {
+    let initial = true;
+    const unsub = firestoreDb!.collection('audit_log').onSnapshot((snap) => {
+      const list: any[] = [];
+      snap.forEach(doc => {
+        list.push(doc.data());
+      });
+      store.audit_log = list.sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)));
+      if (initial) { initial = false; resolve(); }
+    }, (err) => {
+      console.error('[Firestore] audit_log listener error:', err?.message || err);
+      if (initial) { initial = false; resolve(); }
+    });
+    firestoreUnsubscribers.push(unsub);
+  }));
+
+  // 8. Reports listener
+  initialLoadPromises.push(new Promise((resolve) => {
+    let initial = true;
+    const unsub = firestoreDb!.collection('reports').onSnapshot((snap) => {
+      const list: any[] = [];
+      snap.forEach(doc => {
+        list.push(doc.data());
+      });
+      store.reports = list.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+      if (initial) { initial = false; resolve(); }
+    }, (err) => {
+      console.error('[Firestore] reports listener error:', err?.message || err);
+      if (initial) { initial = false; resolve(); }
+    });
+    firestoreUnsubscribers.push(unsub);
+  }));
+
+  await Promise.race([
+    Promise.all(initialLoadPromises),
+    new Promise(r => setTimeout(r, 6000))
+  ]);
+
+  console.log(`[Storage] Cloud Firestore real-time snapshot sync operational.`);
+  console.log(`[Storage] Warm cache: ${store.profiles.length} profiles, ${store.posts.length} posts, ${store.matches.length} matches, ${userTokens.size} sessions.`);
+}
+
+async function initStorage(): Promise<void> {
+  const isProduction = process.env.NODE_ENV === 'production';
+  console.log(`[Storage] Initializing persistence layer (Environment: ${process.env.NODE_ENV || 'development'})...`);
+
+  let fbApp: App | null = null;
+  try {
+    if (getApps().length === 0) {
+      fbApp = initializeApp({ projectId: FIREBASE_PROJECT_ID });
+    } else {
+      fbApp = getApps()[0]!;
+    }
+    firestoreDb = getFirestore(fbApp);
+  } catch (err: any) {
+    if (isProduction) {
+      console.error('FATAL: Could not initialize firebase-admin with projectId "kwegatta" in production:');
+      console.error(err?.message || err);
+      console.error('Server startup aborted. Silent fallback to disk storage in production is prohibited.');
+      process.exit(1);
+    } else {
+      console.log(`[Storage] Notice: firebase-admin initialization failed in non-production (${err?.message || err}).`);
+      console.log('[Storage] Activating local disk storage engine (.kwegatta_store.json).');
+      storageMode = 'disk';
+      store = loadStore();
+      return;
+    }
+  }
+
+  try {
+    const probePromise = firestoreDb.collection('profiles').limit(1).get();
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Cloud Firestore connection probe timed out after 8000ms')), 8000)
+    );
+    await Promise.race([probePromise, timeoutPromise]);
+
+    console.log(`✅ [Storage] Successfully connected to Cloud Firestore (Project: ${FIREBASE_PROJECT_ID}, Region: us-west1, Database: (default))`);
+    storageMode = 'firestore';
+    await setupFirestoreListeners();
+  } catch (err: any) {
+    if (isProduction) {
+      console.error('========================================================================');
+      console.error('FATAL STARTUP ERROR: Cloud Firestore cannot be reached in production environment!');
+      console.error(`Target: Project "${FIREBASE_PROJECT_ID}", Database "(default)", Region "us-west1"`);
+      console.error(`Reason: ${err?.message || err}`);
+      console.error('CRITICAL: As specified, server will NOT fall back to disk silently in production.');
+      console.error('Exiting process now.');
+      console.error('========================================================================');
+      process.exit(1);
+    } else {
+      console.log(`[Storage] Notice: Cloud Firestore cannot be reached in non-production (${err?.message || err}).`);
+      console.log('[Storage] Activating local disk storage engine (.kwegatta_store.json) for development.');
+      storageMode = 'disk';
+      store = loadStore();
+    }
+  }
+}
 
 /* =========================================================================
    AUTHENTICATION ENDPOINTS
@@ -548,19 +911,30 @@ app.post('/api/auth/token', (req: Request, res: Response) => {
 });
 
 /* =========================================================================
-   HARD RULE ENFORCEMENT: ONLY gemma-4-31b-it IS ALLOWED. NEVER ANY OTHER MODEL.
+   OPEN-WEIGHT GEMMA MODELS CONFIGURATION:
+   Allowed: gemma-4-26b-a4b-it and gemma-4-31b-it.
+   Default: gemma-4-26b-a4b-it (validated as 36x faster TTFT: 0.70s vs 25.58s).
    ========================================================================= */
-const REQUIRED_OPEN_WEIGHT_MODEL = 'gemma-4-31b-it';
-const GEMMA_TIMEOUT_MS = 90000; // 90 seconds timeout for open-weight 31B model
+const ALLOWED_OPEN_WEIGHT_MODELS = ['gemma-4-26b-a4b-it', 'gemma-4-31b-it'];
+const DEFAULT_OPEN_WEIGHT_MODEL = 'gemma-4-26b-a4b-it';
+const GEMMA_TIMEOUT_MS = 60000; // 60 seconds timeout
+
+// Pair Match Cache: key(`${idA}_${idB}`) -> { versionA, versionB, result, updatedAt }
+const matchPairCache = new Map<string, { versionA: string; versionB: string; result: any; updatedAt: string }>();
+
+function getPairCacheKey(idA: string, idB: string): string {
+  return [idA, idB].sort().join('_');
+}
 
 app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
-  const { model = REQUIRED_OPEN_WEIGHT_MODEL, contents, generationConfig } = req.body || {};
+  const { model = DEFAULT_OPEN_WEIGHT_MODEL, contents, generationConfig } = req.body || {};
+  const targetModel = ALLOWED_OPEN_WEIGHT_MODELS.includes(model) ? model : DEFAULT_OPEN_WEIGHT_MODEL;
 
-  // HARD CONSTRAINT VERIFICATION:
-  if (model !== REQUIRED_OPEN_WEIGHT_MODEL) {
+  // HARD CONSTRAINT VERIFICATION: Only allowed open-weight Gemma models
+  if (!ALLOWED_OPEN_WEIGHT_MODELS.includes(targetModel)) {
     return res.status(400).json({
       error: {
-        message: `Violates Hackathon hard rule: Only open-weight model ${REQUIRED_OPEN_WEIGHT_MODEL} is allowed. Attempted to call: ${model}`
+        message: `Violates rule: Only open-weight models ${ALLOWED_OPEN_WEIGHT_MODELS.join(' or ')} are allowed. Attempted to call: ${model}`
       }
     });
   }
@@ -586,9 +960,9 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
     });
   }
 
-  // Attempt up to 2 times (retry once on 500, 503, or timeout)
+  // Attempt up to 2 times (retry immediately once on 500, 503, or timeout)
   let lastError: any = null;
-  const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${REQUIRED_OPEN_WEIGHT_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   aiMetrics.totalCalls++;
   const callStartTime = Date.now();
@@ -598,7 +972,7 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
     const timeout = setTimeout(() => controller.abort(), GEMMA_TIMEOUT_MS);
 
     try {
-      console.log(`[Gemma 4] Invoking open-weight model (attempt ${attempt}/2, 90s timeout)...`);
+      console.log(`[Gemma 4] Invoking ${targetModel} (attempt ${attempt}/2)...`);
       
       const userConfig = (generationConfig && typeof generationConfig === 'object') ? generationConfig : {};
       const { temperature, thinkingConfig, ...safeConfig } = userConfig as any;
@@ -621,14 +995,13 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
 
       clearTimeout(timeout);
 
-      // On 500 or 503, retry once before failing
-      if (apiResponse.status >= 500) {
+      // On 500 or 503, retry once immediately before failing
+      if (apiResponse.status === 500 || apiResponse.status === 503) {
         const errorText = await apiResponse.text().catch(() => '');
-        console.warn(`[Gemma 4] Upstream returned status ${apiResponse.status} on attempt ${attempt}:`, errorText.slice(0, 200));
+        console.warn(`[Gemma 4] Upstream returned status ${apiResponse.status} on attempt ${attempt}:`, errorText.slice(0, 150));
         lastError = new Error(`Gemma upstream error ${apiResponse.status}: ${errorText.slice(0, 150)}`);
         if (attempt < 2) {
-          console.log('[Gemma 4] Retrying request once after 1s delay...');
-          await new Promise(r => setTimeout(r, 1000));
+          console.log('[Gemma 4] Retrying request immediately...');
           continue;
         }
         aiMetrics.fallbackCalls++;
@@ -649,12 +1022,11 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
     } catch (error: any) {
       clearTimeout(timeout);
       const isTimeout = error.name === 'AbortError' || error.message?.includes('abort');
-      console.warn(`[Gemma 4] Error on attempt ${attempt}:`, isTimeout ? 'Timed out after 90 seconds' : error.message);
+      console.warn(`[Gemma 4] Error on attempt ${attempt}:`, isTimeout ? 'Timed out' : error.message);
       lastError = error;
 
       if (attempt < 2) {
-        console.log('[Gemma 4] Retrying request once after error...');
-        await new Promise(r => setTimeout(r, 1000));
+        console.log('[Gemma 4] Retrying request immediately after error...');
         continue;
       }
 
@@ -662,7 +1034,7 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
       return res.status(500).json({
         error: {
           message: isTimeout
-            ? 'Gemma model request timed out after 90 seconds'
+            ? 'Gemma model request timed out'
             : (error.message || 'Server error communicating with Gemma 4')
         }
       });
@@ -677,10 +1049,132 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
   });
 });
 
+// STREAMING GEMMA TOKENS TO THE BROWSER (SSE)
+app.post('/api/gemma/stream', gemmaLimiter, async (req: Request, res: Response) => {
+  const { model = DEFAULT_OPEN_WEIGHT_MODEL, contents, generationConfig } = req.body || {};
+  const targetModel = ALLOWED_OPEN_WEIGHT_MODELS.includes(model) ? model : DEFAULT_OPEN_WEIGHT_MODEL;
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return res.status(503).json({ error: { message: 'GEMINI_API_KEY is not configured.' } });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  const userConfig = (generationConfig && typeof generationConfig === 'object') ? generationConfig : {};
+  const { temperature, thinkingConfig, ...safeConfig } = userConfig as any;
+  const requestPayload = {
+    contents,
+    generationConfig: {
+      ...safeConfig,
+      thinkingConfig: {
+        thinkingLevel: 'MINIMAL'
+      }
+    }
+  };
+
+  const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const upstream = await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestPayload)
+      });
+
+      if (!upstream.ok) {
+        if ((upstream.status === 500 || upstream.status === 503) && attempt < 2) {
+          console.warn(`[Gemma Stream] Status ${upstream.status} on attempt ${attempt}, retrying immediately...`);
+          continue;
+        }
+        res.write(`data: ${JSON.stringify({ error: `Upstream error: ${upstream.status}` })}\n\n`);
+        return res.end();
+      }
+
+      const reader = upstream.body?.getReader();
+      if (!reader) {
+        res.write(`data: ${JSON.stringify({ error: 'No response body stream' })}\n\n`);
+        return res.end();
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.slice(6).trim();
+            if (dataStr === '[DONE]') {
+              res.write(`data: [DONE]\n\n`);
+              continue;
+            }
+            try {
+              const parsed = JSON.parse(dataStr);
+              const textChunk = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (textChunk) {
+                res.write(`data: ${JSON.stringify({ text: textChunk })}\n\n`);
+              }
+            } catch (_) {}
+          }
+        }
+      }
+
+      res.write(`data: [DONE]\n\n`);
+      return res.end();
+    } catch (err: any) {
+      if (attempt < 2) {
+        console.warn(`[Gemma Stream] Error on attempt ${attempt}, retrying immediately:`, err.message);
+        continue;
+      }
+      res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+      return res.end();
+    }
+  }
+});
+
+// MATCH PAIR CACHING ENDPOINTS
+app.get('/api/matches/pair-cache', (req: Request, res: Response) => {
+  const { a, b, verA, verB } = req.query as { a?: string; b?: string; verA?: string; verB?: string };
+  if (!a || !b) {
+    return res.status(400).json({ error: 'Parameters a and b required' });
+  }
+  const key = getPairCacheKey(a, b);
+  const cached = matchPairCache.get(key);
+  if (cached && cached.versionA === verA && cached.versionB === verB) {
+    return res.json({ cached: true, result: cached.result });
+  }
+  return res.json({ cached: false });
+});
+
+app.post('/api/matches/pair-cache', (req: Request, res: Response) => {
+  const { a, b, verA, verB, result } = req.body || {};
+  if (!a || !b || !result) {
+    return res.status(400).json({ error: 'Missing required parameters' });
+  }
+  const key = getPairCacheKey(a, b);
+  matchPairCache.set(key, {
+    versionA: String(verA || ''),
+    versionB: String(verB || ''),
+    result,
+    updatedAt: new Date().toISOString()
+  });
+  return res.json({ success: true });
+});
+
 /* =========================================================================
    ADMIN ENDPOINTS
    ========================================================================= */
-app.post('/api/admin/login', adminLoginLimiter, (req: Request, res: Response) => {
+app.post('/api/admin/login', adminLoginLimiter, async (req: Request, res: Response) => {
   const { code } = req.body || {};
   const expectedCode = process.env.ADMIN_CODE || 'kwegatta2026';
   
@@ -699,17 +1193,17 @@ app.post('/api/admin/login', adminLoginLimiter, (req: Request, res: Response) =>
     return res.status(401).json({ error: 'Invalid admin passcode' });
   }
 
-  const token = 'adm_' + crypto.randomBytes(24).toString('hex');
-  activeAdminTokens.set(token, Date.now());
+  const token = issueAdminToken();
 
-  store.audit_log.unshift({
+  const auditEntry = {
     id: 'audit-' + Date.now(),
     timestamp: new Date().toISOString(),
     action: 'ADMIN_LOGIN',
     details: 'Admin logged in successfully.',
     admin: 'admin'
-  });
-  saveStore(store);
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
 
   return res.json({ success: true, token });
 });
@@ -815,46 +1309,60 @@ app.get('/api/admin/posts', (req: Request, res: Response) => {
   return res.json(store.posts);
 });
 
-app.post('/api/admin/action', (req: Request, res: Response) => {
+app.post('/api/admin/action', async (req: Request, res: Response) => {
   if (!verifyAdmin(req, res)) return;
 
   const { action, id, hidden, message } = req.body || {};
 
   if (action === 'delete_member') {
     const target = store.profiles.find(p => p.id === id);
+    const deletedPosts = store.posts.filter(p => p.author_id === id).map(p => p.id);
     store.profiles = store.profiles.filter(p => p.id !== id);
     store.posts = store.posts.filter(p => p.author_id !== id);
-    store.audit_log.unshift({
+    if (storageMode === 'firestore' && firestoreDb) {
+      await removeDoc('profiles', id);
+      if (deletedPosts.length > 0) await batchRemoveDocs('posts', deletedPosts);
+    }
+    const auditEntry = {
       id: 'audit-' + Date.now(),
       timestamp: new Date().toISOString(),
       action: 'DELETE_MEMBER',
       details: `Deleted member: ${target?.name || id}`,
       admin: 'admin'
-    });
+    };
+    store.audit_log.unshift(auditEntry);
+    await persistDoc('audit_log', auditEntry.id, auditEntry);
   } else if (action === 'toggle_hide_member') {
     const target = store.profiles.find(p => p.id === id);
     if (target) {
       target.hidden = hidden;
-      store.audit_log.unshift({
+      await persistDoc('profiles', target.id, target);
+      const auditEntry = {
         id: 'audit-' + Date.now(),
         timestamp: new Date().toISOString(),
         action: hidden ? 'HIDE_MEMBER' : 'UNHIDE_MEMBER',
         details: `${hidden ? 'Hid' : 'Unhid'} member: ${target.name}`,
         admin: 'admin'
-      });
+      };
+      store.audit_log.unshift(auditEntry);
+      await persistDoc('audit_log', auditEntry.id, auditEntry);
     }
   } else if (action === 'delete_post') {
     store.posts = store.posts.filter(p => p.id !== id);
-    store.audit_log.unshift({
+    await removeDoc('posts', id);
+    const auditEntry = {
       id: 'audit-' + Date.now(),
       timestamp: new Date().toISOString(),
       action: 'DELETE_POST',
       details: `Deleted post ID: ${id}`,
       admin: 'admin'
-    });
+    };
+    store.audit_log.unshift(auditEntry);
+    await persistDoc('audit_log', auditEntry.id, auditEntry);
   } else if (action === 'send_announcement') {
+    const newNotifs: Array<{ id: string; data: any }> = [];
     for (const p of store.profiles) {
-      store.notifications.unshift({
+      const notif = {
         id: 'notif-ann-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
         to_id: p.id,
         from_id: 'organiser',
@@ -862,24 +1370,99 @@ app.post('/api/admin/action', (req: Request, res: Response) => {
         body: `📢 Organiser Announcement: ${message}`,
         read: false,
         created_at: new Date().toISOString()
-      });
+      };
+      store.notifications.unshift(notif);
+      newNotifs.push({ id: notif.id, data: notif });
     }
-    store.audit_log.unshift({
+    if (newNotifs.length > 0) {
+      await batchPersistDocs('notifications', newNotifs);
+    }
+    const auditEntry = {
       id: 'audit-' + Date.now(),
       timestamp: new Date().toISOString(),
       action: 'SEND_ANNOUNCEMENT',
       details: `Broadcasted notice to ${store.profiles.length} members: "${message.slice(0, 50)}..."`,
       admin: 'admin'
-    });
+    };
+    store.audit_log.unshift(auditEntry);
+    await persistDoc('audit_log', auditEntry.id, auditEntry);
   }
 
-  saveStore(store);
+  if (storageMode === 'disk') {
+    saveStore(store);
+  }
   return res.json({ success: true });
 });
 
 app.get('/api/admin/audit-log', (req: Request, res: Response) => {
   if (!verifyAdmin(req, res)) return;
   return res.json(store.audit_log || []);
+});
+
+// Member Safety: Report a profile with reason
+app.post('/api/reports', async (req: Request, res: Response) => {
+  const authUserId = resolveAuthUserId(req);
+  const { reported_id, reason, details } = req.body || {};
+  if (!reported_id || typeof reported_id !== 'string') {
+    return res.status(400).json({ error: 'Reported member ID is required' });
+  }
+
+  const reportedProfile = store.profiles.find((p: any) => p.id === reported_id);
+  const reporterProfile = authUserId ? store.profiles.find((p: any) => p.id === authUserId) : null;
+
+  const report = {
+    id: 'rep-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex'),
+    reporter_id: authUserId || 'anonymous',
+    reporter_name: reporterProfile?.name || 'Anonymous',
+    reported_id,
+    reported_name: reportedProfile?.name || 'Unknown',
+    reason: sanitizeText(reason, 200) || 'Inappropriate behavior',
+    details: sanitizeText(details, 1000) || '',
+    created_at: new Date().toISOString(),
+    status: 'pending'
+  };
+
+  store.reports.unshift(report);
+  await persistDoc('reports', report.id, report);
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'MEMBER_REPORTED',
+    details: `Member "${report.reported_name}" (${report.reported_id}) reported by ${report.reporter_name}: ${report.reason}`,
+    admin: 'system'
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  return res.json({ success: true, report });
+});
+
+// Admin-only list reports
+app.get('/api/admin/reports', (req: Request, res: Response) => {
+  if (!verifyAdmin(req, res)) return;
+  return res.json(store.reports || []);
+});
+
+// Admin-only report action (dismiss or resolve)
+app.post('/api/admin/reports/:id/action', async (req: Request, res: Response) => {
+  if (!verifyAdmin(req, res)) return;
+  const { id } = req.params;
+  const { action } = req.body || {};
+  const report = store.reports.find((r: any) => r.id === id);
+  if (!report) {
+    return res.status(404).json({ error: 'Report not found' });
+  }
+
+  if (action === 'dismiss') {
+    report.status = 'dismissed';
+    await persistDoc('reports', report.id, report);
+  } else if (action === 'resolve') {
+    report.status = 'resolved';
+    await persistDoc('reports', report.id, report);
+  }
+
+  return res.json({ success: true, report });
 });
 
 app.get('/api/admin/export', (req: Request, res: Response) => {
@@ -915,8 +1498,138 @@ app.get('/api/admin/export', (req: Request, res: Response) => {
   }
 });
 
+// Admin-Only Member Import endpoint: Accepts exported JSON and restores members with the exact same IDs
+app.post('/api/admin/import', async (req: Request, res: Response) => {
+  if (!verifyAdmin(req, res)) return;
+
+  try {
+    let members: any[] = [];
+    if (Array.isArray(req.body)) {
+      members = req.body;
+    } else if (req.body && Array.isArray(req.body.profiles)) {
+      members = req.body.profiles;
+    } else if (req.body && Array.isArray(req.body.members)) {
+      members = req.body.members;
+    } else if (req.body && typeof req.body.data === 'string') {
+      try {
+        const parsed = JSON.parse(req.body.data);
+        if (Array.isArray(parsed)) members = parsed;
+        else if (Array.isArray(parsed.profiles)) members = parsed.profiles;
+        else if (Array.isArray(parsed.members)) members = parsed.members;
+      } catch (_) {}
+    }
+
+    if (!Array.isArray(members) || members.length === 0) {
+      return res.status(400).json({
+        error: 'Invalid import data: Expected an array of member profile objects or { profiles: [...] }'
+      });
+    }
+
+    let restoredCount = 0;
+    const restoredProfiles: any[] = [];
+
+    for (const raw of members) {
+      if (!raw || typeof raw !== 'object') continue;
+      const id = String(raw.id || '').trim();
+      const rawName = String(raw.name || '').trim();
+      if (!id || !rawName) continue;
+
+      const role = sanitizeText(raw.role, 50) || (Array.isArray(raw.roles) && raw.roles[0]) || 'Developer';
+
+      const profile = {
+        id, // Preserved exact same ID!
+        name: sanitizeText(rawName, 100),
+        role,
+        roles: sanitizeArray(raw.roles, 2, 40),
+        intent: sanitizeText(raw.intent, 100),
+        stage: sanitizeText(raw.stage, 100),
+        location: sanitizeText(raw.location, 100),
+        hours_per_week: sanitizeText(raw.hours_per_week, 50),
+        headline: sanitizeText(raw.headline, 200),
+        bio: sanitizeText(raw.bio, 1000),
+        offers: sanitizeText(raw.offers, 1000),
+        needs: sanitizeText(raw.needs, 1000),
+        teaches: sanitizeText(raw.teaches, 1000),
+        learns: sanitizeText(raw.learns, 1000),
+        tags: sanitizeArray(raw.tags, 15, 30),
+        skills: sanitizeArray(raw.skills, 15, 40),
+        github: sanitizeText(raw.github, 50).replace(/^@/, '').replace(/[^a-zA-Z0-9-_]/g, ''),
+        linkedin: sanitizeUrl(raw.linkedin),
+        website: sanitizeUrl(raw.website),
+        whatsapp: sanitizeText(raw.whatsapp, 30).replace(/[^0-9+]/g, ''),
+        hide_whatsapp: Boolean(raw.hide_whatsapp),
+        avatar: sanitizeAvatar(raw.avatar),
+        status: sanitizeText(raw.status, 100),
+        is_demo: Boolean(raw.is_demo),
+        created_at: sanitizeText(raw.created_at, 50) || new Date().toISOString(),
+        gh: raw.gh && typeof raw.gh === 'object' ? raw.gh : null,
+        blocked_ids: sanitizeArray(raw.blocked_ids, 200, 64),
+        hidden: Boolean(raw.hidden)
+      };
+
+      restoredProfiles.push(profile);
+      restoredCount++;
+    }
+
+    if (restoredCount === 0) {
+      return res.status(400).json({ error: 'No valid member profiles found in import payload' });
+    }
+
+    // Persist to storage (Firestore or Local Disk)
+    if (storageMode === 'firestore' && firestoreDb) {
+      const BATCH_SIZE = 400;
+      for (let i = 0; i < restoredProfiles.length; i += BATCH_SIZE) {
+        const batch = firestoreDb.batch();
+        const chunk = restoredProfiles.slice(i, i + BATCH_SIZE);
+        for (const p of chunk) {
+          const docRef = firestoreDb.collection('profiles').doc(p.id);
+          batch.set(docRef, p);
+        }
+        await batch.commit();
+      }
+    }
+
+    // Update in-memory store
+    for (const p of restoredProfiles) {
+      const idx = store.profiles.findIndex(existing => existing.id === p.id);
+      if (idx >= 0) {
+        store.profiles[idx] = p;
+      } else {
+        store.profiles.push(p);
+      }
+    }
+
+    if (storageMode === 'disk') {
+      saveStore(store);
+    }
+
+    const auditEntry = {
+      id: 'audit-' + Date.now(),
+      timestamp: new Date().toISOString(),
+      action: 'ADMIN_IMPORT',
+      details: `Imported and restored ${restoredCount} member profile(s) with preserved IDs.`,
+      admin: 'admin'
+    };
+    store.audit_log.unshift(auditEntry);
+    if (storageMode === 'firestore' && firestoreDb) {
+      firestoreDb.collection('audit_log').doc(auditEntry.id).set(auditEntry).catch(() => {});
+    } else {
+      saveStore(store);
+    }
+
+    return res.json({
+      success: true,
+      count: restoredCount,
+      message: `Successfully restored ${restoredCount} member profile(s) with preserved IDs.`
+    });
+  } catch (err: any) {
+    console.error('Failed to import members:', err);
+    return res.status(500).json({ error: err.message || 'Failed to import members' });
+  }
+});
+
 // Explicit connect endpoint (records notification to peer - requires session)
-app.post('/api/connect', (req: Request, res: Response) => {
+app.post('/api/connect', async (req: Request, res: Response) => {
   const authUserId = resolveAuthUserId(req);
   const isAdmin = checkAdmin(req);
 
@@ -953,7 +1666,7 @@ app.post('/api/connect', (req: Request, res: Response) => {
   };
 
   store.notifications.unshift(notif);
-  saveStore(store);
+  await persistDoc('notifications', notif.id, notif);
 
   return res.json({
     success: true,
@@ -965,7 +1678,7 @@ app.post('/api/connect', (req: Request, res: Response) => {
 });
 
 // Delete member profile permanently (Authentication required: self or admin)
-app.delete('/api/profiles/:id', (req: Request, res: Response) => {
+app.delete('/api/profiles/:id', async (req: Request, res: Response) => {
   const id = req.params.id;
   const authUserId = resolveAuthUserId(req);
   const isAdmin = checkAdmin(req);
@@ -979,13 +1692,27 @@ app.delete('/api/profiles/:id', (req: Request, res: Response) => {
   }
 
   const initialCount = store.profiles.length;
+  const deletedPosts = store.posts.filter((p: any) => p.author_id === id).map(p => p.id);
+  const deletedFollows = store.follows.filter((f: any) => f.follower_id === id || f.following_id === id).map(f => f.id);
+  const deletedMatches = store.matches.filter((m: any) => m.a_id === id || m.b_id === id).map(m => m.id);
+  const deletedNotifs = store.notifications.filter((n: any) => n.to_id === id || n.from_id === id).map(n => n.id);
+
   store.profiles = store.profiles.filter((p: any) => p.id !== id);
   store.posts = store.posts.filter((p: any) => p.author_id !== id);
   store.follows = store.follows.filter((f: any) => f.follower_id !== id && f.following_id !== id);
   store.matches = store.matches.filter((m: any) => m.a_id !== id && m.b_id !== id);
   store.notifications = store.notifications.filter((n: any) => n.to_id !== id && n.from_id !== id);
 
-  saveStore(store);
+  if (storageMode === 'firestore' && firestoreDb) {
+    await removeDoc('profiles', id);
+    if (deletedPosts.length > 0) await batchRemoveDocs('posts', deletedPosts);
+    if (deletedFollows.length > 0) await batchRemoveDocs('follows', deletedFollows);
+    if (deletedMatches.length > 0) await batchRemoveDocs('matches', deletedMatches);
+    if (deletedNotifs.length > 0) await batchRemoveDocs('notifications', deletedNotifs);
+  } else {
+    saveStore(store);
+  }
+
   return res.json({
     success: true,
     deleted: initialCount !== store.profiles.length,
@@ -997,9 +1724,11 @@ app.delete('/api/profiles/:id', (req: Request, res: Response) => {
 app.get('/api/config', (_req: Request, res: Response) => {
   res.json({
     appName: 'Kwegatta',
-    model: REQUIRED_OPEN_WEIGHT_MODEL,
+    model: DEFAULT_OPEN_WEIGHT_MODEL,
+    allowedModels: ALLOWED_OPEN_WEIGHT_MODELS,
     hasServerApiKey: Boolean(process.env.GEMINI_API_KEY),
     isDemoMode,
+    storage: storageMode,
     appUrl: process.env.APP_URL || ''
   });
 });
@@ -1033,12 +1762,27 @@ app.get('/api/data/:collection', (req: Request, res: Response) => {
   items.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   const sliced = items.slice(0, limit);
 
-  // WHATSAPP VISIBILITY PLAN:
+  // WHATSAPP VISIBILITY & BLOCKING PRIVACY PLAN:
   // - Any signed-in member can see another member's WhatsApp number (unless hidden by member toggle).
   // - Anonymous callers never receive WhatsApp numbers.
+  // - A blocked member no longer sees or matches the person who blocked them.
   if (col === 'profiles') {
     const callerId = resolveAuthUserId(req);
-    const safeProfiles = sliced.map(p => {
+    let filteredProfiles = sliced;
+    if (callerId) {
+      const callerProfile = store.profiles.find((p: any) => p.id === callerId);
+      const callerBlockedSet = new Set(callerProfile?.blocked_ids || []);
+      filteredProfiles = filteredProfiles.filter((p: any) => {
+        if (p.id === callerId) return true;
+        // Do not show if caller blocked p
+        if (callerBlockedSet.has(p.id)) return false;
+        // Do not show if p blocked caller
+        if (Array.isArray(p.blocked_ids) && p.blocked_ids.includes(callerId)) return false;
+        return true;
+      });
+    }
+
+    const safeProfiles = filteredProfiles.map(p => {
       if (callerId) {
         const isSelf = p.id === callerId;
         const isHidden = Boolean(p.hide_whatsapp && !isSelf);
@@ -1061,11 +1805,30 @@ app.get('/api/data/:collection', (req: Request, res: Response) => {
     return res.json(safeProfiles);
   }
 
+  // Filter matches so blocked members never match each other
+  if (col === 'matches') {
+    const callerId = resolveAuthUserId(req);
+    if (callerId) {
+      const callerProfile = store.profiles.find((p: any) => p.id === callerId);
+      const callerBlockedSet = new Set(callerProfile?.blocked_ids || []);
+      const safeMatches = sliced.filter((m: any) => {
+        const otherId = m.a_id === callerId ? m.b_id : m.b_id === callerId ? m.a_id : null;
+        if (otherId) {
+          if (callerBlockedSet.has(otherId)) return false;
+          const otherProfile = store.profiles.find((p: any) => p.id === otherId);
+          if (Array.isArray(otherProfile?.blocked_ids) && otherProfile.blocked_ids.includes(callerId)) return false;
+        }
+        return true;
+      });
+      return res.json(safeMatches);
+    }
+  }
+
   return res.json(sliced);
 });
 
 // Profile & Data Creation (Protected / Strict Validation / Session Required)
-app.post('/api/data/:collection', (req: Request, res: Response) => {
+app.post('/api/data/:collection', async (req: Request, res: Response) => {
   const col = req.params.collection as keyof StoreData;
   if (!store[col]) {
     return res.status(404).json({ error: `Collection ${col} not found` });
@@ -1096,14 +1859,18 @@ app.post('/api/data/:collection', (req: Request, res: Response) => {
       return res.status(400).json({ error: 'A valid name (at least 2 characters) is required' });
     }
 
-    const validRoles = ['builder', 'business', 'design', 'other'];
-    const role = validRoles.includes(raw.role) ? raw.role : 'builder';
+    const role = sanitizeText(raw.role, 50) || (Array.isArray(raw.roles) && raw.roles[0]) || 'Developer';
     const id = (isExisting ? requestedId : null) || sanitizeText(raw.id, 64) || ('user-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex'));
 
     const row = {
       id,
       name: sanitizeText(rawName, 100),
       role,
+      roles: sanitizeArray(raw.roles, 2, 40),
+      intent: sanitizeText(raw.intent, 100),
+      stage: sanitizeText(raw.stage, 100),
+      location: sanitizeText(raw.location, 100),
+      hours_per_week: sanitizeText(raw.hours_per_week, 50),
       headline: sanitizeText(raw.headline, 200),
       bio: sanitizeText(raw.bio, 1000),
       offers: sanitizeText(raw.offers, 1000),
@@ -1114,13 +1881,15 @@ app.post('/api/data/:collection', (req: Request, res: Response) => {
       skills: sanitizeArray(raw.skills, 15, 40),
       github: sanitizeText(raw.github, 50).replace(/^@/, '').replace(/[^a-zA-Z0-9-_]/g, ''),
       linkedin: sanitizeUrl(raw.linkedin),
+      website: sanitizeUrl(raw.website),
       whatsapp: sanitizeText(raw.whatsapp, 30).replace(/[^0-9+]/g, ''),
       hide_whatsapp: Boolean(raw.hide_whatsapp),
-      avatar: sanitizeUrl(raw.avatar),
+      avatar: sanitizeAvatar(raw.avatar),
       status: sanitizeText(raw.status, 100),
       is_demo: Boolean(raw.is_demo),
       created_at: sanitizeText(raw.created_at, 50) || new Date().toISOString(),
-      gh: raw.gh && typeof raw.gh === 'object' ? raw.gh : null
+      gh: raw.gh && typeof raw.gh === 'object' ? raw.gh : null,
+      blocked_ids: sanitizeArray(raw.blocked_ids, 200, 64)
     };
 
     const existingIdx = store.profiles.findIndex((item: any) => item.id === row.id);
@@ -1130,7 +1899,7 @@ app.post('/api/data/:collection', (req: Request, res: Response) => {
       store.profiles.unshift(row);
     }
 
-    saveStore(store);
+    await persistDoc('profiles', row.id, row);
     const token = issueUserToken(row.id);
     return res.json({ ...row, token });
   }
@@ -1162,7 +1931,7 @@ app.post('/api/data/:collection', (req: Request, res: Response) => {
     };
 
     store.posts.unshift(row);
-    saveStore(store);
+    await persistDoc('posts', row.id, row);
     return res.json(row);
   }
 
@@ -1186,7 +1955,7 @@ app.post('/api/data/:collection', (req: Request, res: Response) => {
     }
 
     store.follows.unshift(row);
-    saveStore(store);
+    await persistDoc('follows', row.id, row);
     return res.json(row);
   }
 
@@ -1209,7 +1978,7 @@ app.post('/api/data/:collection', (req: Request, res: Response) => {
     };
 
     store.notifications.unshift(row);
-    saveStore(store);
+    await persistDoc('notifications', row.id, row);
     return res.json(row);
   }
 
@@ -1233,7 +2002,7 @@ app.post('/api/data/:collection', (req: Request, res: Response) => {
     };
 
     store.matches.unshift(row);
-    saveStore(store);
+    await persistDoc('matches', row.id, row);
     return res.json(row);
   }
 
@@ -1241,7 +2010,7 @@ app.post('/api/data/:collection', (req: Request, res: Response) => {
 });
 
 // Update Record (Ownership / Auth Check for All Collections)
-app.patch('/api/data/:collection/:id', (req: Request, res: Response) => {
+app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
   const col = req.params.collection as keyof StoreData;
   const id = req.params.id;
   if (!store[col]) {
@@ -1283,14 +2052,40 @@ app.patch('/api/data/:collection/:id', (req: Request, res: Response) => {
     if (!rawBody) return res.status(400).json({ error: 'Post body cannot be empty' });
     patch.body = sanitizeText(rawBody, 2000);
   }
+  if (col === 'profiles') {
+    if (patch.avatar !== undefined) {
+      patch.avatar = sanitizeAvatar(patch.avatar);
+    }
+    if (patch.blocked_ids !== undefined) {
+      patch.blocked_ids = sanitizeArray(patch.blocked_ids, 200, 64);
+    }
+    if (patch.roles !== undefined) {
+      patch.roles = sanitizeArray(patch.roles, 2, 40);
+    }
+    if (patch.intent !== undefined) {
+      patch.intent = sanitizeText(patch.intent, 100);
+    }
+    if (patch.stage !== undefined) {
+      patch.stage = sanitizeText(patch.stage, 100);
+    }
+    if (patch.location !== undefined) {
+      patch.location = sanitizeText(patch.location, 100);
+    }
+    if (patch.hours_per_week !== undefined) {
+      patch.hours_per_week = sanitizeText(patch.hours_per_week, 50);
+    }
+    if (patch.website !== undefined) {
+      patch.website = sanitizeUrl(patch.website);
+    }
+  }
 
   store[col][index] = { ...existing, ...patch };
-  saveStore(store);
+  await persistDoc(col, id, store[col][index]);
   return res.json(store[col][index]);
 });
 
 // Delete Record (Ownership / Auth Check for All Collections)
-app.delete('/api/data/:collection/:id', (req: Request, res: Response) => {
+app.delete('/api/data/:collection/:id', async (req: Request, res: Response) => {
   const col = req.params.collection as keyof StoreData;
   const id = req.params.id;
   if (!store[col]) {
@@ -1324,7 +2119,7 @@ app.delete('/api/data/:collection/:id', (req: Request, res: Response) => {
   }
 
   store[col] = store[col].filter((item: any) => item.id !== id);
-  saveStore(store);
+  await removeDoc(col, id);
   return res.json({ success: true });
 });
 
@@ -1377,30 +2172,43 @@ app.post('/api/upload-photo', (req: Request, res: Response) => {
 });
 
 // Demo data operations (Admin session required)
-app.post('/api/demo/seed', (req: Request, res: Response) => {
+app.post('/api/demo/seed', async (req: Request, res: Response) => {
   if (!checkAdmin(req)) {
     return res.status(401).json({ error: 'Admin session required' });
   }
+  const toAdd: Array<{ id: string; data: any }> = [];
   for (const demo of INITIAL_DEMO_MEMBERS) {
     if (!store.profiles.some(p => p.id === demo.id)) {
       store.profiles.push({ ...demo });
+      toAdd.push({ id: demo.id, data: { ...demo } });
     }
   }
-  saveStore(store);
+  if (toAdd.length > 0) {
+    await batchPersistDocs('profiles', toAdd);
+  } else {
+    saveStore(store);
+  }
   return res.json({ success: true, count: store.profiles.length });
 });
 
-app.post('/api/demo/clear', (req: Request, res: Response) => {
+app.post('/api/demo/clear', async (req: Request, res: Response) => {
   if (!checkAdmin(req)) {
     return res.status(401).json({ error: 'Admin session required' });
   }
+  const demoIds = store.profiles.filter(p => p.is_demo).map(p => p.id);
   store.profiles = store.profiles.filter(p => !p.is_demo);
-  saveStore(store);
+  if (demoIds.length > 0 && storageMode === 'firestore' && firestoreDb) {
+    await batchRemoveDocs('profiles', demoIds);
+  } else {
+    saveStore(store);
+  }
   return res.json({ success: true, count: store.profiles.length });
 });
 
 // Production static assets or Vite middleware in dev
 async function setupVite() {
+  await initStorage();
+
   const isProd = process.env.NODE_ENV === 'production';
   const distPath = path.join(__dirname, 'dist');
 
@@ -1422,7 +2230,8 @@ async function setupVite() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Kwegatta server listening on port ${PORT} (0.0.0.0)`);
-    console.log(`Gemma Model: ${REQUIRED_OPEN_WEIGHT_MODEL}`);
+    console.log(`Gemma Model: ${DEFAULT_OPEN_WEIGHT_MODEL}`);
+    console.log(`Storage engine: ${storageMode.toUpperCase()}`);
   });
 }
 

@@ -22,6 +22,13 @@
         "avatar": { "type": "string" },
         "status": { "type": "string", "maxLength": 100 },
         "is_demo": { "type": "boolean" },
+        "intent": { "type": "string", "maxLength": 100 },
+        "stage": { "type": "string", "maxLength": 100 },
+        "roles": { "type": "array" },
+        "location": { "type": "string", "maxLength": 100 },
+        "hours_per_week": { "type": "string", "maxLength": 50 },
+        "website": { "type": "string", "maxLength": 200 },
+        "blocked_ids": { "type": "array" },
         "created_at": { "type": "string" }
       },
       "required": ["id", "name", "created_at"]

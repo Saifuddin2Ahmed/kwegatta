@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Zap, Sparkles, MessageCircle, AlertCircle, RefreshCw, Lightbulb, ExternalLink, QrCode, Check } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Profile, MatchResult } from '../types';
-import { matchCandidatesWithGemma, db, APP_NAME, requestMemberConnect } from '../services/api';
+import { matchCandidatesWithGemma, calculateKeywordMatches, db, APP_NAME, requestMemberConnect } from '../services/api';
 import { formatWhatsAppUrl } from '../utils';
 import { MatchOverlapAvatars } from './MatchOverlapAvatars';
 import { Avatar } from './Avatar';
@@ -26,6 +26,7 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
 }) => {
   const [matches, setMatches] = useState<MatchResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRefining, setIsRefining] = useState(false);
   const [isAiUsed, setIsAiUsed] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [newMembersCount, setNewMembersCount] = useState(0);
@@ -57,7 +58,6 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
   };
 
   const loadMatches = async (forceFresh = false) => {
-    setIsLoading(true);
     setErrorMessage(null);
 
     const cacheKey = `kw_matches_${currentProfile.id}`;
@@ -69,9 +69,10 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
         if (parsed.list && parsed.list.length > 0) {
           setMatches(parsed.list);
           setIsAiUsed(parsed.ai ?? true);
+          setIsRefining(false);
+          setIsLoading(false);
           const lastCount = parsed.count || 0;
           setNewMembersCount(Math.max(0, candidates.length - lastCount));
-          setIsLoading(false);
           triggerFirstMatchCelebration();
           return;
         }
@@ -80,45 +81,57 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
       }
     }
 
+    // REQUIREMENT 3: SHOW KEYWORD MATCHES AT ONCE, LABELLED "Quick match"
+    const quickMatches = calculateKeywordMatches(currentProfile, candidates);
+    if (quickMatches.length > 0) {
+      setMatches(quickMatches);
+      triggerFirstMatchCelebration();
+    }
+    setIsLoading(false);
+    setIsRefining(true);
+
     try {
       const res = await matchCandidatesWithGemma(currentProfile, candidates);
-      setMatches(res.list);
-      setIsAiUsed(res.ai);
-      if (res.error) {
-        setErrorMessage(res.error);
-      }
-      setNewMembersCount(0);
+      // Replace each with Gemma result when it arrives, labelled 'AI match', without list jumping around
+      if (res.list && res.list.length > 0) {
+        setMatches(res.list.map(m => ({ ...m, matchType: 'ai' })));
+        setIsAiUsed(true);
+        if (res.error) {
+          setErrorMessage(res.error);
+        } else {
+          setErrorMessage(null);
+        }
+        setNewMembersCount(0);
 
-      try {
-        localStorage.setItem(
-          cacheKey,
-          JSON.stringify({
-            list: res.list,
-            ai: res.ai,
-            count: candidates.length,
-            timestamp: Date.now()
-          })
-        );
-      } catch (_) {}
+        try {
+          localStorage.setItem(
+            cacheKey,
+            JSON.stringify({
+              list: res.list.map(m => ({ ...m, matchType: 'ai' })),
+              ai: true,
+              count: candidates.length,
+              timestamp: Date.now()
+            })
+          );
+        } catch (_) {}
 
-      if (res.list.length > 0) {
-        triggerFirstMatchCelebration();
-      }
-
-      // Record match pairs in database
-      for (const m of res.list) {
-        await db.insert('matches', {
-          a_id: currentProfile.id,
-          b_id: m.id,
-          score: m.score,
-          reason: m.reason,
-          spark: m.spark || ''
-        });
+        // Record match pairs in database
+        for (const m of res.list) {
+          await db.insert('matches', {
+            a_id: currentProfile.id,
+            b_id: m.id,
+            score: m.score,
+            reason: m.reason,
+            spark: m.spark || ''
+          });
+        }
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'Error executing match ranking');
+      console.warn('Gemma background matching failed, keeping quick matches:', err);
+      // Keep quick matches, do not blank screen or throw error
+      setIsAiUsed(false);
     } finally {
-      setIsLoading(false);
+      setIsRefining(false);
     }
   };
 
@@ -174,9 +187,17 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
       {/* Main Section Header */}
       <div className="flex items-baseline justify-between gap-4 border-b border-[var(--card-border)] pb-4">
         <div className="space-y-0.5">
-          <h2 className="text-lg sm:text-xl font-display font-bold text-[var(--fg)] tracking-tight">
-            Recommended Collaborators
-          </h2>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <h2 className="text-lg sm:text-xl font-display font-bold text-[var(--fg)] tracking-tight">
+              Recommended Collaborators
+            </h2>
+            {isRefining && (
+              <span className="text-[11px] text-[var(--gold)] flex items-center gap-1.5 font-medium bg-[var(--gold-subtle)] px-2.5 py-0.5 rounded-full border border-[var(--gold)]/20 animate-pulse">
+                <Sparkles className="w-3 h-3 animate-spin" />
+                <span>Refining with Gemma 4...</span>
+              </span>
+            )}
+          </div>
           <p className="text-xs text-[var(--fg-muted)]">
             Synthesized by Gemma 4 based on complementary needs, offers, and learning goals
           </p>
@@ -184,11 +205,11 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
 
         <button
           onClick={() => loadMatches(true)}
-          disabled={isLoading}
+          disabled={isLoading || isRefining}
           className="kw-btn kw-btn-ghost text-xs py-1.5 px-2.5 flex items-center gap-1.5"
           title="Recalculate matches"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-3.5 h-3.5 ${isRefining ? 'animate-spin' : ''}`} />
           <span>Refresh{newMembersCount > 0 ? ` (${newMembersCount} new)` : ''}</span>
         </button>
       </div>
@@ -213,7 +234,7 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
           <div className="space-y-1">
             <h3 className="font-semibold text-sm text-[var(--fg)]">Be the first to connect</h3>
             <p className="text-xs text-[var(--fg-muted)] max-w-sm mx-auto">
-              Share your profile or connect with fellow builders. As more members join, Gemma 4 will automatically surface your top matches.
+              Share your profile or connect with other people. As more members join, Gemma 4 will automatically surface your top matches.
             </p>
           </div>
           <button onClick={onShowQr} className="kw-btn kw-btn-gold text-xs py-2 px-4 font-semibold">
@@ -255,6 +276,18 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
                         <span className="text-xs text-[var(--teal)] font-medium">
                           {profile.role}
                         </span>
+                        {/* Requirement 3: Labelled Quick match or AI match */}
+                        {m.matchType === 'quick' ? (
+                          <span className="kw-badge text-[10px] bg-[var(--bg-subtle)] text-[var(--fg-muted)] border border-[var(--card-border)] flex items-center gap-1 font-medium transition-all">
+                            <Zap className="w-2.5 h-2.5 text-[var(--gold)]" />
+                            <span>Quick match</span>
+                          </span>
+                        ) : (
+                          <span className="kw-badge text-[10px] bg-[var(--gold-subtle)] text-[var(--gold)] border border-[var(--gold)]/30 flex items-center gap-1 font-semibold transition-all animate-in fade-in">
+                            <Sparkles className="w-2.5 h-2.5" />
+                            <span>AI match</span>
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-[var(--fg-muted)] leading-normal line-clamp-2 max-w-lg">
                         {profile.headline || profile.bio}

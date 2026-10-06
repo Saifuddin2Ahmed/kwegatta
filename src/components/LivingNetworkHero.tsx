@@ -192,7 +192,7 @@ export const HeroSection: React.FC<HeroProps> = ({
                 onClick={onJoinClick}
                 className="kw-btn kw-btn-gold text-sm sm:text-base py-3 px-6 font-bold shadow-lg inline-flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer"
               >
-                <span>Get matched in 60 seconds</span>
+                <span>Get matched in about 2 minutes</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
 

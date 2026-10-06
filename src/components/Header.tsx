@@ -12,6 +12,7 @@ interface HeaderProps {
   searchQuery: string;
   onSearchChange: (q: string) => void;
   onNavigate: (tab: string) => void;
+  onJoin?: () => void;
   activeTab?: string;
   isDemoMode?: boolean;
 }
@@ -24,11 +25,16 @@ export const Header: React.FC<HeaderProps> = ({
   searchQuery,
   onSearchChange,
   onNavigate,
+  onJoin,
   activeTab
 }) => {
   const [showMobileSearch, setShowMobileSearch] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const mobileSearchInputRef = useRef<HTMLInputElement>(null);
+
+  // Requirement 6: Search hint shows "Ctrl K" on Windows and Android, "⌘K" on Apple
+  const isApple = typeof navigator !== 'undefined' && /(Mac|iPhone|iPod|iPad)/i.test(navigator.userAgent);
+  const searchShortcutHint = isApple ? '⌘K' : 'Ctrl K';
 
   useEffect(() => {
     // Keyboard shortcut to focus search (/ or Cmd/Ctrl+K)
@@ -107,7 +113,7 @@ export const Header: React.FC<HeaderProps> = ({
               aria-label="Search people, skills, and needs"
             />
             <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-0.5 text-[10px] font-mono text-[var(--fg-subtle)] bg-[var(--card)] border border-[var(--card-border)] px-1.5 py-0.5 rounded pointer-events-none">
-              <span className="text-[9px]">⌘</span>K
+              <span>{searchShortcutHint}</span>
             </div>
           </div>
         </div>
@@ -173,7 +179,10 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           ) : (
             <button
-              onClick={() => onNavigate('onboard')}
+              onClick={() => {
+                if (onJoin) onJoin();
+                else onNavigate('onboard');
+              }}
               className="kw-btn kw-btn-gold text-xs py-1.5 px-3.5 rounded-xl font-semibold active:scale-95 shadow-sm cursor-pointer"
             >
               Join

@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] - 2026-10-06
+
+### Added
+- **Designated Open-Weight Models (`gemma-4-26b-a4b-it` default & `gemma-4-31b-it` alternative)**:
+  - Default production inference model upgraded to `gemma-4-26b-a4b-it`, delivering 732ms avg TTFT (~24x speedup) and 100% benchmark reliability.
+  - Retained `gemma-4-31b-it` as designated high-capacity alternative.
+  - Published comprehensive benchmark comparison table in `docs/AI-USAGE.md`.
+- **Member Safety (Report & Block)**:
+  - Added "Report profile" and "Block member" in a "More" menu next to Connect and Follow on another member's profile (`/#/u/:id`), along with direct quick-action buttons.
+  - Connected reports to the `/admin` dashboard under Safety Reports for instant moderation review.
+- **Profile Photo Controls**:
+  - Added visible "Change photo" button on "My profile" with real-time feedback (preview, processing spinner, confirmation checkmark, error retry).
+
+### Changed
+- **Privacy Standard Alignment**:
+  - Replaced heading on `/privacy` with "Aligned with the Digital Public Goods Standard", ensuring clear self-assessment language without implying formal certification.
+- **Sign-up Resilience**:
+  - Profiles are committed immediately to Firestore before AI synthesis, preventing answer loss on network dropouts.
+
+---
+
 ## [1.0.0] - 2026-10-02 — Hack Day Kampala Release
 
 ### Added

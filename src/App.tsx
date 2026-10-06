@@ -13,6 +13,8 @@ import { WallView } from './components/WallView';
 import { SetupView } from './components/SetupView';
 import { AdminView } from './components/AdminView';
 import { AboutView } from './components/AboutView';
+import { PrivacyView } from './components/PrivacyView';
+import { LicenseView } from './components/LicenseView';
 import { Footer } from './components/Footer';
 import { Profile, Post, NotificationItem, Follow } from './types';
 import { db, APP_NAME, ensureAuthToken } from './services/api';
@@ -108,10 +110,26 @@ export default function App() {
     return () => clearInterval(interval);
   }, [refreshData]);
 
-  // Handle URL hash changes
+  // Listen for live background AI profile polish updates
+  useEffect(() => {
+    const handleProfileUpdate = (e: any) => {
+      const updated = e.detail as Profile;
+      if (updated && updated.id) {
+        setCurrentProfile(prev => (prev && prev.id === updated.id ? updated : prev));
+        setAllProfiles(prev => prev.map(p => (p.id === updated.id ? updated : p)));
+      }
+    };
+    window.addEventListener('kwegatta_profile_updated', handleProfileUpdate);
+    return () => window.removeEventListener('kwegatta_profile_updated', handleProfileUpdate);
+  }, []);
+
+  // Handle URL hash changes (and pathname direct links like /privacy, /license)
   const handleHashChange = useCallback(() => {
-    const hash = window.location.hash.replace(/^#\/?/, '');
-    const parts = hash.split('/');
+    const rawHash = window.location.hash.replace(/^#\/?/, '');
+    const rawPath = window.location.pathname.replace(/^\//, '');
+    const directPath = ['privacy', 'license', 'about', 'wall'].includes(rawPath) ? rawPath : '';
+    const effective = rawHash || directPath || 'home';
+    const parts = effective.split('/');
     const main = parts[0] || 'home';
     const sub = parts[1];
 
@@ -120,7 +138,7 @@ export default function App() {
     } else if (main === 'u' && sub) {
       setViewedProfileId(sub);
       setActiveTab('userProfile');
-    } else if (['home', 'learn', 'people', 'feed', 'inbox', 'me', 'setup', 'admin', 'about', 'onboard'].includes(main)) {
+    } else if (['home', 'learn', 'people', 'feed', 'inbox', 'me', 'setup', 'admin', 'about', 'onboard', 'privacy', 'license'].includes(main)) {
       setActiveTab(main);
       setViewedProfileId(null);
     } else {
@@ -146,8 +164,27 @@ export default function App() {
     else if (tab === 'admin') window.location.hash = '#/admin';
     else if (tab === 'setup') window.location.hash = '#/setup';
     else if (tab === 'about') window.location.hash = '#/about';
-    else if (tab === 'onboard') window.location.hash = '#/onboard';
+    else if (tab === 'privacy') window.location.hash = '#/privacy';
+    else if (tab === 'license') window.location.hash = '#/license';
+    else if (tab === 'onboard') triggerJoinFlow();
     else window.location.hash = `#/${tab}`;
+  };
+
+  const triggerJoinFlow = () => {
+    // "Join" and "Get matched in about 2 minutes" work from every page:
+    // go to the landing page, scroll to the onboarding chat and focus the input.
+    window.location.hash = '#/onboard';
+    setActiveTab('onboard');
+    setTimeout(() => {
+      const el = document.getElementById('onboarding-composer');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth' });
+        setTimeout(() => {
+          const input = el.querySelector('input:not([type="file"]):not([hidden]), textarea, button') as HTMLElement | null;
+          input?.focus();
+        }, 350);
+      }
+    }, 120);
   };
 
   const navigateToProfile = (profileId: string) => {
@@ -157,8 +194,8 @@ export default function App() {
   // Follow / Unfollow
   const handleToggleFollow = async (targetId: string) => {
     if (!currentProfile) {
-      showToast('Join Kwegatta to follow other builders');
-      navigateTo('onboard');
+      showToast('Join Kwegatta to follow other people');
+      triggerJoinFlow();
       return;
     }
 
@@ -246,6 +283,7 @@ export default function App() {
           if (activeTab !== 'people') navigateTo('people');
         }}
         onNavigate={navigateTo}
+        onJoin={triggerJoinFlow}
         activeTab={activeTab}
         isDemoMode={isDemoMode}
       />
@@ -284,16 +322,7 @@ export default function App() {
               profiles={allProfiles}
               matchesCount={matches.length}
               postsCount={posts.length}
-              onJoinClick={() => {
-                const el = document.getElementById('onboarding-composer');
-                if (el) {
-                  el.scrollIntoView({ behavior: 'smooth' });
-                  setTimeout(() => {
-                    const input = el.querySelector('input:not([type="file"]), textarea') as HTMLInputElement | null;
-                    input?.focus();
-                  }, 350);
-                }
-              }}
+              onJoinClick={triggerJoinFlow}
             />
 
             {/* c) The onboarding chat, directly under the hero */}
@@ -327,7 +356,7 @@ export default function App() {
             followingIds={followingIds}
             onToggleFollow={handleToggleFollow}
             onViewProfile={navigateToProfile}
-            onJoinClick={() => navigateTo('onboard')}
+            onJoinClick={triggerJoinFlow}
           />
         ) : activeTab === 'people' ? (
           <PeopleView
@@ -384,6 +413,10 @@ export default function App() {
           )
         ) : activeTab === 'about' ? (
           <AboutView onNavigateHome={() => navigateTo('home')} />
+        ) : activeTab === 'privacy' ? (
+          <PrivacyView onBack={() => navigateTo('home')} />
+        ) : activeTab === 'license' ? (
+          <LicenseView onBack={() => navigateTo('home')} />
         ) : displayedProfile ? (
           <ProfileView
             profile={displayedProfile}
@@ -418,7 +451,7 @@ export default function App() {
       </main>
 
       {/* Production-Grade Multi-Column Startup Footer */}
-      <Footer onNavigate={navigateTo} />
+      <Footer onNavigate={navigateTo} onJoin={triggerJoinFlow} />
 
     </div>
   );

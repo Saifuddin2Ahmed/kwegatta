@@ -3,7 +3,7 @@
 [![Hacktoberfest 2026](https://img.shields.io/badge/Hacktoberfest-2026-ff7a00.svg?style=flat-square&logo=hacktoberfest)](https://hacktoberfest.com/)
 [![Award: 2nd Place Hack Day Kampala](https://img.shields.io/badge/Award-2nd_Place_·_Hack_Day_Kampala-ffd700.svg?style=flat-square&logo=trophy)](https://github.com/Saifuddin2Ahmed/kwegatta)
 [![Entry: Best Open-Source AI Project](https://img.shields.io/badge/Entry-Best_Open--Source_AI_Project-238636.svg?style=flat-square)](https://www.mlh.com/opensource-ai)
-[![Open-Weight Model: Gemma 4 31B IT](https://img.shields.io/badge/Model-gemma--4--31b--it-4493f8.svg?style=flat-square)](https://ai.google.dev/gemma/docs/core)
+[![Open-Weight Model: Gemma 4](https://img.shields.io/badge/Model-gemma--4--26b--a4b--it_(default)_|_31b--it-4493f8.svg?style=flat-square)](https://ai.google.dev/gemma/docs/core)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](./LICENSE)
 [![Gemma Terms: Apache 2.0](https://img.shields.io/badge/Gemma_License-Apache_2.0-blue.svg?style=flat-square)](https://ai.google.dev/gemma/docs/core)
 [![Digital Public Goods](https://img.shields.io/badge/DPG-Aligned-success.svg?style=flat-square)](./docs/DPG-ALIGNMENT.md)
@@ -27,7 +27,7 @@
 - [Team](#team)
 - [System Architecture](#system-architecture)
 - [Core Features](#core-features)
-- [Open-Weight AI Model (Gemma 4 31B IT)](#open-weight-ai-model-gemma-4-31b-it)
+- [Open-Weight AI Model (Gemma 4: gemma-4-26b-a4b-it / gemma-4-31b-it)](#open-weight-ai-model-gemma-4)
 - [Privacy & User Sovereignty Controls](#privacy--user-sovereignty-controls)
 - [Tech Stack](#tech-stack)
 - [Run Locally](#run-locally)
@@ -52,9 +52,9 @@ Traditional networking fails because:
 
 ## The Solution & Goals
 
-**Kwegatta** turns room networking into a seamless 60-second experience:
-1. **60-Second Chat Onboarding on Mobile**: A quick conversation gathers the member's name, public GitHub, what they offer, what they need, what they teach, and what they want to learn.
-2. **AI Synthesized Profiles**: The open-weight model **Gemma 4** (`gemma-4-31b-it`) synthesizes a punchy headline, 2-sentence bio, skills, and role using strictly member-supplied facts.
+**Kwegatta** turns room networking into a seamless experience:
+1. **Chat Onboarding on Mobile**: A quick conversation gathers the member's name, public GitHub, what they offer, what they need, what they teach, and what they want to learn.
+2. **AI Synthesized Profiles**: The open-weight model **Gemma 4** (`gemma-4-26b-a4b-it` default, `gemma-4-31b-it` alternative) synthesizes a punchy headline, 2-sentence bio, skills, and role using strictly member-supplied facts.
 3. **Complementary Matchmaking**: AI evaluates need-and-offer coverage rather than mere surface similarity (e.g., matching a business student who needs mobile developers with a Flutter developer who needs sales and marketing).
 4. **Instant WhatsApp / LinkedIn Connect**: With one tap, users launch a pre-composed WhatsApp icebreaker (`wa.me`) or reach out via LinkedIn.
 5. **Peer Mentorship & Study Buddies**: Automatically identifies one mentor (who teaches what you want to learn) and one study partner (learning the same topic).
@@ -70,7 +70,7 @@ Traditional networking fails because:
 * **Organizers**: Hacktoberfest 2026 is powered by **Major League Hacking (MLH)** and **DEV**, presented by **DigitalOcean**. Theme: *"AI belongs to everyone"*.
 * **Challenge Entered**: **Best Open-Source AI Project** ([https://www.mlh.com/opensource-ai](https://www.mlh.com/opensource-ai))
 * **Result**: Named one of the two winning teams (**2nd place · Hacktoberfest 2026 Hack Day Kampala**).
-* **Designated Model**: **`gemma-4-31b-it`** (Google DeepMind, Apache 2.0 open-weight model with 31 billion parameters, qualifying as a large language model under challenge rules).
+* **Designated Models**: **`gemma-4-26b-a4b-it`** (default; benchmarked at 732ms avg TTFT) and **`gemma-4-31b-it`** (alternative), both Google DeepMind Apache 2.0 open-weight models qualifying under challenge rules.
 
 ---
 
@@ -78,7 +78,7 @@ Traditional networking fails because:
 
 | Challenge Requirement | How Kwegatta Meets the Requirement |
 | --------------------- | ---------------------------------- |
-| **a) Open-source or open-weight AI is an important part of the project** | **MET**: Every AI feature in Kwegatta (profile synthesis, complementary matchmaking, post classification, and learning recommendations) runs exclusively on the open-weight model `gemma-4-31b-it`. No closed or proprietary models are used. |
+| **a) Open-source or open-weight AI is an important part of the project** | **MET**: Every AI feature in Kwegatta (profile synthesis, complementary matchmaking, post classification, and learning recommendations) runs exclusively on open-weight Gemma 4 models (`gemma-4-26b-a4b-it` as default, `gemma-4-31b-it` as alternative). No closed or proprietary models are used. |
 | **b) Public GitHub repository with an open-source licence** | **MET**: Public repository at [https://github.com/Saifuddin2Ahmed/kwegatta](https://github.com/Saifuddin2Ahmed/kwegatta) under the OSI-approved **MIT License** (`LICENSE`). |
 | **c) README explains what we built, how to run or try it, names the model and key dependencies, with a link to the model's licence** | **MET**: This README explains Kwegatta in detail, provides local run instructions, lists dependencies, and links to the [Apache 2.0 license for Gemma 4](https://ai.google.dev/gemma/docs/core). |
 | **d) A working demo and a clear explanation** | **MET**: Live deployed app running at [https://kwegatta.ai.studio](https://kwegatta.ai.studio) with a step-by-step walkthrough in [docs/DEMO-SCRIPT.md](docs/DEMO-SCRIPT.md). |
@@ -127,7 +127,7 @@ graph TD
     end
 
     subgraph CloudServices ["Cloud Infrastructure & AI"]
-        GEMMA["Open-Weight Model: gemma-4-31b-it (Google Cloud API)"]
+        GEMMA["Open-Weight Model: gemma-4-26b-a4b-it (default) / 31b-it (alt)"]
         FIRESTORE["Cloud Firestore (Persistent NoSQL Data)"]
         GITHUB_API["GitHub REST API (Public Repos)"]
     end
@@ -158,16 +158,16 @@ Detailed architectural documentation is available in [docs/ARCHITECTURE.md](docs
 
 ---
 
-## Open-Weight AI Model (Gemma 4 31B IT)
+## Open-Weight AI Model (Gemma 4: gemma-4-26b-a4b-it / gemma-4-31b-it)
 
 Kwegatta enforces a strict architectural policy:
-1. **Model**: Exclusively uses **`gemma-4-31b-it`**, an open-weight foundation model published by Google DeepMind under the [Apache 2.0 License](https://ai.google.dev/gemma/docs/core).
+1. **Model**: Exclusively uses open-weight foundation models published by Google DeepMind under the [Apache 2.0 License](https://ai.google.dev/gemma/docs/core): **`gemma-4-26b-a4b-it`** (default production model, benchmarked at 732ms average TTFT) and **`gemma-4-31b-it`** (designated high-capacity alternative).
 2. **Zero Closed Models**: Closed proprietary models (Gemini, GPT, Claude) are strictly banned to maintain open-source software sovereignty.
 3. **Server-Side Execution**: The API key is stored and executed exclusively on the server (`server.ts`). No credentials ever appear in client bundles.
 4. **Anti-Hallucination Guardrails**: Prompts explicitly forbid inventing skills, universities, or achievements. Only facts provided by members are used.
 5. **Deterministic Heuristic Fallback**: If the model times out (> 90s) or fails, Kwegatta seamlessly activates its keyword complement ranking, transparently labeled `Basic match (AI unavailable)`.
 
-Full prompt specifications and safety boundaries are documented in [docs/AI-USAGE.md](docs/AI-USAGE.md).
+Full prompt specifications, benchmarks, and safety boundaries are documented in [docs/AI-USAGE.md](docs/AI-USAGE.md).
 
 ---
 
@@ -191,7 +191,7 @@ Read our full privacy policy in [PRIVACY.md](PRIVACY.md) and schema specificatio
 * **QR Codes**: `qrcode` library
 * **Backend**: Node.js 20+, Express
 * **Database**: Cloud Firestore
-* **AI Model**: `gemma-4-31b-it` via `@google/genai` on server
+* **AI Model**: `gemma-4-26b-a4b-it` (default) and `gemma-4-31b-it` (alternative) via `@google/genai` on server
 
 ---
 
@@ -200,7 +200,7 @@ Read our full privacy policy in [PRIVACY.md](PRIVACY.md) and schema specificatio
 ### Prerequisites
 * Node.js 20+ installed
 * npm
-* A Google AI Studio API key (for `gemma-4-31b-it`)
+* A Google AI Studio API key (for `gemma-4-26b-a4b-it` / `gemma-4-31b-it`)
 
 ### 1. Clone the Repository
 ```bash
@@ -260,7 +260,7 @@ We extend our sincere thanks to:
 * **Web3 Club MUBS** and **GDG on Campus MUBS** for hosting the event at the EIIC.
 * **Major League Hacking (MLH)** and **DEV** for organizing Hacktoberfest 2026.
 * **DigitalOcean** for presenting Hacktoberfest 2026 under the theme *"AI belongs to everyone"*.
-* **Google DeepMind & Google AI** for releasing the open-weight **Gemma 4** (`gemma-4-31b-it`) model under the Apache 2.0 license.
+* **Google DeepMind & Google AI** for releasing the open-weight **Gemma 4** (`gemma-4-26b-a4b-it` and `gemma-4-31b-it`) models under the Apache 2.0 license.
 
 ---
 
