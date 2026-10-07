@@ -1,6 +1,6 @@
 {
   "name": "kwegatta",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Network where students and builders match by what they need and offer using the open-weight Gemma 4 model.",
   "license": "MIT",
   "repository": {
@@ -15,6 +15,9 @@
     "uganda"
   ],
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",

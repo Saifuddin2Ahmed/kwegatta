@@ -394,7 +394,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
               Built as a Digital Public Good for global communities.
             </h2>
             <p className="text-xs sm:text-sm text-[var(--fg-muted)] leading-relaxed max-w-2xl">
-              Kwegatta was built at <strong className="text-[var(--fg)]">Hacktoberfest 2026 Hack Day Kampala × MUBS</strong> (Makerere University Business School). We entered the Best Open-Source AI Project challenge, and Kwegatta was named one of the two winning teams (2nd place). Released under the MIT licence, it is designed for adaptation by universities, NGOs, and developer networks worldwide.
+              Kwegatta was built at <strong className="text-[var(--fg)]">Hacktoberfest 2026 Hack Day Kampala × MUBS</strong> (Makerere University Business School). We entered the Best Open-Source AI Project challenge, and Kwegatta was awarded 1st place · Hacktoberfest 2026 Hack Day Kampala. Sixty-seven people took part and eight projects were built. Kwegatta was awarded 1st place, and the team was forwarded to the MUBS Entrepreneurship, Innovation and Incubation Centre for its incubator. Released under the MIT licence, it is designed for adaptation by universities, NGOs, and developer networks worldwide.
             </p>
           </div>
 

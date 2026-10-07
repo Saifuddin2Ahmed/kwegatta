@@ -63,7 +63,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({
 
       ctx.fillStyle = 'rgba(240, 243, 246, 0.6)';
       ctx.font = '16px "Inter", sans-serif';
-      ctx.fillText('Open Collaboration & Matchmaking', 230, 80);
+      ctx.fillText('1st place · Hacktoberfest 2026 Hack Day Kampala', 230, 80);
 
       // 3. Member Avatar
       const avatarSize = 150;
@@ -213,7 +213,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({
       // Footer notice
       ctx.fillStyle = 'rgba(240, 243, 246, 0.4)';
       ctx.font = '13px "Inter", sans-serif';
-      ctx.fillText('kwegatta.ai.studio · Kampala, Uganda', 64, height - 48);
+      ctx.fillText('kwegatta.ai.studio · Kampala, Uganda · 1st place · Hacktoberfest 2026 Hack Day Kampala', 64, height - 48);
 
       if (isMounted) {
         setDataUrl(canvas.toDataURL('image/png'));

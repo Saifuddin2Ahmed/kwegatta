@@ -4293,11 +4293,60 @@ async function setupVite() {
 
   if (isProd && fs.existsSync(distPath)) {
     console.log('Serving production static bundle from dist');
-    app.use(express.static(distPath));
+
+    // Long-lived immutable caching for hashed /assets/
+    app.use('/assets', express.static(path.join(distPath, 'assets'), {
+      maxAge: '1y',
+      immutable: true,
+      setHeaders: (res) => {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+    }));
+
+    // Cache-Control: no-cache for sw.js
+    app.get('/sw.js', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile(path.join(distPath, 'sw.js'));
+    });
+
+    // Cache-Control: no-cache for index.html
+    app.get(['/', '/index.html'], (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache');
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+
+    app.use(express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('index.html') || filePath.endsWith('sw.js')) {
+          res.setHeader('Cache-Control', 'no-cache');
+        } else if (filePath.includes('/assets/')) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      }
+    }));
+
     app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-cache');
       res.sendFile(path.join(distPath, 'index.html'));
     });
   } else {
+    // In dev / middleware mode:
+    app.get('/sw.js', (_req, res, next) => {
+      res.setHeader('Cache-Control', 'no-cache');
+      const swPublic = path.join(__dirname, 'public', 'sw.js');
+      if (fs.existsSync(swPublic)) {
+        return res.sendFile(swPublic);
+      }
+      next();
+    });
+
+    app.use((req, res, next) => {
+      if (req.path === '/index.html' || req.path === '/' || req.path === '/sw.js') {
+        res.setHeader('Cache-Control', 'no-cache');
+      }
+      next();
+    });
+
     console.log('Starting Vite in middleware mode for rapid development');
     const { createServer } = await import('vite');
     const vite = await createServer({

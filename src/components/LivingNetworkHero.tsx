@@ -171,7 +171,7 @@ export const HeroSection: React.FC<HeroProps> = ({
               className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--gold)] hover:underline tracking-wide cursor-pointer"
             >
               <Trophy className="w-3.5 h-3.5 flex-shrink-0" />
-              <span>2nd place · Hacktoberfest 2026 Hack Day Kampala</span>
+              <span>1st place · Hacktoberfest 2026 Hack Day Kampala</span>
             </a>
           </div>
 
@@ -262,7 +262,7 @@ export const KampalaStorySection: React.FC<KampalaStoryProps> = () => {
         <div className="lg:col-span-7 space-y-6">
           <div className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--gold)] tracking-wide">
             <Trophy className="w-3.5 h-3.5" />
-            <span>2nd place · Hacktoberfest 2026 Hack Day Kampala</span>
+            <span>1st place · Hacktoberfest 2026 Hack Day Kampala</span>
           </div>
 
           <h2 className="text-3xl sm:text-4xl lg:text-5xl font-display font-extrabold text-[var(--fg)] tracking-tight">
@@ -277,7 +277,7 @@ export const KampalaStorySection: React.FC<KampalaStoryProps> = () => {
               We entered the Best Open-Source AI Project challenge: build something real with an open-weight AI model. We built Kwegatta using strictly Gemma 4.
             </p>
             <p>
-              Seven people from different universities and organisations met that morning, built Kwegatta by the afternoon, and was named one of the two winning teams (2nd place).
+              Sixty-seven people took part and eight projects were built. Kwegatta was awarded 1st place, and the team was forwarded to the MUBS Entrepreneurship, Innovation and Incubation Centre for its incubator.
             </p>
           </div>
         </div>

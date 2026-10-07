@@ -44,6 +44,45 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [showUpdateBar, setShowUpdateBar] = useState(false);
+
+  // Listen for new service worker taking control
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+
+    let hadPreviousController = !!navigator.serviceWorker.controller;
+
+    const onControllerChange = () => {
+      setShowUpdateBar(true);
+    };
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'NEW_VERSION_AVAILABLE') {
+        setShowUpdateBar(true);
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+    navigator.serviceWorker.addEventListener('message', onMessage);
+
+    navigator.serviceWorker.getRegistration().then((reg) => {
+      if (!reg) return;
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'activated' && (hadPreviousController || navigator.serviceWorker.controller)) {
+            setShowUpdateBar(true);
+          }
+        });
+      });
+    }).catch(() => {});
+
+    return () => {
+      navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+      navigator.serviceWorker.removeEventListener('message', onMessage);
+    };
+  }, []);
 
   // Initialize theme (default to dark ink theme)
   useEffect(() => {
@@ -421,12 +460,32 @@ export default function App() {
           <span>{toastMessage}</span>
           <button
             onClick={() => setToastMessage(null)}
-            className="text-[var(--fg-muted)] hover:text-[var(--fg)] text-xs font-bold p-1"
+            className="text-[var(--fg-muted)] hover:text-[var(--fg)] text-xs font-bold p-1 cursor-pointer"
             aria-label="Dismiss toast"
           >
             ✕
           </button>
         </div>
+      )}
+
+      {/* New Version Ready Notification Bar */}
+      {showUpdateBar && (
+        <aside
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center justify-between gap-4 px-4 py-2.5 rounded-xl bg-[var(--card)] border border-[var(--gold)] shadow-2xl text-xs sm:text-sm font-medium text-[var(--fg)] max-w-md w-[calc(100%-2rem)] animate-in fade-in slide-in-from-bottom-3"
+        >
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-2 h-2 rounded-full bg-[var(--gold)] animate-pulse" />
+            <span>A new version is ready</span>
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            className="kw-btn kw-btn-gold text-xs py-1.5 px-3 font-semibold cursor-pointer"
+          >
+            Refresh
+          </button>
+        </aside>
       )}
 
       {/* Main Content Container with standard max-width and balanced vertical rhythm */}

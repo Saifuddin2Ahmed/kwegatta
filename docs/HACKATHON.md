@@ -13,6 +13,7 @@ This document contains the official hackathon details, compliance checklist, and
 * **Organizers**: Hacktoberfest 2026 is powered by **Major League Hacking (MLH)** and **DEV**, presented by **DigitalOcean**
 * **Theme**: *"AI belongs to everyone"*
 * **Challenge Entered**: **Best Open-Source AI Project** ([https://www.mlh.com/opensource-ai](https://www.mlh.com/opensource-ai))
+* **Result**: **1st place · Hacktoberfest 2026 Hack Day Kampala**. Sixty-seven people took part and eight projects were built. Kwegatta was awarded 1st place, and the team was forwarded to the MUBS Entrepreneurship, Innovation and Incubation Centre for its incubator.
 * **Designated Model**: **`gemma-4-31b-it`** (Google DeepMind, Apache 2.0 open-weight model with 31 billion parameters, qualifying as a large language model under challenge rules).
 
 ---
@@ -45,7 +46,7 @@ https://github.com/Saifuddin2Ahmed/kwegatta
 ### Technologies Used
 * **AI Model**: `gemma-4-31b-it` (Open-Weight Large Language Model, Apache 2.0)
 * **Frontend**: React 19, TypeScript, Vite, Tailwind CSS, GitHub Primer Design System, Lucide Icons, QRCode
-* **Backend**: Node.js 20+, Express, Vite server middleware
+* **Backend**: Node.js 22+, Express, Vite server middleware
 * **Database**: Cloud Firestore
 * **APIs**: GitHub REST API (public repository inspection)
 * **Standard Alignment**: Aligned with the Digital Public Goods Standard (SDG 4, SDG 8, SDG 9, SDG 17)

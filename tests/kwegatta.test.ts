@@ -228,3 +228,38 @@ describe('Member-Submitted Events & Approval Permissions', () => {
   });
 });
 
+describe('Service Worker & Cache-Control Configuration (PWA v1.2.1)', () => {
+  it('public/sw.js specifies CACHE_NAME as kwegatta-1.2.1 and handles cache strategies correctly', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
+
+    // 1. Cache name includes version kwegatta-1.2.1
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.2.1'");
+
+    // 2. Skip waiting and clients claim are preserved
+    expect(swContent).toContain('self.skipWaiting()');
+    expect(swContent).toContain('self.clients.claim()');
+
+    // 3. /api/ requests never cached
+    expect(swContent).toContain("request.url.includes('/api/')");
+
+    // 4. Page requests (/, /index.html, navigate) are network-first
+    expect(swContent).toContain("url.pathname === '/' ||");
+    expect(swContent).toContain("url.pathname === '/index.html'");
+
+    // 5. Hashed assets under /assets/ are handled
+    expect(swContent).toContain("url.pathname.includes('/assets/')");
+  });
+
+  it('server.ts sends Cache-Control: no-cache for index.html and sw.js, and immutable for assets', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const serverContent = fs.readFileSync(path.join(process.cwd(), 'server.ts'), 'utf-8');
+
+    expect(serverContent).toContain("res.setHeader('Cache-Control', 'no-cache');");
+    expect(serverContent).toContain("immutable");
+  });
+});
+
+

@@ -6,6 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.1] - 2026-10-07
+
+### Changed
+- **PWA Service Worker Cache Strategy (`public/sw.js`)**:
+  - Network-first caching for page navigations, `/`, and `/index.html` to guarantee visitors always receive the latest release, falling back to cache when offline.
+  - Hashed `/assets/` served cache-first.
+  - Stale-while-revalidate strategy for icons, manifest, and static images.
+  - Upgraded cache bucket to `kwegatta-1.2.1` with automatic stale cache eviction on activate.
+  - Retained `skipWaiting` and `clients.claim` with new version notification bar: "A new version is ready" with a "Refresh" button.
+- **Server Cache-Control Headers (`server.ts`)**:
+  - Added `Cache-Control: no-cache` for `index.html` and `sw.js`.
+  - Added long-lived immutable caching (`Cache-Control: public, max-age=31536000, immutable`) for `/assets/`.
+
+---
+
 ## [1.2.0] - 2026-10-07
 
 ### Added
