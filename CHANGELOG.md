@@ -6,6 +6,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.0] - 2026-10-07
+
+### Added
+- **Security Hardening**:
+  - Administrative endpoint protected by timing-safe authentication, 15-minute lock after 5 failed attempts, and persistent audit logging.
+  - Strict security headers (`Strict-Transport-Security`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and granular `Content-Security-Policy`).
+  - Zero-vulnerability dependency chain with `@grpc/grpc-js` and `uuid` overrides.
+- **Scale & Performance**:
+  - Account-aware rate limiting: 240 req/min for authenticated members and 1200 req/min for visitor networks.
+  - Efficient `/api/avatar/:id` endpoint with HTTP 304 ETag caching, reducing member list payloads by >90%.
+  - Combined `/api/sync` delta endpoint polling every 30s with tab visibility detection.
+  - Full code-splitting for admin, wall, onboarding, and share card modals, reducing initial JS bundle to 210 kB gzip.
+- **First-Day Experience**:
+  - Empty state onboarding with "What happens next" guide, "Invite people" action with personalized QR code and link, and "Share my profile".
+  - Accessible AuthModal with focus trap, Escape key closing, and focus restoration.
+  - System health monitoring endpoint at `GET /api/health/status`.
+  - Comprehensive unit test suite with Vitest in CI workflow.
+
+---
+
 ## [1.1.0] - 2026-10-06
 
 ### Added

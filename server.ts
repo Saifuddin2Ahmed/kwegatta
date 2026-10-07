@@ -2260,12 +2260,12 @@ app.get('/api/config', (_req: Request, res: Response) => {
     hasServerApiKey: Boolean(process.env.GEMINI_API_KEY),
     isDemoMode,
     storage: storageMode,
-    appUrl: process.env.PUBLIC_APP_URL || process.env.APP_URL || 'https://kwegatta.ai.studio'
+    appUrl: 'https://kwegatta.ai.studio'
   });
 });
 
-// System Healthz Endpoint
-app.get('/healthz', (_req: Request, res: Response) => {
+// System Health & Monitoring Endpoint
+app.get(['/api/health/status', '/healthz'], (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),

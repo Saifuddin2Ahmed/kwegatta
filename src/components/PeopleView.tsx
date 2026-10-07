@@ -10,11 +10,18 @@ import {
   AlertCircle,
   MapPin,
   Lock,
-  MessageSquare
+  MessageSquare,
+  Share2,
+  Copy,
+  Check,
+  Compass,
+  QrCode,
+  Users
 } from 'lucide-react';
 import { Profile, AskKwegattaMatch } from '../types';
 import { Avatar } from './Avatar';
 import { askKwegatta } from '../services/api';
+import { generateQrCodeDataUrl } from '../utils';
 
 interface PeopleViewProps {
   currentProfile: Profile | null;
@@ -488,19 +495,77 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
 
       {/* Standard Directory Grid */}
       {filtered.length === 0 ? (
-        <div className="py-16 text-center space-y-3 border border-dashed border-[var(--card-border)] rounded-xl">
-          <h3 className="font-semibold text-sm text-[var(--fg)]">No members match your criteria</h3>
-          <p className="text-xs text-[var(--fg-muted)]">Try adjusting your keywords or clearing the active filter.</p>
-          <button
-            onClick={() => {
-              onSearchChange('');
-              setRoleFilter('all');
-              onSelectTag(null);
-            }}
-            className="kw-btn kw-btn-ghost text-xs py-1.5 px-3"
-          >
-            Reset Filters
-          </button>
+        <div className="py-12 px-6 text-center space-y-6 border border-dashed border-[var(--card-border)] rounded-2xl bg-[var(--card)]/40">
+          <div className="w-12 h-12 rounded-full bg-[var(--gold-subtle)] text-[var(--gold)] grid place-items-center mx-auto">
+            <Users className="w-6 h-6" />
+          </div>
+
+          <div className="space-y-2 max-w-md mx-auto">
+            <h3 className="font-bold text-base text-[var(--fg)]">No members found</h3>
+            <p className="text-xs text-[var(--fg-muted)] leading-relaxed">
+              {searchQuery || roleFilter !== 'all' || selectedTag
+                ? 'Try adjusting your search query, selecting another role category, or clearing active tag filters.'
+                : 'You are among the first members here. Invite your network to start matching on skills, offers, and projects.'}
+            </p>
+          </div>
+
+          {/* What happens next guide */}
+          <div className="max-w-lg mx-auto p-4 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] text-left space-y-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--gold)]">
+              <Compass className="w-4 h-4" />
+              <span>What happens next:</span>
+            </div>
+            <ol className="text-xs text-[var(--fg-muted)] space-y-2 pl-4 list-decimal leading-relaxed">
+              <li>
+                <strong className="text-[var(--fg)]">Invite collaborators</strong>: Share your personal profile invite link with peers across tech stacks.
+              </li>
+              <li>
+                <strong className="text-[var(--fg)]">Profile indexing</strong>: Every member's headline, needs, offers, and learning goals are indexed automatically.
+              </li>
+              <li>
+                <strong className="text-[var(--fg)]">Natural language search</strong>: Ask Kwegatta queries search across open-weight embeddings.
+              </li>
+            </ol>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            {(searchQuery || roleFilter !== 'all' || selectedTag) && (
+              <button
+                onClick={() => {
+                  onSearchChange('');
+                  setRoleFilter('all');
+                  onSelectTag(null);
+                }}
+                className="kw-btn kw-btn-ghost text-xs py-2 px-4"
+              >
+                Reset Filters
+              </button>
+            )}
+
+            {currentProfile && (
+              <>
+                <button
+                  onClick={() => {
+                    const inviteUrl = `https://kwegatta.ai.studio/#/u/${currentProfile.id}`;
+                    if (navigator.clipboard) {
+                      navigator.clipboard.writeText(inviteUrl);
+                    }
+                  }}
+                  className="kw-btn kw-btn-gold text-xs py-2 px-4 font-semibold flex items-center gap-1.5"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Invite people</span>
+                </button>
+                <button
+                  onClick={() => onViewProfile(currentProfile.id)}
+                  className="kw-btn kw-btn-ghost text-xs py-2 px-4 flex items-center gap-1.5"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>Share my profile</span>
+                </button>
+              </>
+            )}
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
