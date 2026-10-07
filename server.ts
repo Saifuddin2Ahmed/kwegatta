@@ -7,23 +7,12 @@ import { fileURLToPath } from 'url';
 import { initializeApp, getApps, type App } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { getAuth as getAdminAuth, type Auth as AdminAuth } from 'firebase-admin/auth';
-import { GoogleGenAI } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
-
-// Shared Google GenAI client for server-side matchmaking and semantic analysis
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    }
-  }
-});
 
 // Security: Disable X-Powered-By header to prevent fingerprinting
 app.disable('x-powered-by');
@@ -1001,15 +990,28 @@ app.post('/api/auth/token', (req: Request, res: Response) => {
 });
 
 /* =========================================================================
-   OPEN-WEIGHT GEMMA MODELS CONFIGURATION:
+   OPEN-WEIGHT GEMMA MODELS CONFIGURATION & CENTRAL SERVER-SIDE GUARD:
    Allowed: gemma-4-26b-a4b-it and gemma-4-31b-it.
    Default: gemma-4-26b-a4b-it (validated as 36x faster TTFT: 0.70s vs 25.58s).
    ========================================================================= */
-const ALLOWED_OPEN_WEIGHT_MODELS = ['gemma-4-26b-a4b-it', 'gemma-4-31b-it'];
-const DEFAULT_OPEN_WEIGHT_MODEL = 'gemma-4-26b-a4b-it';
-// GEMMA TAIL LATENCY CONSTANTS
-const GEMMA_HEDGE_DELAY_MS = 4000; // Start 2nd identical request after 4 seconds of silence
-const GEMMA_HARD_TIMEOUT_MS = 20000; // Give up with clear error after 20 seconds
+export const ALLOWED_OPEN_WEIGHT_MODELS = ['gemma-4-26b-a4b-it', 'gemma-4-31b-it'] as const;
+export const DEFAULT_OPEN_WEIGHT_MODEL = 'gemma-4-26b-a4b-it';
+export const GEMMA_HEDGE_DELAY_MS = 4000; // Start 2nd identical request after 4 seconds of silence
+export const GEMMA_HARD_TIMEOUT_MS = 20000; // Give up with clear error after 20 seconds
+
+/**
+ * Server-side guard: Every model call MUST go through this validation.
+ * Throws immediately if model ID does not start with "gemma-" or is not allowed.
+ */
+export function validateGemmaModelId(modelId: string): string {
+  if (!modelId || typeof modelId !== 'string' || !modelId.startsWith('gemma-')) {
+    throw new Error(`Rule Violation: Prohibited model '${modelId}'. This project strictly uses open-weight Gemma models starting with 'gemma-'.`);
+  }
+  if (!ALLOWED_OPEN_WEIGHT_MODELS.includes(modelId as any)) {
+    throw new Error(`Unsupported model '${modelId}'. Allowed open-weight models: ${ALLOWED_OPEN_WEIGHT_MODELS.join(', ')}`);
+  }
+  return modelId;
+}
 
 // Pair Match Cache: key(`${idA}_${idB}`) -> { versionA, versionB, result, updatedAt }
 const matchPairCache = new Map<string, { versionA: string; versionB: string; result: any; updatedAt: string }>();
@@ -1018,38 +1020,19 @@ function getPairCacheKey(idA: string, idB: string): string {
   return [idA, idB].sort().join('_');
 }
 
-app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
-  const { model = DEFAULT_OPEN_WEIGHT_MODEL, contents, generationConfig } = req.body || {};
-  const targetModel = ALLOWED_OPEN_WEIGHT_MODELS.includes(model) ? model : DEFAULT_OPEN_WEIGHT_MODEL;
-
-  // HARD CONSTRAINT VERIFICATION: Only allowed open-weight Gemma models
-  if (!ALLOWED_OPEN_WEIGHT_MODELS.includes(targetModel)) {
-    return res.status(400).json({
-      error: {
-        message: `Violates rule: Only open-weight models ${ALLOWED_OPEN_WEIGHT_MODELS.join(' or ')} are allowed. Attempted to call: ${model}`
-      }
-    });
-  }
-
-  // Safety: Limit prompt payload size to prevent resource exhaustion attacks
-  try {
-    const contentsStr = JSON.stringify(contents || '');
-    if (contentsStr.length > 50000) {
-      return res.status(400).json({
-        error: { message: 'Prompt content exceeds maximum allowed length of 50KB.' }
-      });
-    }
-  } catch (e) {
-    return res.status(400).json({ error: { message: 'Invalid contents format' } });
-  }
+/**
+ * Central Gemma execution engine with 4s hedging, resilient 500/503 retry, and 20s hard timeout.
+ */
+export async function invokeGemmaDirect(
+  contents: any,
+  generationConfig?: any,
+  model: string = DEFAULT_OPEN_WEIGHT_MODEL
+): Promise<{ text: string; data: any; elapsedMs: number }> {
+  const targetModel = validateGemmaModelId(model);
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return res.status(503).json({
-      error: {
-        message: 'GEMINI_API_KEY is not configured on the server environment. Fallback to keyword matching activated.'
-      }
-    });
+    throw new Error('GEMINI_API_KEY is not configured on the server environment.');
   }
 
   aiMetrics.totalCalls++;
@@ -1070,14 +1053,6 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
 
   const payloadString = JSON.stringify(requestPayload);
 
-  // Resilient Hedged Execution Pattern:
-  // 1. Start Request #1.
-  // 2. If 4 seconds pass with no answer, start Request #2 in parallel.
-  // 3. When an upstream request fails with 500 or 503:
-  //    - Do NOT return the error immediately.
-  //    - If another request is currently running, wait for it.
-  //    - If no other request is running and time remains (<20s), immediately launch another attempt.
-  // 4. Return an error only when all attempts have failed or 20 seconds have passed.
   let isResolved = false;
   let timer4s: NodeJS.Timeout | null = null;
   let timer20s: NodeJS.Timeout | null = null;
@@ -1091,13 +1066,12 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
     if (timer20s) clearTimeout(timer20s);
   };
 
-  return new Promise<void>((resolve) => {
-    const handleWinner = (requestId: number, result: { status: number; data: any }) => {
+  return new Promise<{ text: string; data: any; elapsedMs: number }>((resolve, reject) => {
+    const handleWinner = (requestId: number, data: any) => {
       if (isResolved) return;
       isResolved = true;
       cleanup();
 
-      // Cancel all other in-flight requests immediately
       for (const [id, ctrl] of activeControllers.entries()) {
         if (id !== requestId) {
           try { ctrl.abort(); } catch (_) {}
@@ -1109,8 +1083,9 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
       aiMetrics.successfulCalls++;
       aiMetrics.durations.push(elapsed);
       console.log(`[Gemma 4 Hedging] Request #${requestId} won in ${elapsed}ms for ${targetModel}`);
-      res.status(result.status).json(result.data);
-      resolve();
+
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      resolve({ text, data, elapsedMs: elapsed });
     };
 
     const startAttempt = async (forcedId?: number) => {
@@ -1132,7 +1107,6 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
 
         if (isResolved) return;
 
-        // On 500 or 503 upstream failures: do not return error immediately
         if (resp.status === 500 || resp.status === 503) {
           const errText = await resp.text().catch(() => '');
           lastError = new Error(`Upstream HTTP ${resp.status}: ${errText.slice(0, 150)}`);
@@ -1141,25 +1115,21 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
 
           if (isResolved) return;
 
-          // If another request is currently running in parallel, wait for it
           if (activeControllers.size > 0) {
             console.log(`[Gemma 4 Hedging] Waiting on other active in-flight request...`);
             return;
           }
 
-          // Otherwise start one more attempt if under limit and 20s budget
           if (totalAttempts < 4 && Date.now() - callStartTime < 18000) {
             console.log(`[Gemma 4 Hedging] No other request running. Starting replacement attempt #${nextRequestId}...`);
             startAttempt();
             return;
           }
 
-          // If all attempts failed or budget exceeded: return error
           isResolved = true;
           cleanup();
           aiMetrics.fallbackCalls++;
-          res.status(500).json({ error: { message: lastError.message || 'Failed to get response from Gemma 4' } });
-          resolve();
+          reject(lastError);
           return;
         }
 
@@ -1168,7 +1138,7 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
           throw new Error(data?.error?.message || `Upstream error HTTP ${resp.status}`);
         }
 
-        handleWinner(requestId, { status: resp.status, data });
+        handleWinner(requestId, data);
       } catch (err: any) {
         activeControllers.delete(requestId);
         if (isResolved) return;
@@ -1178,25 +1148,21 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
           lastError = err;
           console.warn(`[Gemma 4 Hedging] Attempt #${requestId} failed:`, err?.message || err);
 
-          // If another request is running, wait for it
           if (activeControllers.size > 0) {
             console.log(`[Gemma 4 Hedging] Another request is running, waiting...`);
             return;
           }
 
-          // If no running request and retry budget remains, start another attempt
           if (totalAttempts < 4 && Date.now() - callStartTime < 18000) {
             console.log(`[Gemma 4 Hedging] Starting replacement attempt #${nextRequestId}...`);
             startAttempt();
             return;
           }
 
-          // All attempts failed
           isResolved = true;
           cleanup();
           aiMetrics.fallbackCalls++;
-          res.status(500).json({ error: { message: lastError?.message || 'Failed to get response from Gemma 4' } });
-          resolve();
+          reject(lastError || new Error('Failed to get response from Gemma 4'));
         }
       }
     };
@@ -1212,8 +1178,7 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
       activeControllers.clear();
       console.error(`[Gemma 4 Hedging] All requests timed out after 20 seconds.`);
       aiMetrics.fallbackCalls++;
-      res.status(504).json({ error: { message: 'Gemma request timed out after 20 seconds' } });
-      resolve();
+      reject(new Error('Gemma request timed out after 20 seconds'));
     }, GEMMA_HARD_TIMEOUT_MS);
 
     // Start Request #1 immediately
@@ -1229,12 +1194,50 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
       }
     }, GEMMA_HEDGE_DELAY_MS);
   });
+}
+
+app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
+  const { model = DEFAULT_OPEN_WEIGHT_MODEL, contents, generationConfig } = req.body || {};
+
+  // HARD CONSTRAINT VERIFICATION: Guard validates model starts with "gemma-"
+  try {
+    validateGemmaModelId(model);
+  } catch (err: any) {
+    return res.status(400).json({ error: { message: err.message } });
+  }
+
+  // Safety: Limit prompt payload size to prevent resource exhaustion attacks
+  try {
+    const contentsStr = JSON.stringify(contents || '');
+    if (contentsStr.length > 50000) {
+      return res.status(400).json({
+        error: { message: 'Prompt content exceeds maximum allowed length of 50KB.' }
+      });
+    }
+  } catch (e) {
+    return res.status(400).json({ error: { message: 'Invalid contents format' } });
+  }
+
+  try {
+    const result = await invokeGemmaDirect(contents, generationConfig, model);
+    return res.json(result.data);
+  } catch (err: any) {
+    const isTimeout = err?.message?.includes('timed out');
+    return res.status(isTimeout ? 504 : 500).json({
+      error: { message: err?.message || 'Failed to get response from Gemma 4' }
+    });
+  }
 });
 
 // STREAMING GEMMA TOKENS TO THE BROWSER (SSE) WITH 4s HEDGING AND RESILIENT 500/503 HANDLING
 app.post('/api/gemma/stream', gemmaLimiter, async (req: Request, res: Response) => {
   const { model = DEFAULT_OPEN_WEIGHT_MODEL, contents, generationConfig } = req.body || {};
-  const targetModel = ALLOWED_OPEN_WEIGHT_MODELS.includes(model) ? model : DEFAULT_OPEN_WEIGHT_MODEL;
+  let targetModel: string;
+  try {
+    targetModel = validateGemmaModelId(model);
+  } catch (err: any) {
+    return res.status(400).json({ error: { message: err.message } });
+  }
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -1482,33 +1485,43 @@ app.post('/api/ai/ask-kwegatta', askLimiter, async (req: Request, res: Response)
     institution: p.institution || ''
   }));
 
-  const systemPrompt = `You are Kwegatta's intelligent matchmaking engine.
+  const prompt = `You are Kwegatta's intelligent matchmaking engine for Ugandan builders, creators, and students.
 A user asked: "${cleanQuery}".
 Based STRICTLY and ONLY on what members wrote in their profiles below, select up to 5 best matching members.
+
 RULES:
 1. Never invent or hallucinate facts about any member. Only use facts explicitly written in their profile.
 2. For each recommended member, provide exactly one concise, helpful sentence explaining why they fit the user's request.
-3. Return a valid JSON array of objects: [{"profile_id": string, "reason": string}]
-4. If no members match, return an empty array [].`;
+3. Respond ONLY with a valid JSON array of objects: [{"profile_id": string, "reason": string}]
+4. If no members match, return an empty array [].
+
+MEMBERS:
+${JSON.stringify(memberList, null, 2)}
+
+JSON Output:`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: JSON.stringify({ user_query: cleanQuery, members: memberList }),
-      config: {
-        systemInstruction: systemPrompt,
-        responseMimeType: 'application/json'
-      }
-    });
+    const response = await invokeGemmaDirect(prompt, { temperature: 0.1 }, DEFAULT_OPEN_WEIGHT_MODEL);
 
     let matchesRaw: any[] = [];
     try {
-      const text = response.text?.trim() || '[]';
-      matchesRaw = JSON.parse(text);
+      let rawText = response.text?.trim() || '[]';
+      // Strip markdown codeblocks like ```json ... ```
+      if (rawText.includes('```')) {
+        rawText = rawText.replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, '$1').trim();
+      }
+      // Extract array bounds [ ... ]
+      const startIdx = rawText.indexOf('[');
+      const endIdx = rawText.lastIndexOf(']');
+      if (startIdx !== -1 && endIdx > startIdx) {
+        rawText = rawText.slice(startIdx, endIdx + 1);
+      }
+      matchesRaw = JSON.parse(rawText);
       if (!Array.isArray(matchesRaw)) {
         matchesRaw = [];
       }
-    } catch (_) {
+    } catch (parseErr) {
+      console.warn('[Ask Kwegatta Gemma] JSON parse error, falling back:', parseErr);
       matchesRaw = [];
     }
 
@@ -1527,7 +1540,7 @@ RULES:
 
     return res.json({ matches: results, query: cleanQuery });
   } catch (err: any) {
-    console.warn('[Ask Kwegatta AI] Note:', err?.message || err);
+    console.warn('[Ask Kwegatta Gemma] Error:', err?.message || err);
     // Simple keyword fallback
     const qLower = cleanQuery.toLowerCase();
     const keywords = qLower.split(/\s+/).filter(w => w.length > 2);
