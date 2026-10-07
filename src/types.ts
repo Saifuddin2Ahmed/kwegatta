@@ -67,6 +67,7 @@ export interface Profile {
   gh?: GitHubData | null;
   blocked_ids?: string[];
   hidden?: boolean;
+  suspended?: boolean;
   account_uid?: string;
   email?: string;
 }
@@ -144,4 +145,42 @@ export interface Post {
   created_at: string;
   reactions?: Record<string, number>;
   comments?: PostComment[];
+}
+
+export type OpportunityType = 'Grant' | 'Hackathon' | 'Job' | 'Training' | 'Call for partners';
+
+export interface EventOpportunityItem {
+  id: string;
+  kind: 'event' | 'opportunity';
+  title: string;
+  description: string;
+  // For Event:
+  datetime?: string; // date and time
+  location?: string; // place or online link
+  cover_image?: string; // optional cover image
+  registration_link?: string; // optional registration link
+  // For Opportunity:
+  opportunity_type?: OpportunityType;
+  deadline?: string;
+  link?: string;
+  // Attendees / RSVPs:
+  created_at: string;
+  created_by?: string;
+  published: boolean;
+  attendee_ids: string[];
+}
+
+export interface PinnedAnnouncement {
+  id: string;
+  text: string;
+  link?: string;
+  active: boolean;
+  created_at: string;
+  created_by?: string;
+}
+
+export interface EventAttendeeMatch {
+  profile: Profile;
+  reason: string;
+  score: number;
 }

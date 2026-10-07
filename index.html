@@ -34,26 +34,9 @@
     }
     </script>
 
-    <!-- Defensive Fetch Setter Guard for Sandboxed / Preview Environments -->
+    <!-- Dev Preview WebSocket Guard: silences only Vite dev HMR closure, never in production -->
     <script>
-      (function() {
-        try {
-          const originalFetch = window.fetch;
-          let currentFetch = originalFetch;
-          Object.defineProperty(window, 'fetch', {
-            get: function() {
-              return currentFetch;
-            },
-            set: function(newFetch) {
-              currentFetch = newFetch;
-            },
-            configurable: true,
-            enumerable: true
-          });
-        } catch (e) {
-          // If already defined or non-configurable, continue safely
-        }
-      })();
+      if (window.location.hostname.includes('run.app') || window.location.hostname === 'localhost') { window.addEventListener('unhandledrejection', function(e) { if ((e.reason?.message || e.reason) === 'WebSocket closed without opened') e.preventDefault(); }); }
     </script>
 
     <!-- PWA & Mobile Web App Meta -->

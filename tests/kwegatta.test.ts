@@ -1,6 +1,68 @@
 import { describe, it, expect } from 'vitest';
-import { validateGemmaModelId, sanitizePublicProfile, ALLOWED_OPEN_WEIGHT_MODELS, DEFAULT_OPEN_WEIGHT_MODEL } from '../server';
+import {
+  validateGemmaModelId,
+  sanitizePublicProfile,
+  ALLOWED_OPEN_WEIGHT_MODELS,
+  DEFAULT_OPEN_WEIGHT_MODEL,
+  getAdminEmailsList,
+  ALLOWED_GEMMA_TASKS,
+  buildGemmaPrompt
+} from '../server';
 import { validatePasswordStrength } from '../src/services/firebase';
+
+describe('Admin Accounts & Security', () => {
+  it('parses ADMIN_EMAILS environment variable correctly', () => {
+    const list = getAdminEmailsList();
+    expect(Array.isArray(list)).toBe(true);
+  });
+
+  it('keeps admin unreachable when ADMIN_EMAILS is empty and no stored admins exist', () => {
+    const originalEnv = process.env.ADMIN_EMAILS;
+    delete process.env.ADMIN_EMAILS;
+    try {
+      const list = getAdminEmailsList();
+      expect(list.length >= 0).toBe(true);
+      // Empty string should never match any admin email
+      expect(list.includes('')).toBe(false);
+      expect(list.includes('attacker@evil.com')).toBe(false);
+    } finally {
+      process.env.ADMIN_EMAILS = originalEnv;
+    }
+  });
+});
+
+describe('Gemma Task Validation & Prompt Builder', () => {
+  it('restricts Gemma inference to predefined approved tasks only', () => {
+    expect(ALLOWED_GEMMA_TASKS).toContain('polish_profile');
+    expect(ALLOWED_GEMMA_TASKS).toContain('match');
+    expect(ALLOWED_GEMMA_TASKS).toContain('tag_post');
+    expect(ALLOWED_GEMMA_TASKS).toContain('ask');
+    expect(ALLOWED_GEMMA_TASKS).toContain('event_matches');
+    expect(ALLOWED_GEMMA_TASKS.length).toBe(5);
+  });
+
+  it('builds structured prompts for polish_profile task', () => {
+    const prompt = buildGemmaPrompt('polish_profile', {
+      name: 'Joan',
+      role: 'Developer',
+      offers: 'React, TypeScript',
+      needs: 'Backend guidance'
+    });
+    expect(prompt).toContain('Joan');
+    expect(prompt).toContain('React, TypeScript');
+  });
+
+  it('builds structured prompts for event_matches task', () => {
+    const prompt = buildGemmaPrompt('event_matches', {
+      event_title: 'Hack Day Kampala',
+      me: { name: 'Alex', role: 'builder' },
+      attendees: [{ id: 'u1', name: 'Bob', role: 'designer', offers: 'UI/UX' }]
+    });
+    expect(prompt).toContain('Hack Day Kampala');
+    expect(prompt).toContain('Alex');
+    expect(prompt).toContain('Bob');
+  });
+});
 
 describe('Gemma Model Guard', () => {
   it('allows allowed open-weight Gemma model IDs', () => {

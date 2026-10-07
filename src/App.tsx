@@ -9,6 +9,8 @@ import { InboxView } from './components/InboxView';
 import { ProfileView } from './components/ProfileView';
 import { HeroSection, KampalaStorySection } from './components/LivingNetworkHero';
 import { Footer } from './components/Footer';
+import { EventsView } from './components/EventsView';
+import { PinnedAnnouncementBar } from './components/PinnedAnnouncementBar';
 import { Profile, Post, NotificationItem, Follow } from './types';
 import { db, APP_NAME, ensureAuthToken, claimExistingProfile, fetchMyAccountProfile } from './services/api';
 import { auth, handleRedirectResult, logOut } from './services/firebase';
@@ -27,6 +29,7 @@ export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [activeTab, setActiveTab] = useState<string>('home');
   const [viewedProfileId, setViewedProfileId] = useState<string | null>(null);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(() => auth.currentUser);
@@ -167,12 +170,18 @@ export default function App() {
     } else if (main === 'u' && sub) {
       setViewedProfileId(sub);
       setActiveTab('userProfile');
-    } else if (['home', 'learn', 'people', 'feed', 'inbox', 'me', 'setup', 'admin', 'about', 'onboard', 'privacy', 'license'].includes(main)) {
+    } else if (main === 'events') {
+      setActiveTab('events');
+      setSelectedEventId(sub || null);
+      setViewedProfileId(null);
+    } else if (['home', 'events', 'learn', 'people', 'feed', 'inbox', 'me', 'setup', 'admin', 'about', 'onboard', 'privacy', 'license'].includes(main)) {
       setActiveTab(main);
       setViewedProfileId(null);
+      setSelectedEventId(null);
     } else {
       setActiveTab('home');
       setViewedProfileId(null);
+      setSelectedEventId(null);
     }
   }, []);
 
@@ -184,6 +193,7 @@ export default function App() {
 
   const navigateTo = (tab: string) => {
     if (tab === 'home') window.location.hash = '#/home';
+    else if (tab === 'events') window.location.hash = '#/events';
     else if (tab === 'learn') window.location.hash = '#/learn';
     else if (tab === 'people') window.location.hash = '#/people';
     else if (tab === 'feed') window.location.hash = '#/feed';
@@ -374,7 +384,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)] flex flex-col font-sans transition-colors selection:bg-[var(--gold)] selection:text-[#090D16]">
-      
+      {/* Pinned Announcement Bar */}
+      <PinnedAnnouncementBar />
+
       {/* Top Application Header */}
       <Header
         currentProfile={currentProfile}
@@ -448,6 +460,15 @@ export default function App() {
             {/* d) "Built in one day in Kampala": story, the two other photos, four facts, team */}
             <KampalaStorySection onNavigate={navigateTo} />
           </div>
+        ) : activeTab === 'events' ? (
+          <EventsView
+            currentProfile={currentProfile}
+            allProfiles={allProfiles}
+            initialItemId={selectedEventId}
+            onViewProfile={navigateToProfile}
+            onJoinClick={triggerJoinFlow}
+            onToast={showToast}
+          />
         ) : activeTab === 'home' ? (
           <MatchesView
             currentProfile={currentProfile!}
@@ -504,6 +525,7 @@ export default function App() {
               onBack={() => navigateTo('home')}
               onRefreshGlobalData={refreshData}
               onToast={showToast}
+              onOpenSignIn={() => setShowSignInModal(true)}
             />
           </React.Suspense>
         ) : activeTab === 'setup' ? (

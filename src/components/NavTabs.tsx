@@ -1,5 +1,5 @@
 import React from 'react';
-import { Zap, BookOpen, Users, MessageSquare, Bell, User, Info } from 'lucide-react';
+import { Zap, BookOpen, Users, MessageSquare, Bell, User, Info, Calendar } from 'lucide-react';
 
 interface NavTabsProps {
   activeTab: string;
@@ -10,6 +10,7 @@ interface NavTabsProps {
 export const NavTabs: React.FC<NavTabsProps> = ({ activeTab, unreadCount, onTabChange }) => {
   const tabs = [
     { id: 'home', label: 'Matches', icon: Zap },
+    { id: 'events', label: 'Events', icon: Calendar },
     { id: 'learn', label: 'Peer Learning', icon: BookOpen },
     { id: 'people', label: 'Directory', icon: Users },
     { id: 'feed', label: 'Project Wall', icon: MessageSquare },

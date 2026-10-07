@@ -424,6 +424,9 @@ interface StoreData {
   notifications: any[];
   posts: any[];
   reports: any[];
+  events: any[];
+  pinned_announcement: any;
+  admin_emails: string[];
   audit_log: Array<{
     id: string;
     timestamp: string;
@@ -433,7 +436,7 @@ interface StoreData {
   }>;
 }
 
-// Active admin session tokens with creation timestamps (passcode flow)
+// Active admin session tokens with creation timestamps (emergency fallback passcode flow)
 const activeAdminTokens = new Map<string, number>();
 const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
@@ -468,16 +471,78 @@ function issueAdminToken(): string {
   return token;
 }
 
-function checkAdmin(req: Request): boolean {
-  const token = (req.headers['x-admin-token'] as string) || (req.query.token as string);
-  if (!token || !activeAdminTokens.has(token)) return false;
-  const createdAt = activeAdminTokens.get(token)!;
-  if (Date.now() - createdAt < TOKEN_TTL_MS) return true;
-  activeAdminTokens.delete(token);
-  if (storageMode === 'firestore' && firestoreDb) {
-    removeDoc('sessions', token).catch(() => {});
+export function getAdminEmailsList(): string[] {
+  const envEmails = (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map(e => e.trim().toLowerCase())
+    .filter(Boolean);
+  
+  const storedEmails = Array.isArray(store.admin_emails)
+    ? store.admin_emails.map((e: string) => String(e).trim().toLowerCase()).filter(Boolean)
+    : [];
+
+  const combined = new Set([...envEmails, ...storedEmails]);
+  return Array.from(combined);
+}
+
+export function resolveAdminInfo(req: Request): { isAdmin: boolean; adminName: string; adminEmail: string } {
+  // 1. Primary: Check signed-in account by email (Google or Email/Password)
+  const authUser = (req as any).authUser as AuthUserData | undefined;
+  const adminEmails = getAdminEmailsList();
+  
+  if (authUser && authUser.email) {
+    const userEmail = authUser.email.trim().toLowerCase();
+    if (adminEmails.includes(userEmail)) {
+      return {
+        isAdmin: true,
+        adminName: authUser.name || authUser.email.split('@')[0] || 'Admin',
+        adminEmail: userEmail
+      };
+    }
   }
-  return false;
+
+  // Also check if authUserId matches a profile linked to an admin email
+  const authUserId = resolveAuthUserId(req);
+  if (authUserId) {
+    const profile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
+    if (profile && profile.email) {
+      const pEmail = profile.email.trim().toLowerCase();
+      if (adminEmails.includes(pEmail)) {
+        return {
+          isAdmin: true,
+          adminName: profile.name || profile.email.split('@')[0] || 'Admin',
+          adminEmail: pEmail
+        };
+      }
+    }
+  }
+
+  // 2. Emergency fallback: ADMIN_FALLBACK=true + session token
+  const token = (req.headers['x-admin-token'] as string) || (req.query.token as string);
+  if (token && activeAdminTokens.has(token)) {
+    if (process.env.ADMIN_FALLBACK === 'true') {
+      const createdAt = activeAdminTokens.get(token)!;
+      if (Date.now() - createdAt < TOKEN_TTL_MS) {
+        return {
+          isAdmin: true,
+          adminName: 'Fallback Admin',
+          adminEmail: 'fallback-admin@kwegatta.internal'
+        };
+      } else {
+        activeAdminTokens.delete(token);
+      }
+    }
+  }
+
+  return {
+    isAdmin: false,
+    adminName: '',
+    adminEmail: ''
+  };
+}
+
+export function checkAdmin(req: Request): boolean {
+  return resolveAdminInfo(req).isAdmin;
 }
 
 /* =========================================================================
@@ -571,6 +636,15 @@ function loadStore(): StoreData {
         if (!parsed.reports || !Array.isArray(parsed.reports)) {
           parsed.reports = [];
         }
+        if (!parsed.events || !Array.isArray(parsed.events)) {
+          parsed.events = [];
+        }
+        if (!parsed.admin_emails || !Array.isArray(parsed.admin_emails)) {
+          parsed.admin_emails = [];
+        }
+        if (parsed.pinned_announcement === undefined) {
+          parsed.pinned_announcement = null;
+        }
         if (!parsed.audit_log || !Array.isArray(parsed.audit_log)) {
           parsed.audit_log = [];
         }
@@ -648,6 +722,47 @@ function loadStore(): StoreData {
       }
     ] : [],
     reports: [],
+    events: isDemoMode ? [
+      {
+        id: 'event-hackday-showcase',
+        kind: 'event',
+        title: 'Hack Day Kampala 2026 Showcase & Demo Day',
+        description: 'Live product demonstrations, founder matchmaking, and networking with student builders and tech teams across Makerere, MUBS, and Kyambogo.',
+        datetime: new Date(Date.now() + 86400000 * 5).toISOString(),
+        location: 'Makerere Innovation Pod, Kampala',
+        cover_image: '',
+        registration_link: 'https://kwegatta.ai.studio/#/events',
+        created_at: new Date(Date.now() - 3600000 * 24).toISOString(),
+        published: true,
+        attendee_ids: ['demo-amina', 'demo-brian', 'demo-joseph']
+      },
+      {
+        id: 'opp-uganda-ai-grant',
+        kind: 'opportunity',
+        title: 'Uganda Open-Weight AI Grant (Cohort 2)',
+        description: 'Up to $5,000 equity-free seed funding and compute credits for builder teams applying open-weight models to local agriculture, education, and fintech in Uganda.',
+        opportunity_type: 'Grant',
+        deadline: new Date(Date.now() + 86400000 * 18).toISOString(),
+        link: 'https://kwegatta.ai.studio',
+        created_at: new Date(Date.now() - 3600000 * 12).toISOString(),
+        published: true,
+        attendee_ids: ['demo-grace', 'demo-peter']
+      },
+      {
+        id: 'opp-climate-hackathon',
+        kind: 'opportunity',
+        title: 'Kampala Clean Energy & Solar Sprint',
+        description: '48-hour hardware and IoT sprint focused on solar energy monitoring, clean cooking tech, and urban sustainability.',
+        opportunity_type: 'Hackathon',
+        deadline: new Date(Date.now() + 86400000 * 10).toISOString(),
+        link: 'https://kwegatta.ai.studio',
+        created_at: new Date(Date.now() - 3600000 * 6).toISOString(),
+        published: true,
+        attendee_ids: ['demo-peter', 'demo-amina']
+      }
+    ] : [],
+    pinned_announcement: null,
+    admin_emails: [],
     audit_log: [
       {
         id: 'audit-init',
@@ -1249,30 +1364,243 @@ export async function invokeGemmaDirect(
   });
 }
 
-app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
-  const { model = DEFAULT_OPEN_WEIGHT_MODEL, contents, generationConfig } = req.body || {};
+// Member Gemma Rate Limiter: 20 calls/minute, 300 calls/day per signed-in member
+interface MemberGemmaRateRecord {
+  minuteCount: number;
+  minuteReset: number;
+  dayCount: number;
+  dayReset: number;
+}
+export const memberGemmaLimits = new Map<string, MemberGemmaRateRecord>();
 
-  // HARD CONSTRAINT VERIFICATION: Guard validates model starts with "gemma-"
+export function checkMemberGemmaRateLimit(memberId: string): { allowed: boolean; error?: string; retryAfter?: number } {
+  const now = Date.now();
+  let record = memberGemmaLimits.get(memberId);
+  if (!record) {
+    record = {
+      minuteCount: 0,
+      minuteReset: now + 60 * 1000,
+      dayCount: 0,
+      dayReset: now + 24 * 60 * 60 * 1000
+    };
+    memberGemmaLimits.set(memberId, record);
+  }
+
+  if (now >= record.minuteReset) {
+    record.minuteCount = 0;
+    record.minuteReset = now + 60 * 1000;
+  }
+
+  if (now >= record.dayReset) {
+    record.dayCount = 0;
+    record.dayReset = now + 24 * 60 * 60 * 1000;
+  }
+
+  if (record.minuteCount >= 20) {
+    const retryAfter = Math.ceil((record.minuteReset - now) / 1000);
+    return {
+      allowed: false,
+      error: 'Rate limit exceeded: 20 calls per minute limit reached per member.',
+      retryAfter
+    };
+  }
+
+  if (record.dayCount >= 300) {
+    const retryAfter = Math.ceil((record.dayReset - now) / 1000);
+    return {
+      allowed: false,
+      error: 'Daily quota exceeded: 300 calls per day limit reached per member.',
+      retryAfter
+    };
+  }
+
+  record.minuteCount++;
+  record.dayCount++;
+  return { allowed: true };
+}
+
+// Allowed Task Names: No free-form prompts from browser
+export const ALLOWED_GEMMA_TASKS = [
+  'polish_profile',
+  'match',
+  'tag_post',
+  'ask',
+  'event_matches'
+] as const;
+
+export type GemmaTask = typeof ALLOWED_GEMMA_TASKS[number];
+
+export function buildGemmaPrompt(task: GemmaTask, data: any): string {
+  switch (task) {
+    case 'polish_profile': {
+      const { name = '', role = '', headline = '', offers = '', needs = '', skills = [] } = data || {};
+      return `You are Kwegatta's profile assistant for the Kampala tech ecosystem.
+Polish and structure this member's profile for peer learning and project collaboration.
+Raw inputs:
+- Name: ${name}
+- Role: ${role}
+- Headline: ${headline}
+- What they offer / teach: ${offers}
+- What they need / want to learn: ${needs}
+- Skills: ${Array.isArray(skills) ? skills.join(', ') : skills}
+
+Return ONLY this JSON, no other text:
+{
+  "headline": "<max 8 words summary>",
+  "bio": "<2 sentences, maximum 45 words total, using only stated facts>",
+  "tags": ["<3 to 6 short lowercase topic tags>"],
+  "skills": ["<up to 6 concrete skills mentioned>"],
+  "role": "<Founder | Business | Developer | Designer | Domain expert | Mentor | Student>"
+}`;
+    }
+    case 'match': {
+      const { me = {}, candidate = {}, candidates = [] } = data || {};
+      if (Array.isArray(candidates) && candidates.length > 0) {
+        return `You are Kwegatta's matchmaking engine in Kampala (MUBS x EIIC).
+Target Member (ME):
+Name: ${me.name || 'Member'}, Role: ${me.role || 'builder'}, Offers: ${me.offers || ''}, Needs: ${me.needs || ''}, Skills: ${(me.skills || []).join(', ')}
+
+Candidates:
+${candidates.map((c: any, i: number) => `#${i + 1} (ID: ${c.id}): Name: ${c.name}, Role: ${c.role}, Offers: ${c.offers}, Needs: ${c.needs}, Skills: ${(c.skills || []).join(', ')}`).join('\n')}
+
+Pick top 3 best complementary partners for ME. Return ONLY a JSON array, no other text:
+[
+  {
+    "n": <candidate index number 1 to ${candidates.length}>,
+    "score": <match score integer 50-100>,
+    "reason": "<one concrete sentence: who needs what from whom>",
+    "spark": "<one specific collaboration>",
+    "icebreaker": "<a warm first WhatsApp message>"
+  }
+]`;
+      }
+      return `You are Kwegatta's collaboration matchmaking engine in Kampala.
+Analyze whether these two tech ecosystem members should connect.
+Member 1:
+Name: ${me.name || 'Member 1'}, Role: ${me.role || 'builder'}, Offers: ${me.offers || ''}, Needs: ${me.needs || ''}
+
+Member 2:
+Name: ${candidate.name || 'Member 2'}, Role: ${candidate.role || 'builder'}, Offers: ${candidate.offers || ''}, Needs: ${candidate.needs || ''}
+
+Return ONLY this JSON object:
+{
+  "score": 85,
+  "reason": "<one concise sentence explaining why they should collaborate>"
+}`;
+    }
+    case 'tag_post': {
+      const { body = '', kind = 'idea', title = '' } = data || {};
+      return `You are Kwegatta's community project wall tagger.
+Analyze this member's post and return 2 to 4 technical topic tags.
+Post Kind: ${kind}
+Title: ${title}
+Content: ${body}
+
+Return ONLY a JSON array of tags:
+["tag1", "tag2", "tag3"]`;
+    }
+    case 'ask': {
+      const { query = '', candidates = [] } = data || {};
+      const candidateList = Array.isArray(candidates)
+        ? candidates.slice(0, 30).map((c: any) => `ID: ${c.id}, Name: ${c.name}, Role: ${c.role}, Offers: ${c.offers}, Needs: ${c.needs}, Skills: ${(c.skills || []).join(', ')}`).join('\n')
+        : '';
+      return `You are Kwegatta's semantic search assistant for the Kampala tech community.
+Search query: "${query}"
+Evaluate community members:
+${candidateList}
+
+Return ONLY a JSON object with matches array:
+{
+  "matches": [
+    {
+      "id": "<member_id>",
+      "reason": "<1-sentence reason why this person matches the query>",
+      "score": 85
+    }
+  ]
+}`;
+    }
+    case 'event_matches': {
+      const { event_title = '', me = {}, attendees = [] } = data || {};
+      const attendeeList = Array.isArray(attendees)
+        ? attendees.slice(0, 30).map((a: any) => `ID: ${a.id}, Name: ${a.name}, Role: ${a.role}, Offers: ${a.offers}, Needs: ${a.needs}`).join('\n')
+        : '';
+      return `You are Kwegatta's event networking engine for "${event_title}".
+Attendee ME: Name: ${me.name || 'Attendee'}, Role: ${me.role || 'builder'}, Offers: "${me.offers || ''}", Needs: "${me.needs || ''}"
+Other Attendees:
+${attendeeList}
+
+Find up to 5 attendees ME should meet at this event. Return ONLY a JSON object:
+{
+  "matches": [
+    {
+      "profile_id": "<attendee_id>",
+      "reason": "<one sentence explaining why they should meet at this event>",
+      "score": 85
+    }
+  ]
+}`;
+    }
+    default:
+      throw new Error(`Unknown task: ${task}`);
+  }
+}
+
+app.post('/api/gemma', async (req: Request, res: Response) => {
+  // 1. Must be a signed-in member: 401 otherwise
+  const callerId = resolveAuthUserId(req);
+  if (!callerId) {
+    return res.status(401).json({
+      error: { message: 'Authentication required: must be a signed-in member to call Gemma inference.' }
+    });
+  }
+
+  // 2. Per-member rate limiter: 20 calls a minute, 300 a day
+  const rateLimitRes = checkMemberGemmaRateLimit(callerId);
+  if (!rateLimitRes.allowed) {
+    if (rateLimitRes.retryAfter) {
+      res.setHeader('Retry-After', rateLimitRes.retryAfter);
+    }
+    return res.status(429).json({ error: { message: rateLimitRes.error } });
+  }
+
+  const { task, data, model = DEFAULT_OPEN_WEIGHT_MODEL } = req.body || {};
+
+  // 3. No free-form prompts: task validation
+  if (!task || typeof task !== 'string' || !ALLOWED_GEMMA_TASKS.includes(task as any)) {
+    return res.status(400).json({
+      error: { message: `Unknown task '${task}'. Allowed tasks: ${ALLOWED_GEMMA_TASKS.join(', ')}` }
+    });
+  }
+
+  // 4. Input capped at 8,000 characters
+  const inputStr = typeof data === 'string' ? data : JSON.stringify(data ?? {});
+  if (inputStr.length > 8000) {
+    return res.status(400).json({
+      error: { message: 'Input data exceeds maximum allowed limit of 8,000 characters.' }
+    });
+  }
+
+  let targetModel: string;
   try {
-    validateGemmaModelId(model);
+    targetModel = validateGemmaModelId(model);
   } catch (err: any) {
     return res.status(400).json({ error: { message: err.message } });
   }
 
-  // Safety: Limit prompt payload size to prevent resource exhaustion attacks
-  try {
-    const contentsStr = JSON.stringify(contents || '');
-    if (contentsStr.length > 50000) {
-      return res.status(400).json({
-        error: { message: 'Prompt content exceeds maximum allowed length of 50KB.' }
-      });
+  // 5. Server builds prompt and caps output tokens at 800
+  const prompt = buildGemmaPrompt(task as GemmaTask, data);
+  const contents = [{ role: 'user', parts: [{ text: prompt }] }];
+  const generationConfig = {
+    temperature: 0.1,
+    maxOutputTokens: 800,
+    thinkingConfig: {
+      thinkingLevel: 'MINIMAL'
     }
-  } catch (e) {
-    return res.status(400).json({ error: { message: 'Invalid contents format' } });
-  }
+  };
 
   try {
-    const result = await invokeGemmaDirect(contents, generationConfig, model);
+    const result = await invokeGemmaDirect(contents, generationConfig, targetModel);
     return res.json(result.data);
   } catch (err: any) {
     const isTimeout = err?.message?.includes('timed out');
@@ -1283,8 +1611,41 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
 });
 
 // STREAMING GEMMA TOKENS TO THE BROWSER (SSE) WITH 4s HEDGING AND RESILIENT 500/503 HANDLING
-app.post('/api/gemma/stream', gemmaLimiter, async (req: Request, res: Response) => {
-  const { model = DEFAULT_OPEN_WEIGHT_MODEL, contents, generationConfig } = req.body || {};
+app.post('/api/gemma/stream', async (req: Request, res: Response) => {
+  // 1. Must be a signed-in member: 401 otherwise
+  const callerId = resolveAuthUserId(req);
+  if (!callerId) {
+    return res.status(401).json({
+      error: { message: 'Authentication required: must be a signed-in member to call Gemma streaming inference.' }
+    });
+  }
+
+  // 2. Per-member rate limiter: 20 calls a minute, 300 a day
+  const rateLimitRes = checkMemberGemmaRateLimit(callerId);
+  if (!rateLimitRes.allowed) {
+    if (rateLimitRes.retryAfter) {
+      res.setHeader('Retry-After', rateLimitRes.retryAfter);
+    }
+    return res.status(429).json({ error: { message: rateLimitRes.error } });
+  }
+
+  const { task, data, model = DEFAULT_OPEN_WEIGHT_MODEL } = req.body || {};
+
+  // 3. No free-form prompts: task validation
+  if (!task || typeof task !== 'string' || !ALLOWED_GEMMA_TASKS.includes(task as any)) {
+    return res.status(400).json({
+      error: { message: `Unknown task '${task}'. Allowed tasks: ${ALLOWED_GEMMA_TASKS.join(', ')}` }
+    });
+  }
+
+  // 4. Input capped at 8,000 characters
+  const inputStr = typeof data === 'string' ? data : JSON.stringify(data ?? {});
+  if (inputStr.length > 8000) {
+    return res.status(400).json({
+      error: { message: 'Input data exceeds maximum allowed limit of 8,000 characters.' }
+    });
+  }
+
   let targetModel: string;
   try {
     targetModel = validateGemmaModelId(model);
@@ -1297,17 +1658,20 @@ app.post('/api/gemma/stream', gemmaLimiter, async (req: Request, res: Response) 
     return res.status(503).json({ error: { message: 'GEMINI_API_KEY is not configured.' } });
   }
 
+  // 5. Server builds prompt and caps output at 800 tokens
+  const prompt = buildGemmaPrompt(task as GemmaTask, data);
+  const contents = [{ role: 'user', parts: [{ text: prompt }] }];
+
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders?.();
 
-  const userConfig = (generationConfig && typeof generationConfig === 'object') ? generationConfig : {};
-  const { temperature, thinkingConfig, ...safeConfig } = userConfig as any;
   const requestPayload = {
     contents,
     generationConfig: {
-      ...safeConfig,
+      temperature: 0.1,
+      maxOutputTokens: 800,
       thinkingConfig: {
         thinkingLevel: 'MINIMAL'
       }
@@ -1662,6 +2026,13 @@ app.post('/api/admin/login', async (req: Request, res: Response) => {
 
   const lockout = adminLockoutMap.get(ipKey) || { failedAttempts: 0, lockedUntil: 0 };
 
+  // Emergency fallback check: passcode login is off by default, enabled only with ADMIN_FALLBACK=true
+  if (process.env.ADMIN_FALLBACK !== 'true') {
+    return res.status(403).json({
+      error: 'Passcode login is disabled. Sign in with an authorized administrator account configured in ADMIN_EMAILS.'
+    });
+  }
+
   // If currently locked out for 15 minutes
   if (lockout.lockedUntil > now) {
     const auditEntry = {
@@ -1725,12 +2096,19 @@ app.post('/api/admin/login', async (req: Request, res: Response) => {
   return res.json({ success: true, token });
 });
 
-function verifyAdmin(req: Request, res: Response): boolean {
-  if (!checkAdmin(req)) {
+export interface AdminResolution {
+  isAdmin: boolean;
+  adminName: string;
+  adminEmail: string;
+}
+
+function verifyAdmin(req: Request, res: Response): AdminResolution | null {
+  const info = resolveAdminInfo(req);
+  if (!info.isAdmin) {
     res.status(401).json({ error: 'Unauthorized: Admin session required' });
-    return false;
+    return null;
   }
-  return true;
+  return info;
 }
 
 app.get('/api/admin/overview', (req: Request, res: Response) => {
@@ -1827,7 +2205,8 @@ app.get('/api/admin/posts', (req: Request, res: Response) => {
 });
 
 app.post('/api/admin/action', async (req: Request, res: Response) => {
-  if (!verifyAdmin(req, res)) return;
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
 
   const { action, id, hidden, message } = req.body || {};
 
@@ -1845,7 +2224,7 @@ app.post('/api/admin/action', async (req: Request, res: Response) => {
       timestamp: new Date().toISOString(),
       action: 'DELETE_MEMBER',
       details: `Deleted member: ${target?.name || id}`,
-      admin: 'admin'
+      admin: admin.adminName
     };
     store.audit_log.unshift(auditEntry);
     await persistDoc('audit_log', auditEntry.id, auditEntry);
@@ -1859,7 +2238,7 @@ app.post('/api/admin/action', async (req: Request, res: Response) => {
         timestamp: new Date().toISOString(),
         action: hidden ? 'HIDE_MEMBER' : 'UNHIDE_MEMBER',
         details: `${hidden ? 'Hid' : 'Unhid'} member: ${target.name}`,
-        admin: 'admin'
+        admin: admin.adminName
       };
       store.audit_log.unshift(auditEntry);
       await persistDoc('audit_log', auditEntry.id, auditEntry);
@@ -1872,7 +2251,7 @@ app.post('/api/admin/action', async (req: Request, res: Response) => {
       timestamp: new Date().toISOString(),
       action: 'DELETE_POST',
       details: `Deleted post ID: ${id}`,
-      admin: 'admin'
+      admin: admin.adminName
     };
     store.audit_log.unshift(auditEntry);
     await persistDoc('audit_log', auditEntry.id, auditEntry);
@@ -1899,7 +2278,7 @@ app.post('/api/admin/action', async (req: Request, res: Response) => {
       timestamp: new Date().toISOString(),
       action: 'SEND_ANNOUNCEMENT',
       details: `Broadcasted notice to ${store.profiles.length} members: "${message.slice(0, 50)}..."`,
-      admin: 'admin'
+      admin: admin.adminName
     };
     store.audit_log.unshift(auditEntry);
     await persistDoc('audit_log', auditEntry.id, auditEntry);
@@ -2017,7 +2396,8 @@ app.get('/api/admin/export', (req: Request, res: Response) => {
 
 // Admin-Only Member Import endpoint: Accepts exported JSON and restores members with the exact same IDs
 app.post('/api/admin/import', async (req: Request, res: Response) => {
-  if (!verifyAdmin(req, res)) return;
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
 
   try {
     let members: any[] = [];
@@ -2125,7 +2505,7 @@ app.post('/api/admin/import', async (req: Request, res: Response) => {
       timestamp: new Date().toISOString(),
       action: 'ADMIN_IMPORT',
       details: `Imported and restored ${restoredCount} member profile(s) with preserved IDs.`,
-      admin: 'admin'
+      admin: admin.adminName
     };
     store.audit_log.unshift(auditEntry);
     if (storageMode === 'firestore' && firestoreDb) {
@@ -2383,8 +2763,556 @@ app.get('/api/sync', (req: Request, res: Response) => {
     counts: {
       members: activeProfiles.length,
       posts: posts.length
-    }
+    },
+    pinned_announcement: store.pinned_announcement || null
   });
+});
+
+/* =========================================================================
+   EVENTS, OPPORTUNITIES & PINNED ANNOUNCEMENTS
+   ========================================================================= */
+
+// Pinned Announcement Endpoints
+app.get('/api/announcement/pinned', (_req: Request, res: Response) => {
+  return res.json({ announcement: store.pinned_announcement || null });
+});
+
+app.post('/api/admin/announcement/pin', (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { text, link } = req.body || {};
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({ error: 'Announcement text is required' });
+  }
+
+  const cleanText = sanitizeText(text, 300);
+  const cleanLink = sanitizeUrl(link);
+
+  store.pinned_announcement = {
+    id: 'ann-' + Date.now(),
+    text: cleanText,
+    link: cleanLink || undefined,
+    active: true,
+    created_at: new Date().toISOString(),
+    created_by: admin.adminName
+  };
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'PIN_ANNOUNCEMENT',
+    details: `Pinned announcement: "${cleanText.slice(0, 60)}"`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true, announcement: store.pinned_announcement });
+});
+
+app.post('/api/admin/announcement/unpin', (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const prev = store.pinned_announcement?.text || '';
+  store.pinned_announcement = null;
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'UNPIN_ANNOUNCEMENT',
+    details: `Unpinned announcement${prev ? `: "${prev.slice(0, 50)}"` : ''}`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true, message: 'Announcement unpinned' });
+});
+
+// Admin Status endpoint: returns whether current caller is admin and if fallback is enabled
+app.get('/api/admin/status', (req: Request, res: Response) => {
+  const adminInfo = resolveAdminInfo(req);
+  return res.json({
+    isAdmin: adminInfo.isAdmin,
+    adminName: adminInfo.adminName,
+    adminEmail: adminInfo.adminEmail,
+    fallbackEnabled: process.env.ADMIN_FALLBACK === 'true'
+  });
+});
+
+// Admin Account Management: Add/Remove admins by email
+app.get('/api/admin/admins', (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const envEmails = (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map(e => e.trim().toLowerCase())
+    .filter(Boolean);
+
+  return res.json({
+    admin_emails: getAdminEmailsList(),
+    env_admins: envEmails,
+    stored_admins: store.admin_emails || []
+  });
+});
+
+app.post('/api/admin/admins', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { email } = req.body || {};
+  if (!email || typeof email !== 'string' || !email.includes('@')) {
+    return res.status(400).json({ error: 'Valid email address is required' });
+  }
+
+  const cleanEmail = email.trim().toLowerCase();
+  if (!store.admin_emails) store.admin_emails = [];
+
+  if (!store.admin_emails.includes(cleanEmail)) {
+    store.admin_emails.push(cleanEmail);
+    if (storageMode === 'disk') saveStore(store);
+
+    const auditEntry = {
+      id: 'audit-' + Date.now(),
+      timestamp: new Date().toISOString(),
+      action: 'ADD_ADMIN',
+      details: `Added admin account: ${cleanEmail}`,
+      admin: admin.adminName
+    };
+    store.audit_log.unshift(auditEntry);
+    await persistDoc('audit_log', auditEntry.id, auditEntry);
+  }
+
+  return res.json({ success: true, admin_emails: getAdminEmailsList() });
+});
+
+app.delete('/api/admin/admins/:email', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const targetEmail = req.params.email.trim().toLowerCase();
+  if (store.admin_emails) {
+    store.admin_emails = store.admin_emails.filter(e => e.trim().toLowerCase() !== targetEmail);
+    if (storageMode === 'disk') saveStore(store);
+
+    const auditEntry = {
+      id: 'audit-' + Date.now(),
+      timestamp: new Date().toISOString(),
+      action: 'REMOVE_ADMIN',
+      details: `Removed admin account: ${targetEmail}`,
+      admin: admin.adminName
+    };
+    store.audit_log.unshift(auditEntry);
+    await persistDoc('audit_log', auditEntry.id, auditEntry);
+  }
+
+  return res.json({ success: true, admin_emails: getAdminEmailsList() });
+});
+
+// Member suspension
+app.post('/api/admin/members/:id/suspend', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { id } = req.params;
+  const target = store.profiles.find((p: any) => p.id === id);
+  if (!target) return res.status(404).json({ error: 'Member not found' });
+
+  target.suspended = true;
+  target.hidden = true;
+  await persistDoc('profiles', target.id, target);
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'SUSPEND_MEMBER',
+    details: `Suspended member: ${target.name} (${target.id})`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true, message: `Member ${target.name} suspended.` });
+});
+
+app.post('/api/admin/members/:id/unsuspend', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { id } = req.params;
+  const target = store.profiles.find((p: any) => p.id === id);
+  if (!target) return res.status(404).json({ error: 'Member not found' });
+
+  target.suspended = false;
+  target.hidden = false;
+  await persistDoc('profiles', target.id, target);
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'UNSUSPEND_MEMBER',
+    details: `Unsuspended member: ${target.name} (${target.id})`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true, message: `Member ${target.name} unsuspended.` });
+});
+
+// Events & Opportunities Endpoints
+app.get('/api/events', (req: Request, res: Response) => {
+  const isAdmin = checkAdmin(req);
+  let list = Array.isArray(store.events) ? [...store.events] : [];
+
+  if (!isAdmin) {
+    list = list.filter((item: any) => item.published !== false);
+  }
+
+  // Sort: upcoming first (by datetime or deadline asc), past items at the end
+  const now = Date.now();
+  list.sort((a: any, b: any) => {
+    const timeA = new Date(a.datetime || a.deadline || a.created_at).getTime();
+    const timeB = new Date(b.datetime || b.deadline || b.created_at).getTime();
+    const isPastA = timeA < now;
+    const isPastB = timeB < now;
+
+    if (isPastA && !isPastB) return 1;
+    if (!isPastA && isPastB) return -1;
+    if (!isPastA && !isPastB) return timeA - timeB; // upcoming sooner first
+    return timeB - timeA; // past most recent first
+  });
+
+  return res.json(list);
+});
+
+app.get('/api/events/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const callerId = resolveAuthUserId(req);
+  const isAdmin = checkAdmin(req);
+
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) {
+    return res.status(404).json({ error: 'Event or Opportunity not found' });
+  }
+
+  if (!isAdmin && item.published === false) {
+    return res.status(404).json({ error: 'Event not found or unpublished' });
+  }
+
+  // Resolve attendee profiles: names and photos only, never emails or phone numbers
+  const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
+  const attendeeProfiles = store.profiles
+    .filter((p: any) => attendeeIds.includes(p.id) && !p.hidden && !p.suspended)
+    .map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      avatar: `/api/avatar/${p.id}`,
+      role: p.role,
+      headline: p.headline
+    }));
+
+  // Compute "People you should meet there" for signed-in caller
+  let peopleToMeet: Array<{ profile: any; reason: string; score: number }> = [];
+  if (callerId) {
+    const callerProfile = store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId);
+    if (callerProfile) {
+      const otherAttendees = store.profiles.filter(
+        (p: any) => attendeeIds.includes(p.id) && p.id !== callerProfile.id && !p.hidden && !p.suspended
+      );
+
+      const targetNeeds = `${callerProfile.needs || ''} ${callerProfile.learns || ''}`.toLowerCase();
+      const targetOffers = `${callerProfile.offers || ''} ${callerProfile.teaches || ''} ${(callerProfile.skills || []).join(' ')}`.toLowerCase();
+
+      peopleToMeet = otherAttendees.map((c: any) => {
+        let score = 75;
+        let reason = 'Shares relevant collaboration interests in the Kampala network.';
+
+        const skills = (c.skills || []).concat(c.tags || []);
+        const matchingSkills = skills.filter((s: string) => targetNeeds.includes(String(s).toLowerCase()));
+
+        if (matchingSkills.length > 0) {
+          score += 20;
+          reason = `${c.name} offers ${matchingSkills.slice(0, 2).join(' and ')}, which matches what you're looking for.`;
+        } else if (c.role && targetNeeds.includes(String(c.role).toLowerCase())) {
+          score += 15;
+          reason = `${c.name} is a ${c.role}, matching your project interests.`;
+        } else if (c.needs && targetOffers.includes(String(c.needs).toLowerCase().slice(0, 15))) {
+          score += 10;
+          reason = `You offer skills that complement what ${c.name} is building.`;
+        }
+
+        return {
+          profile: {
+            id: c.id,
+            name: c.name,
+            avatar: `/api/avatar/${c.id}`,
+            role: c.role,
+            headline: c.headline
+          },
+          reason,
+          score
+        };
+      }).sort((a, b) => b.score - a.score).slice(0, 5);
+    }
+  }
+
+  const isAttending = Boolean(callerId && (
+    attendeeIds.includes(callerId) ||
+    store.profiles.some((p: any) => (p.account_uid === callerId || p.id === callerId) && attendeeIds.includes(p.id))
+  ));
+
+  return res.json({
+    ...item,
+    attendees: attendeeProfiles,
+    people_to_meet: peopleToMeet,
+    is_attending: isAttending
+  });
+});
+
+app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
+  const callerId = resolveAuthUserId(req);
+  if (!callerId) {
+    return res.status(401).json({ error: 'Please sign in to RSVP or save interest.' });
+  }
+
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) {
+    return res.status(404).json({ error: 'Event or Opportunity not found' });
+  }
+
+  // Find caller's profile ID
+  const callerProfile = store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId);
+  const memberId = callerProfile?.id || callerId;
+
+  if (!Array.isArray(item.attendee_ids)) {
+    item.attendee_ids = [];
+  }
+
+  const index = item.attendee_ids.indexOf(memberId);
+  let isGoing = false;
+
+  if (index >= 0) {
+    item.attendee_ids.splice(index, 1);
+    isGoing = false;
+  } else {
+    item.attendee_ids.push(memberId);
+    isGoing = true;
+  }
+
+  await persistDoc('events', item.id, item);
+  if (storageMode === 'disk') saveStore(store);
+
+  return res.json({
+    success: true,
+    is_attending: isGoing,
+    attendee_count: item.attendee_ids.length
+  });
+});
+
+app.post('/api/events', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const raw = req.body || {};
+  const kind = raw.kind === 'opportunity' ? 'opportunity' : 'event';
+  const title = sanitizeText(raw.title, 150);
+  const description = sanitizeText(raw.description, 2000);
+
+  if (!title || !description) {
+    return res.status(400).json({ error: 'Title and description are required.' });
+  }
+
+  const item: any = {
+    id: (kind === 'event' ? 'event-' : 'opp-') + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
+    kind,
+    title,
+    description,
+    datetime: raw.datetime ? sanitizeText(raw.datetime, 60) : undefined,
+    location: raw.location ? sanitizeText(raw.location, 200) : undefined,
+    cover_image: raw.cover_image ? sanitizeAvatar(raw.cover_image) : undefined,
+    registration_link: raw.registration_link ? sanitizeUrl(raw.registration_link) : undefined,
+    opportunity_type: raw.opportunity_type ? sanitizeText(raw.opportunity_type, 50) : undefined,
+    deadline: raw.deadline ? sanitizeText(raw.deadline, 60) : undefined,
+    link: raw.link ? sanitizeUrl(raw.link) : undefined,
+    published: raw.published !== false,
+    attendee_ids: [],
+    created_at: new Date().toISOString(),
+    created_by: admin.adminName
+  };
+
+  if (!store.events) store.events = [];
+  store.events.unshift(item);
+  await persistDoc('events', item.id, item);
+
+  // Requirement 4: Publishing an item sends one notification to members
+  if (item.published) {
+    const notifBody = kind === 'event'
+      ? `📅 New Event: ${item.title}`
+      : `💡 New Opportunity (${item.opportunity_type || 'General'}): ${item.title}`;
+
+    const newNotifs: Array<{ id: string; data: any }> = [];
+    for (const p of store.profiles) {
+      if (p.hidden || p.suspended) continue;
+      const notif = {
+        id: 'notif-ev-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        to_id: p.id,
+        from_id: 'organiser',
+        type: 'digest',
+        body: notifBody,
+        read: false,
+        created_at: new Date().toISOString()
+      };
+      store.notifications.unshift(notif);
+      newNotifs.push({ id: notif.id, data: notif });
+    }
+    if (newNotifs.length > 0) {
+      await batchPersistDocs('notifications', newNotifs);
+    }
+  }
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'CREATE_EVENT',
+    details: `Created ${kind}: "${item.title}" (${item.published ? 'Published' : 'Draft'})`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true, item });
+});
+
+app.patch('/api/events/:id', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) {
+    return res.status(404).json({ error: 'Event or Opportunity not found' });
+  }
+
+  const raw = req.body || {};
+  const wasUnpublished = item.published === false;
+
+  if (raw.title !== undefined) item.title = sanitizeText(raw.title, 150);
+  if (raw.description !== undefined) item.description = sanitizeText(raw.description, 2000);
+  if (raw.datetime !== undefined) item.datetime = sanitizeText(raw.datetime, 60);
+  if (raw.location !== undefined) item.location = sanitizeText(raw.location, 200);
+  if (raw.cover_image !== undefined) item.cover_image = sanitizeAvatar(raw.cover_image);
+  if (raw.registration_link !== undefined) item.registration_link = sanitizeUrl(raw.registration_link);
+  if (raw.opportunity_type !== undefined) item.opportunity_type = sanitizeText(raw.opportunity_type, 50);
+  if (raw.deadline !== undefined) item.deadline = sanitizeText(raw.deadline, 60);
+  if (raw.link !== undefined) item.link = sanitizeUrl(raw.link);
+  if (raw.published !== undefined) item.published = Boolean(raw.published);
+
+  // If newly published, broadcast one notification
+  if (wasUnpublished && item.published) {
+    const notifBody = item.kind === 'event'
+      ? `📅 New Event: ${item.title}`
+      : `💡 New Opportunity (${item.opportunity_type || 'General'}): ${item.title}`;
+
+    const newNotifs: Array<{ id: string; data: any }> = [];
+    for (const p of store.profiles) {
+      if (p.hidden || p.suspended) continue;
+      const notif = {
+        id: 'notif-ev-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        to_id: p.id,
+        from_id: 'organiser',
+        type: 'digest',
+        body: notifBody,
+        read: false,
+        created_at: new Date().toISOString()
+      };
+      store.notifications.unshift(notif);
+      newNotifs.push({ id: notif.id, data: notif });
+    }
+    if (newNotifs.length > 0) {
+      await batchPersistDocs('notifications', newNotifs);
+    }
+  }
+
+  await persistDoc('events', item.id, item);
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'UPDATE_EVENT',
+    details: `Updated ${item.kind}: "${item.title}" (${item.published ? 'Published' : 'Unpublished'})`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true, item });
+});
+
+app.delete('/api/events/:id', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) {
+    return res.status(404).json({ error: 'Event or Opportunity not found' });
+  }
+
+  store.events = (store.events || []).filter((e: any) => e.id !== id);
+  await removeDoc('events', id);
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'DELETE_EVENT',
+    details: `Deleted ${item.kind}: "${item.title}"`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true, message: 'Event or Opportunity deleted' });
+});
+
+app.get('/api/events/:id/export', (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) {
+    return res.status(404).json({ error: 'Event or Opportunity not found' });
+  }
+
+  const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
+  const attendeeProfiles = store.profiles.filter((p: any) => attendeeIds.includes(p.id));
+
+  // CSV output: Name,Role,Headline,Email,Status
+  let csv = 'ID,Name,Role,Headline,Email,Status\n';
+  for (const p of attendeeProfiles) {
+    const cleanName = (p.name || '').replace(/"/g, '""');
+    const cleanRole = (p.role || '').replace(/"/g, '""');
+    const cleanHeadline = (p.headline || p.offers || '').replace(/"/g, '""');
+    const cleanEmail = (p.email || '').replace(/"/g, '""');
+    const status = item.kind === 'event' ? "Going" : "Interested";
+    csv += `"${p.id}","${cleanName}","${cleanRole}","${cleanHeadline}","${cleanEmail}","${status}"\n`;
+  }
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="${item.id}-attendees.csv"`);
+  return res.send(csv);
 });
 
 /* =========================================================================

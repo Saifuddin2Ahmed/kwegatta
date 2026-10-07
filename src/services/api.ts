@@ -157,31 +157,31 @@ async function fetchGemmaWithHedge(
   }
 }
 
-// Call the open-weight Gemma 4 model via server endpoint with retry & 4s hedging
-export async function callGemma(
-  prompt: string,
+// Call the open-weight Gemma 4 model via server task endpoint with retry & 4s hedging
+export async function callGemmaTask(
+  task: 'polish_profile' | 'match' | 'tag_post' | 'ask' | 'event_matches',
+  data: any,
   options: { json?: boolean; temperature?: number } = {},
   retries = 1
 ): Promise<any> {
+  await getFreshAuthToken();
   let lastError: any = null;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const res = await fetchGemmaWithHedge('/api/gemma', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           model: GEMMA_MODEL_ID,
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: options.temperature ?? 0.1
-          }
+          task,
+          data
         })
       });
 
-      const data = await res.json().catch(() => ({}));
+      const resData = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const errorMsg = data?.error?.message || `Server status ${res.status}`;
+        const errorMsg = resData?.error?.message || `Server status ${res.status}`;
         lastError = new Error(errorMsg);
 
         // Retry immediately once on 500, 503, or timeout
@@ -192,7 +192,7 @@ export async function callGemma(
         throw lastError;
       }
 
-      const parts = data?.candidates?.[0]?.content?.parts || [];
+      const parts = resData?.candidates?.[0]?.content?.parts || [];
       const nonThought = parts
         .filter((p: any) => !p.thought)
         .map((p: any) => p.text || '')
@@ -228,21 +228,49 @@ export async function callGemma(
   throw lastError || new Error('Gemma call failed');
 }
 
+export async function callGemma(
+  taskOrPrompt: string,
+  optionsOrData: any = {},
+  retries = 1
+): Promise<any> {
+  const allowedTasks = ['polish_profile', 'match', 'tag_post', 'ask', 'event_matches'];
+  if (allowedTasks.includes(taskOrPrompt)) {
+    return callGemmaTask(taskOrPrompt as any, optionsOrData, typeof retries === 'object' ? retries : {}, typeof retries === 'number' ? retries : 1);
+  }
+  // Otherwise route to 'ask' task with query
+  return callGemmaTask('ask', { query: taskOrPrompt, candidates: [] }, optionsOrData, retries);
+}
+
 // Stream Gemma tokens directly to client with 4s hedging
 export async function callGemmaStream(
-  prompt: string,
-  onChunk: (chunk: string) => void,
+  taskOrPrompt: string,
+  dataOrOnChunk: any,
+  onChunkOrOptions?: any,
   options: { model?: string; temperature?: number } = {}
 ): Promise<string> {
+  await getFreshAuthToken();
+  const allowedTasks = ['polish_profile', 'match', 'tag_post', 'ask', 'event_matches'];
+  let task = 'ask';
+  let data: any = {};
+  let onChunk: (chunk: string) => void = () => {};
+
+  if (allowedTasks.includes(taskOrPrompt)) {
+    task = taskOrPrompt;
+    data = dataOrOnChunk;
+    onChunk = onChunkOrOptions;
+  } else {
+    task = 'ask';
+    data = { query: taskOrPrompt };
+    onChunk = dataOrOnChunk;
+  }
+
   const res = await fetchGemmaWithHedge('/api/gemma/stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       model: options.model || GEMMA_MODEL_ID,
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: options.temperature ?? 0.1
-      }
+      task,
+      data
     })
   });
 
@@ -987,3 +1015,173 @@ export async function askKwegatta(query: string): Promise<AskKwegattaMatch[]> {
     return [];
   }
 }
+
+/* =========================================================================
+   EVENTS, OPPORTUNITIES & PINNED ANNOUNCEMENTS API
+   ========================================================================= */
+
+export async function fetchEvents(): Promise<any[]> {
+  try {
+    await getFreshAuthToken();
+    const res = await fetch('/api/events', { headers: getAuthHeaders() });
+    if (!res.ok) return [];
+    return await res.json();
+  } catch (err) {
+    console.warn('[fetchEvents] error:', err);
+    return [];
+  }
+}
+
+export async function fetchEventById(id: string): Promise<any | null> {
+  try {
+    await getFreshAuthToken();
+    const res = await fetch(`/api/events/${encodeURIComponent(id)}`, { headers: getAuthHeaders() });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    console.warn('[fetchEventById] error:', err);
+    return null;
+  }
+}
+
+export async function rsvpEvent(id: string): Promise<{ success: boolean; is_attending: boolean; attendee_count: number }> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(id)}/rsvp`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to update RSVP');
+  }
+  return await res.json();
+}
+
+export async function createEvent(item: any): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch('/api/events', {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(item)
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to create event');
+  }
+  return data.item;
+}
+
+export async function updateEvent(id: string, patch: any): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(patch)
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to update event');
+  }
+  return data.item;
+}
+
+export async function deleteEvent(id: string): Promise<boolean> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders()
+  });
+  return res.ok;
+}
+
+export async function fetchPinnedAnnouncement(): Promise<{ id: string; text: string; link?: string; active: boolean } | null> {
+  try {
+    const res = await fetch('/api/announcement/pinned');
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.announcement || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+export async function pinAnnouncement(text: string, link?: string): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch('/api/admin/announcement/pin', {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ text, link })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to pin announcement');
+  return data.announcement;
+}
+
+export async function unpinAnnouncement(): Promise<boolean> {
+  await getFreshAuthToken();
+  const res = await fetch('/api/admin/announcement/unpin', {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+  });
+  return res.ok;
+}
+
+export async function fetchAdminEmails(): Promise<{ admin_emails: string[]; env_admins: string[]; stored_admins: string[] }> {
+  await getFreshAuthToken();
+  const res = await fetch('/api/admin/admins', { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch admin accounts');
+  return await res.json();
+}
+
+export async function addAdminEmail(email: string): Promise<string[]> {
+  await getFreshAuthToken();
+  const res = await fetch('/api/admin/admins', {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ email })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to add admin');
+  return data.admin_emails || [];
+}
+
+export async function removeAdminEmail(email: string): Promise<string[]> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/admins/${encodeURIComponent(email)}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders()
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to remove admin');
+  return data.admin_emails || [];
+}
+
+export async function suspendMember(id: string): Promise<boolean> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/members/${encodeURIComponent(id)}/suspend`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+  });
+  return res.ok;
+}
+
+export async function unsuspendMember(id: string): Promise<boolean> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/members/${encodeURIComponent(id)}/unsuspend`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+  });
+  return res.ok;
+}
+
+export async function fetchAdminStatus(): Promise<{ isAdmin: boolean; adminName: string; adminEmail: string; fallbackEnabled: boolean }> {
+  try {
+    await getFreshAuthToken();
+    const res = await fetch('/api/admin/status', { headers: getAuthHeaders() });
+    if (!res.ok) return { isAdmin: false, adminName: '', adminEmail: '', fallbackEnabled: false };
+    return await res.json();
+  } catch (err) {
+    return { isAdmin: false, adminName: '', adminEmail: '', fallbackEnabled: false };
+  }
+}
+
