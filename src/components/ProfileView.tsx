@@ -29,7 +29,12 @@ import {
   MapPin,
   Clock,
   Compass,
-  Layers
+  Layers,
+  LogOut,
+  Lock,
+  KeyRound,
+  Shield,
+  CheckCircle2
 } from 'lucide-react';
 import { Profile, MatchResult } from '../types';
 import {
@@ -38,11 +43,14 @@ import {
   db,
   exportMemberData,
   deleteMemberProfile,
-  requestMemberConnect,
   reportMember
 } from '../services/api';
 import { generateQrCodeDataUrl, formatWhatsAppUrl, resizeImageFile } from '../utils';
 import { Avatar } from './Avatar';
+import { SocialLinksRow } from './SocialLinksRow';
+import { ShareCardModal } from './ShareCardModal';
+import { auth } from '../services/firebase';
+import { EmailAuthProvider, linkWithCredential } from 'firebase/auth';
 
 interface ProfileViewProps {
   profile: Profile;
@@ -53,6 +61,7 @@ interface ProfileViewProps {
   onToggleFollow: () => void;
   onUpdateProfile: (updated: Profile) => void;
   onDeleteProfile?: () => void;
+  onSignOut?: () => void;
   onToast: (msg: string) => void;
 }
 
@@ -65,26 +74,35 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onToggleFollow,
   onUpdateProfile,
   onDeleteProfile,
+  onSignOut,
   onToast
 }) => {
   const isMine = currentProfile?.id === profile.id;
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
   const [isEditing, setIsEditing] = useState(false);
+  const [showMyMoreMenu, setShowMyMoreMenu] = useState(false);
+  const myMenuRef = useRef<HTMLDivElement>(null);
   const [pairMatch, setPairMatch] = useState<MatchResult | null>(null);
   const [isCheckingMatch, setIsCheckingMatch] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
+  const [showShareCardModal, setShowShareCardModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmDeleteInput, setConfirmDeleteInput] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
 
+  // Password linking state for Google accounts
+  const [showAddPassword, setShowAddPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [isLinkingPassword, setIsLinkingPassword] = useState(false);
+  const [passwordLinkedSuccess, setPasswordLinkedSuccess] = useState(false);
+  const [passwordLinkError, setPasswordLinkError] = useState<string | null>(null);
+
   // Photo state machine: preview at once -> processing -> photo saved -> error with try again
   const [photoStatus, setPhotoStatus] = useState<'idle' | 'processing' | 'saved' | 'error'>('idle');
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [photoErrorMsg, setPhotoErrorMsg] = useState<string | null>(null);
-  const photoInputRef = useRef<HTMLInputElement>(null);
-  const selfieInputRef = useRef<HTMLInputElement>(null);
 
   // Safety: Report & Block state
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -94,7 +112,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [isReporting, setIsReporting] = useState(false);
   const [showBlockModal, setShowBlockModal] = useState(false);
   const isBlocked = Boolean(currentProfile?.blocked_ids?.includes(profile.id));
-  const isBlockedByThem = Boolean(currentProfile && profile.blocked_ids?.includes(currentProfile.id));
 
   // Edit form state
   const [editHeadline, setEditHeadline] = useState(profile.headline || '');
@@ -106,13 +123,42 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [editStatus, setEditStatus] = useState(profile.status || 'Open to projects');
   const [editWhatsApp, setEditWhatsApp] = useState(profile.whatsapp || '');
   const [editHideWhatsApp, setEditHideWhatsApp] = useState(profile.hide_whatsapp || false);
+
+  // Social & Academic links edit state
+  const [editLinkedin, setEditLinkedin] = useState(profile.linkedin || '');
+  const [editGithub, setEditGithub] = useState(profile.github || '');
+  const [editWebsite, setEditWebsite] = useState(profile.website || '');
+  const [editTwitter, setEditTwitter] = useState(profile.twitter || '');
+  const [editFacebook, setEditFacebook] = useState(profile.facebook || '');
+  const [editTiktok, setEditTiktok] = useState(profile.tiktok || '');
+  const [editInstagram, setEditInstagram] = useState(profile.instagram || '');
+  const [editYoutube, setEditYoutube] = useState(profile.youtube || '');
+  const [editScholar, setEditScholar] = useState(profile.scholar || '');
+  const [editOrcid, setEditOrcid] = useState(profile.orcid || '');
+
   const [gemmaInstruction, setGemmaInstruction] = useState('');
   const [isRewriting, setIsRewriting] = useState(false);
+
+  // Check auth user provider
+  const currentUser = auth.currentUser;
+  const isGoogleUser = currentUser?.providerData.some(p => p.providerId === 'google.com');
+  const hasPasswordProvider = currentUser?.providerData.some(p => p.providerId === 'password');
+  const userEmail = currentUser?.email || profile.email || 'your account';
 
   useEffect(() => {
     const profileUrl = `${window.location.origin}${window.location.pathname}#/u/${profile.id}`;
     generateQrCodeDataUrl(profileUrl, 240).then(setQrCodeDataUrl);
   }, [profile.id]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (myMenuRef.current && !myMenuRef.current.contains(e.target as Node)) {
+        setShowMyMoreMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleRewriteWithGemma = async () => {
     setIsRewriting(true);
@@ -151,7 +197,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         learns: editLearns.slice(0, 400),
         status: editStatus,
         whatsapp: editWhatsApp.replace(/[^\d+]/g, ''),
-        hide_whatsapp: editHideWhatsApp
+        hide_whatsapp: editHideWhatsApp,
+        linkedin: editLinkedin.trim(),
+        github: editGithub.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\/$/, ''),
+        website: editWebsite.trim(),
+        twitter: editTwitter.trim(),
+        facebook: editFacebook.trim(),
+        tiktok: editTiktok.trim(),
+        instagram: editInstagram.trim(),
+        youtube: editYoutube.trim(),
+        scholar: editScholar.trim(),
+        orcid: editOrcid.trim()
       };
 
       await db.update('profiles', profile.id, updated);
@@ -163,17 +219,44 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     }
   };
 
+  const handleAddPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser || !currentUser.email) {
+      setPasswordLinkError('User email not found. Please re-authenticate.');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordLinkError('Password must be at least 6 characters.');
+      return;
+    }
+
+    setIsLinkingPassword(true);
+    setPasswordLinkError(null);
+
+    try {
+      const credential = EmailAuthProvider.credential(currentUser.email, newPassword);
+      await linkWithCredential(currentUser, credential);
+      setPasswordLinkedSuccess(true);
+      setShowAddPassword(false);
+      setNewPassword('');
+      onToast('Password added! You can now sign in with either Google or email & password.');
+    } catch (err: any) {
+      console.warn('Password linking error:', err);
+      setPasswordLinkError(err.message || 'Could not add password to account.');
+    } finally {
+      setIsLinkingPassword(false);
+    }
+  };
+
   const handlePhotoFile = async (file: File) => {
     if (!file) return;
 
-    // 1. Show preview at once
     const tempUrl = URL.createObjectURL(file);
     setPhotoPreviewUrl(tempUrl);
     setPhotoStatus('processing');
     setPhotoErrorMsg(null);
 
     try {
-      // 2. Resize and store with profile in Firestore
       const resized = await resizeImageFile(file);
       URL.revokeObjectURL(tempUrl);
       setPhotoPreviewUrl(resized);
@@ -195,7 +278,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     if (file) {
       handlePhotoFile(file);
     }
-    // reset input value so re-selecting same photo triggers onChange
     e.target.value = '';
   };
 
@@ -324,7 +406,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       setIsConnecting(true);
       const text = `Hi ${profile.name.split(' ')[0]}, I'm ${currentProfile.name} on Kwegatta. Let's connect!`;
 
-      // Log notification to target member
       await db.insert('notifications', {
         to_id: profile.id,
         from_id: currentProfile.id,
@@ -358,7 +439,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in">
+      {/* Modal for 1200 x 630 Share Card */}
+      {showShareCardModal && (
+        <ShareCardModal
+          profile={profile}
+          isOpen={showShareCardModal}
+          onClose={() => setShowShareCardModal(false)}
+          onToast={onToast}
+        />
+      )}
+
       {/* Modal for Fullscreen QR Code */}
       {showQrModal && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
@@ -472,7 +563,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               )}
             </div>
 
-            {/* Requirement 4: On "My profile", make "Change photo" a visible button */}
             {isMine && (
               <div className="mt-2.5">
                 <label className="primer-btn text-xs py-1.5 px-3.5 flex items-center gap-1.5 cursor-pointer font-medium hover:border-[var(--gold)] active:scale-95 transition-all">
@@ -534,6 +624,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             {profile.bio || profile.headline}
           </p>
 
+          {/* Social Links Row (LinkedIn, GitHub, Website, TikTok, X, Instagram, YouTube, Scholar, ORCID) */}
+          <div className="pt-1">
+            <SocialLinksRow profile={profile} />
+          </div>
+
           {/* Social counts */}
           <div className="flex items-center gap-3 text-xs text-[var(--muted)]">
             <div className="flex items-center gap-1">
@@ -548,24 +643,99 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
           </div>
 
-          {/* Connect / Edit Actions */}
+          {/* Connect / Edit Actions & Share Card Button */}
           <div className="space-y-2">
             {isMine ? (
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setIsEditing(!isEditing)}
-                  className="primer-btn text-xs py-1.5 flex-1"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                  <span>{isEditing ? 'Close editor' : 'Edit profile'}</span>
-                </button>
-                <button
-                  onClick={handleShareLink}
-                  className="primer-btn text-xs py-1.5 px-3"
-                  title="Share profile link"
-                >
-                  <Share2 className="w-3.5 h-3.5 text-[var(--muted)]" />
-                </button>
+              <div className="space-y-2">
+                <div className="flex gap-2 items-center">
+                  <button
+                    onClick={() => setIsEditing(!isEditing)}
+                    className="primer-btn text-xs py-1.5 flex-1"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>{isEditing ? 'Close editor' : 'Edit profile'}</span>
+                  </button>
+                  <button
+                    onClick={() => setShowShareCardModal(true)}
+                    className="primer-btn text-xs py-1.5 px-3 flex items-center gap-1.5 text-[var(--gold)] font-medium"
+                    title="Share my profile card"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>Share my profile</span>
+                  </button>
+                  <div className="relative" ref={myMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowMyMoreMenu(!showMyMoreMenu)}
+                      className="primer-btn text-xs py-1.5 px-2.5 flex items-center gap-1 cursor-pointer"
+                      title="Profile menu"
+                      aria-label="Profile menu"
+                    >
+                      <span>More</span>
+                      <span className="text-[10px]">▾</span>
+                    </button>
+
+                    {showMyMoreMenu && (
+                      <div className="absolute right-0 top-full mt-1.5 w-48 bg-[var(--card)] border border-[var(--card-border)] rounded-xl shadow-2xl z-40 py-1.5 text-xs animate-in fade-in zoom-in-95">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMyMoreMenu(false);
+                            setShowShareCardModal(true);
+                          }}
+                          className="w-full text-left px-3.5 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-[var(--fg)] cursor-pointer"
+                        >
+                          <Share2 className="w-3.5 h-3.5 text-[var(--gold)]" />
+                          <span>Share my profile card</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMyMoreMenu(false);
+                            handleShareLink();
+                          }}
+                          className="w-full text-left px-3.5 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-[var(--fg)] cursor-pointer"
+                        >
+                          <LinkIcon className="w-3.5 h-3.5 text-[var(--fg-muted)]" />
+                          <span>Copy profile link</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMyMoreMenu(false);
+                            handleExportData();
+                          }}
+                          className="w-full text-left px-3.5 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-[var(--fg)] cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5 text-[var(--fg-muted)]" />
+                          <span>Export my data (JSON)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMyMoreMenu(false);
+                            if (onSignOut) onSignOut();
+                          }}
+                          className="w-full text-left px-3.5 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-rose-500 hover:text-rose-600 font-medium cursor-pointer"
+                        >
+                          <LogOut className="w-3.5 h-3.5 text-rose-500" />
+                          <span>Sign out</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowMyMoreMenu(false);
+                            setShowDeleteModal(true);
+                          }}
+                          className="w-full text-left px-3.5 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-[var(--fg-muted)] hover:text-rose-500 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                          <span>Delete profile</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="space-y-2">
@@ -613,7 +783,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     )}
                   </button>
 
-                  {/* Requirement 1: "More" menu next to Connect and Follow with Report and Block */}
                   <div className="relative">
                     <button
                       type="button"
@@ -634,10 +803,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                             setShowMoreMenu(false);
                             handleShareLink();
                           }}
-                          className="w-full text-left px-3 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-[var(--fg)] cursor-pointer"
+                          className="w-full text-left px-3.5 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-[var(--fg)] cursor-pointer"
                         >
                           <Share2 className="w-3.5 h-3.5 text-[var(--fg-muted)]" />
-                          <span>Share profile</span>
+                          <span>Share profile link</span>
                         </button>
                         <button
                           type="button"
@@ -645,7 +814,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                             setShowMoreMenu(false);
                             setShowReportModal(true);
                           }}
-                          className="w-full text-left px-3 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-red-500 hover:text-red-600 font-medium cursor-pointer"
+                          className="w-full text-left px-3.5 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-red-500 hover:text-red-600 font-medium cursor-pointer"
                         >
                           <Flag className="w-3.5 h-3.5 text-red-500" />
                           <span>Report profile</span>
@@ -657,7 +826,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                             if (isBlocked) handleUnblock();
                             else setShowBlockModal(true);
                           }}
-                          className="w-full text-left px-3 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-[var(--fg-muted)] hover:text-red-500 cursor-pointer"
+                          className="w-full text-left px-3.5 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-[var(--fg-muted)] hover:text-red-500 cursor-pointer"
                         >
                           <Ban className="w-3.5 h-3.5" />
                           <span>{isBlocked ? 'Unblock member' : 'Block member'}</span>
@@ -667,7 +836,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   </div>
                 </div>
 
-                {/* Direct visible safety actions */}
                 <div className="flex items-center gap-3 pt-1 text-[11px] text-[var(--fg-muted)]">
                   <button
                     type="button"
@@ -680,7 +848,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   <span>·</span>
                   <button
                     type="button"
-                    onClick={() => isBlocked ? handleUnblock() : setShowBlockModal(true)}
+                    onClick={() => (isBlocked ? handleUnblock() : setShowBlockModal(true))}
                     className="hover:text-red-500 flex items-center gap-1 cursor-pointer transition-colors"
                   >
                     <Ban className="w-3 h-3" />
@@ -691,11 +859,99 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             )}
           </div>
 
+          {/* Account & Sign-in Section (Only for own profile) */}
+          {isMine && (
+            <div className="primer-box p-3.5 bg-[var(--subtle)] space-y-3 text-xs rounded-xl border border-[var(--card-border)]">
+              <div className="font-semibold text-[11px] text-[var(--muted)] uppercase tracking-wider flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-[var(--gold)]" />
+                <span>Account &amp; Security</span>
+              </div>
+
+              <div className="space-y-1.5 text-xs">
+                <p className="text-[var(--fg)] font-medium">
+                  {isGoogleUser
+                    ? `Signed in with Google as ${userEmail}`
+                    : `Signed in as ${userEmail}`}
+                </p>
+                {hasPasswordProvider && (
+                  <div className="flex items-center gap-1 text-emerald-500 text-[11px] font-semibold">
+                    <CheckCircle2 className="w-3 h-3" />
+                    <span>Password credential linked</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Add a password for Google accounts */}
+              {isGoogleUser && !hasPasswordProvider && !passwordLinkedSuccess && (
+                <div className="pt-2 border-t border-[var(--border-muted)] space-y-2">
+                  {!showAddPassword ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowAddPassword(true)}
+                      className="primer-btn text-xs py-1.5 px-3 flex items-center gap-1.5 font-semibold text-[var(--gold)] border-[var(--gold)]/40 hover:bg-[var(--gold-subtle)] cursor-pointer"
+                    >
+                      <KeyRound className="w-3.5 h-3.5" />
+                      <span>Add a password</span>
+                    </button>
+                  ) : (
+                    <form onSubmit={handleAddPassword} className="space-y-2 bg-[var(--card)] p-3 rounded-lg border border-[var(--card-border)] animate-in fade-in">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-semibold text-[var(--fg)] flex items-center gap-1.5">
+                          <Lock className="w-3.5 h-3.5 text-[var(--gold)]" />
+                          <span>Set account password</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowAddPassword(false);
+                            setPasswordLinkError(null);
+                          }}
+                          className="text-[var(--fg-muted)] hover:text-[var(--fg)]"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-[var(--fg-muted)]">
+                        Add a password so you can sign in with your email and password on any device.
+                      </p>
+                      <input
+                        type="password"
+                        placeholder="Create a password (min 6 characters)"
+                        value={newPassword}
+                        onChange={e => setNewPassword(e.target.value)}
+                        className="w-full p-2 text-xs bg-[var(--bg-subtle)] border border-[var(--card-border)] rounded-md focus:outline-none focus:border-[var(--gold)] text-[var(--fg)]"
+                      />
+                      {passwordLinkError && (
+                        <p className="text-[11px] text-red-500 font-medium">{passwordLinkError}</p>
+                      )}
+                      <div className="flex gap-2 justify-end pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setShowAddPassword(false)}
+                          className="primer-btn text-xs py-1 px-2.5"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isLinkingPassword || newPassword.length < 6}
+                          className="kw-btn kw-btn-gold text-xs py-1 px-3.5 font-bold disabled:opacity-40"
+                        >
+                          {isLinkingPassword ? 'Adding...' : 'Save password'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Digital Public Goods: Data & Privacy Controls */}
           {isMine && (
             <div className="primer-box p-3 bg-[var(--subtle)] space-y-2.5 text-xs">
               <div className="font-semibold text-[11px] text-[var(--muted)] uppercase tracking-wider flex items-center justify-between">
-                <span>Data & Privacy</span>
+                <span>Data &amp; Privacy</span>
                 <span className="primer-label primer-label-green text-[10px]">DPG Aligned</span>
               </div>
               <p className="text-[11px] text-[var(--muted)] leading-relaxed">
@@ -721,10 +977,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
           )}
 
-          {/* Badges / Highlights */}
+          {/* Achievements & Badges */}
           <div className="primer-box p-3 bg-[var(--subtle)] space-y-2 text-xs">
             <div className="font-semibold text-[11px] text-[var(--muted)] uppercase tracking-wider">
-              Achievements & Badges
+              Achievements &amp; Badges
             </div>
             <div className="space-y-1.5">
               <div className="flex items-center gap-2 text-xs text-[var(--fg)]">
@@ -738,60 +994,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
           </div>
 
-          {/* Links list */}
-          <div className="space-y-1.5 text-xs text-[var(--muted)] pt-2 border-t border-[var(--border-muted)]">
-            {profile.github && (
-              <div className="flex items-center gap-2">
-                <Github className="w-3.5 h-3.5 flex-shrink-0" />
-                <a
-                  href={`https://github.com/${profile.github}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="truncate hover:underline"
-                >
-                  github.com/{profile.github}
-                </a>
-              </div>
-            )}
-            {profile.linkedin && (
-              <div className="flex items-center gap-2">
-                <LinkIcon className="w-3.5 h-3.5 flex-shrink-0" />
-                <a
-                  href={profile.linkedin}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="truncate hover:underline"
-                >
-                  LinkedIn Profile
-                </a>
-              </div>
-            )}
-            {profile.whatsapp ? (
-              <div className="flex items-center gap-2">
-                <MessageCircle className="w-3.5 h-3.5 flex-shrink-0 text-[var(--success)]" />
-                <a
-                  href={formatWhatsAppUrl(profile.whatsapp, `Hi ${profile.name.split(' ')[0]}, I found your profile on Kwegatta!`)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="truncate hover:underline text-[var(--success)] font-medium"
-                >
-                  WhatsApp: {profile.whatsapp}
-                </a>
-              </div>
-            ) : profile.hide_whatsapp && !isMine ? (
-              <div className="flex items-center gap-2 text-[var(--fg-muted)]">
-                <MessageCircle className="w-3.5 h-3.5 flex-shrink-0 opacity-50" />
-                <span>WhatsApp: Hidden by member</span>
-              </div>
-            ) : !currentProfile ? (
-              <div className="flex items-center gap-2 text-[var(--gold)]">
-                <MessageCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                <span>WhatsApp: (Sign in to view)</span>
-              </div>
-            ) : null}
-          </div>
-
-          {/* Dynamic Profile QR Code with fullscreen modal button */}
+          {/* Dynamic Profile QR Code */}
           <div className="primer-box p-3 text-center space-y-2 bg-[var(--subtle)]">
             <div className="font-semibold text-xs flex items-center justify-between">
               <span className="flex items-center gap-1.5">
@@ -872,43 +1075,43 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
           {/* Edit Profile Form (Expanded if editing) */}
           {isEditing && isMine && (
-            <div className="primer-box p-4 bg-[var(--subtle)] space-y-3.5 border-2 border-[var(--accent)]">
-              <h3 className="font-semibold text-sm flex items-center gap-2">
-                <Edit3 className="w-4 h-4 text-[var(--accent)]" />
+            <div className="primer-box p-4 bg-[var(--subtle)] space-y-4 border-2 border-[var(--gold)] rounded-2xl shadow-xl">
+              <h3 className="font-semibold text-sm flex items-center gap-2 text-[var(--fg)]">
+                <Edit3 className="w-4 h-4 text-[var(--gold)]" />
                 <span>Edit Profile</span>
               </h3>
 
-              <div className="space-y-2.5">
+              <div className="space-y-3">
                 <div>
-                  <label className="block text-xs font-medium text-[var(--muted)] mb-1">
+                  <label className="block text-xs font-semibold text-[var(--fg)] mb-1">
                     Headline (max 8 words)
                   </label>
                   <input
                     type="text"
                     value={editHeadline}
                     onChange={e => setEditHeadline(e.target.value)}
-                    className="primer-input text-xs"
+                    className="primer-input text-xs w-full"
                     maxLength={100}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-[var(--muted)] mb-1">
+                  <label className="block text-xs font-semibold text-[var(--fg)] mb-1">
                     Bio (2 sentences)
                   </label>
                   <textarea
                     value={editBio}
                     onChange={e => setEditBio(e.target.value)}
-                    className="primer-textarea text-xs"
+                    className="primer-textarea text-xs w-full"
                     rows={2}
                     maxLength={400}
                   />
                 </div>
 
                 {/* Rewrite with Gemma helper */}
-                <div className="p-3 bg-[var(--bg)] rounded border border-[var(--border)] space-y-2">
+                <div className="p-3 bg-[var(--bg)] rounded-xl border border-[var(--card-border)] space-y-2">
                   <div className="text-xs font-medium text-[var(--fg)] flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-[var(--done)]" />
+                    <Sparkles className="w-3.5 h-3.5 text-[var(--gold)]" />
                     <span>Rewrite bio with Gemma 4</span>
                   </div>
                   <div className="flex gap-2">
@@ -923,7 +1126,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       type="button"
                       onClick={handleRewriteWithGemma}
                       disabled={isRewriting}
-                      className="primer-btn text-xs py-1 px-3"
+                      className="primer-btn text-xs py-1 px-3 cursor-pointer"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${isRewriting ? 'animate-spin' : ''}`} />
                       <span>{isRewriting ? 'Writing...' : 'Rewrite'}</span>
@@ -933,25 +1136,25 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-[var(--muted)] mb-1">
+                    <label className="block text-xs font-semibold text-[var(--gold)] mb-1">
                       What you OFFER
                     </label>
                     <textarea
                       value={editOffers}
                       onChange={e => setEditOffers(e.target.value)}
-                      className="primer-textarea text-xs"
+                      className="primer-textarea text-xs w-full"
                       rows={2}
                       maxLength={400}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-[var(--muted)] mb-1">
+                    <label className="block text-xs font-semibold text-[var(--teal)] mb-1">
                       What you NEED
                     </label>
                     <textarea
                       value={editNeeds}
                       onChange={e => setEditNeeds(e.target.value)}
-                      className="primer-textarea text-xs"
+                      className="primer-textarea text-xs w-full"
                       rows={2}
                       maxLength={400}
                     />
@@ -967,7 +1170,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       type="text"
                       value={editTeaches}
                       onChange={e => setEditTeaches(e.target.value)}
-                      className="primer-input text-xs"
+                      className="primer-input text-xs w-full"
                       maxLength={200}
                     />
                   </div>
@@ -979,21 +1182,128 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       type="text"
                       value={editLearns}
                       onChange={e => setEditLearns(e.target.value)}
-                      className="primer-input text-xs"
+                      className="primer-input text-xs w-full"
                       maxLength={200}
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* Social & Academic Links Editing */}
+                <div className="space-y-2.5 pt-2 border-t border-[var(--border-muted)]">
+                  <span className="text-xs font-bold text-[var(--fg)] block">
+                    Social &amp; Academic Links (Optional)
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">LinkedIn</label>
+                      <input
+                        type="text"
+                        placeholder="https://linkedin.com/in/username"
+                        value={editLinkedin}
+                        onChange={e => setEditLinkedin(e.target.value)}
+                        className="primer-input text-xs w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">GitHub</label>
+                      <input
+                        type="text"
+                        placeholder="username or github.com/username"
+                        value={editGithub}
+                        onChange={e => setEditGithub(e.target.value)}
+                        className="primer-input text-xs w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Personal Website</label>
+                      <input
+                        type="text"
+                        placeholder="https://yoursite.com"
+                        value={editWebsite}
+                        onChange={e => setEditWebsite(e.target.value)}
+                        className="primer-input text-xs w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">X (Twitter)</label>
+                      <input
+                        type="text"
+                        placeholder="https://x.com/username"
+                        value={editTwitter}
+                        onChange={e => setEditTwitter(e.target.value)}
+                        className="primer-input text-xs w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">TikTok</label>
+                      <input
+                        type="text"
+                        placeholder="https://tiktok.com/@username"
+                        value={editTiktok}
+                        onChange={e => setEditTiktok(e.target.value)}
+                        className="primer-input text-xs w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Instagram</label>
+                      <input
+                        type="text"
+                        placeholder="https://instagram.com/username"
+                        value={editInstagram}
+                        onChange={e => setEditInstagram(e.target.value)}
+                        className="primer-input text-xs w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">YouTube</label>
+                      <input
+                        type="text"
+                        placeholder="https://youtube.com/@channel"
+                        value={editYoutube}
+                        onChange={e => setEditYoutube(e.target.value)}
+                        className="primer-input text-xs w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Facebook</label>
+                      <input
+                        type="text"
+                        placeholder="https://facebook.com/profile"
+                        value={editFacebook}
+                        onChange={e => setEditFacebook(e.target.value)}
+                        className="primer-input text-xs w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Google Scholar</label>
+                      <input
+                        type="text"
+                        placeholder="https://scholar.google.com/citations?user=..."
+                        value={editScholar}
+                        onChange={e => setEditScholar(e.target.value)}
+                        className="primer-input text-xs w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">ORCID</label>
+                      <input
+                        type="text"
+                        placeholder="https://orcid.org/0000-0000-0000-0000"
+                        value={editOrcid}
+                        onChange={e => setEditOrcid(e.target.value)}
+                        className="primer-input text-xs w-full"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
                   <div>
-                    <label className="block text-xs font-medium text-[var(--muted)] mb-1">
-                      Status
-                    </label>
+                    <label className="block text-xs font-semibold text-[var(--fg)] mb-1">Status</label>
                     <select
                       value={editStatus}
                       onChange={e => setEditStatus(e.target.value)}
-                      className="primer-select text-xs"
+                      className="primer-select text-xs w-full"
                     >
                       <option>Open to projects</option>
                       <option>Looking for a co-founder</option>
@@ -1003,15 +1313,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-[var(--muted)] mb-1">
-                      WhatsApp number
-                    </label>
+                    <label className="block text-xs font-semibold text-[var(--fg)] mb-1">WhatsApp number</label>
                     <input
                       type="tel"
                       value={editWhatsApp}
                       onChange={e => setEditWhatsApp(e.target.value)}
                       placeholder="+256 700 000000"
-                      className="primer-input text-xs"
+                      className="primer-input text-xs w-full"
                       maxLength={25}
                     />
                     <label className="flex items-center gap-2 mt-2 text-xs text-[var(--fg)] cursor-pointer">
@@ -1021,7 +1329,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         onChange={e => setEditHideWhatsApp(!e.target.checked)}
                         className="rounded border-[var(--card-border)] text-[var(--gold)] focus:ring-[var(--gold)]"
                       />
-                      <span>Visible to other signed-in members (recommended)</span>
+                      <span>Visible to other signed-in members</span>
                     </label>
                   </div>
                 </div>
@@ -1031,14 +1339,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsEditing(false)}
-                  className="primer-btn text-xs py-1 px-3"
+                  className="primer-btn text-xs py-1.5 px-3 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={handleSaveProfile}
-                  className="primer-btn primer-btn-primary text-xs py-1 px-4"
+                  className="kw-btn kw-btn-gold text-xs py-1.5 px-4 font-bold cursor-pointer"
                 >
                   <Check className="w-3.5 h-3.5" />
                   <span>Save changes</span>
@@ -1085,7 +1393,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           {/* Skills and Tags */}
           {(profile.tags?.length > 0 || profile.skills?.length > 0) && (
             <div className="primer-box p-3.5 space-y-2.5">
-              <div className="font-semibold text-xs text-[var(--fg)]">Tags & Skills</div>
+              <div className="font-semibold text-xs text-[var(--fg)]">Tags &amp; Skills</div>
               <div className="flex flex-wrap gap-1.5">
                 {profile.tags?.map(t => (
                   <span key={t} className="primer-tag text-xs">
@@ -1102,10 +1410,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
           )}
 
-          {/* GitHub Activity / Contribution Grid Simulation */}
+          {/* GitHub Activity / Commit Stream */}
           <div className="primer-box p-3.5 space-y-2">
             <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold">Hack Day Activity & Commit Stream</span>
+              <span className="font-semibold">Hack Day Activity &amp; Commit Stream</span>
               <span className="text-[11px] text-[var(--muted)]">October 2026</span>
             </div>
             <div className="grid grid-cols-12 sm:grid-cols-24 gap-1 pt-1">

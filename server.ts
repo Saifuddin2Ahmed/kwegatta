@@ -6,12 +6,24 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { initializeApp, getApps, type App } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
+import { getAuth as getAdminAuth, type Auth as AdminAuth } from 'firebase-admin/auth';
+import { GoogleGenAI } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+
+// Shared Google GenAI client for server-side matchmaking and semantic analysis
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
+    }
+  }
+});
 
 // Security: Disable X-Powered-By header to prevent fingerprinting
 app.disable('x-powered-by');
@@ -316,6 +328,7 @@ const INITIAL_DEMO_MEMBERS = [
 // Persistence Configuration & Mode (Cloud Firestore with fallback to Local Disk in non-production)
 const FIREBASE_PROJECT_ID = 'kwegatta';
 let firestoreDb: Firestore | null = null;
+let adminAuth: AdminAuth | null = null;
 let storageMode: 'firestore' | 'disk' = 'disk';
 const firestoreUnsubscribers: Array<() => void> = [];
 
@@ -337,23 +350,14 @@ interface StoreData {
   }>;
 }
 
-// Active admin session tokens with creation timestamps
+// Active admin session tokens with creation timestamps (passcode flow)
 const activeAdminTokens = new Map<string, number>();
-
-// User Session Tokens Map: token -> { userId, createdAt }
-const userTokens = new Map<string, { userId: string; createdAt: number }>();
 const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
-// Clean expired tokens every 10 minutes
+// Clean expired admin tokens every 10 minutes
 setInterval(() => {
   const now = Date.now();
   const expiredTokens: string[] = [];
-  for (const [token, data] of userTokens.entries()) {
-    if (now - data.createdAt > TOKEN_TTL_MS) {
-      userTokens.delete(token);
-      expiredTokens.push(token);
-    }
-  }
   for (const [token, createdAt] of activeAdminTokens.entries()) {
     if (now - createdAt > TOKEN_TTL_MS) {
       activeAdminTokens.delete(token);
@@ -364,22 +368,6 @@ setInterval(() => {
     batchRemoveDocs('sessions', expiredTokens).catch(() => {});
   }
 }, 600000);
-
-function issueUserToken(userId: string): string {
-  const token = 'kw_usr_' + crypto.randomBytes(24).toString('hex');
-  const now = Date.now();
-  userTokens.set(token, { userId, createdAt: now });
-  if (storageMode === 'firestore' && firestoreDb) {
-    firestoreDb.collection('sessions').doc(token).set({
-      token,
-      userId,
-      createdAt: now
-    }).catch(err => {
-      console.error('[Firestore] Failed to persist user session:', err?.message || err);
-    });
-  }
-  return token;
-}
 
 function issueAdminToken(): string {
   const token = 'kw_adm_' + crypto.randomBytes(24).toString('hex');
@@ -397,27 +385,46 @@ function issueAdminToken(): string {
   return token;
 }
 
-function resolveAuthUserId(req: Request): string | null {
+interface AuthUserData {
+  uid: string;
+  email?: string;
+  name?: string;
+}
+
+// Global Auth middleware: verifies Firebase ID tokens on every write/request via firebase-admin
+app.use(async (req: Request, _res: Response, next: () => void) => {
   const authHeader = req.headers['authorization'] || '';
   let token = '';
   if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
     token = authHeader.slice(7).trim();
   } else if (req.headers['x-auth-token']) {
     token = String(req.headers['x-auth-token']).trim();
+  } else if (req.headers['x-firebase-token']) {
+    token = String(req.headers['x-firebase-token']).trim();
   }
 
-  if (token && userTokens.has(token)) {
-    const session = userTokens.get(token)!;
-    if (Date.now() - session.createdAt < TOKEN_TTL_MS) {
-      return session.userId;
-    } else {
-      userTokens.delete(token);
-      if (storageMode === 'firestore' && firestoreDb) {
-        removeDoc('sessions', token).catch(() => {});
+  if (token && adminAuth) {
+    try {
+      const decoded = await adminAuth.verifyIdToken(token);
+      if (decoded && decoded.uid) {
+        (req as any).authUserId = decoded.uid;
+        (req as any).authUser = {
+          uid: decoded.uid,
+          email: decoded.email,
+          name: decoded.name
+        } as AuthUserData;
       }
+    } catch (err: any) {
+      // Token expired, malformed, or dev domain
+      // console.warn('[Firebase Admin] verifyIdToken note:', err?.message || err);
     }
   }
-  return null;
+
+  next();
+});
+
+function resolveAuthUserId(req: Request): string | null {
+  return (req as any).authUserId || null;
 }
 
 function checkAdmin(req: Request): boolean {
@@ -471,6 +478,31 @@ function sanitizeArray(arr: any, maxItems = 15, maxItemLength = 50): string[] {
     .filter(item => typeof item === 'string' && item.trim().length > 0)
     .map(item => String(item).trim().slice(0, maxItemLength))
     .slice(0, maxItems);
+}
+
+/**
+ * PRIVACY PROTECTION HELPER:
+ * Never return email, account_uid or auth secrets in public or member-facing responses.
+ * A member's email is visible ONLY to that member and platform admins.
+ */
+function sanitizePublicProfile(p: any, callerAuthUid: string | null, isAdmin: boolean): any {
+  if (!p) return null;
+  const isSelf = Boolean(callerAuthUid && (p.account_uid === callerAuthUid || p.id === callerAuthUid));
+  const canSeeEmail = isSelf || isAdmin;
+  const isWhatsAppHidden = Boolean(p.hide_whatsapp && !isSelf);
+  const canSeeWhatsApp = Boolean(callerAuthUid && !isWhatsAppHidden);
+
+  const { account_uid, email, blocked_ids, ...rest } = p;
+
+  return {
+    ...rest,
+    ...(canSeeEmail && email ? { email } : {}),
+    ...(canSeeEmail && account_uid ? { account_uid } : {}),
+    ...(isSelf && blocked_ids ? { blocked_ids } : {}),
+    whatsapp: canSeeWhatsApp ? (p.whatsapp || '') : '',
+    has_whatsapp: Boolean(p.whatsapp && String(p.whatsapp).trim().length > 0),
+    hide_whatsapp: Boolean(p.hide_whatsapp)
+  };
 }
 
 // Server AI Performance Metrics
@@ -765,21 +797,17 @@ async function setupFirestoreListeners(): Promise<void> {
     firestoreUnsubscribers.push(unsub);
   }));
 
-  // 6. Sessions listener (Restores active member sessions so they survive restarts)
+  // 6. Admin Sessions listener (Restores active admin sessions so they survive restarts)
   initialLoadPromises.push(new Promise((resolve) => {
     let initial = true;
     const unsub = firestoreDb!.collection('sessions').onSnapshot((snap) => {
       const now = Date.now();
-      userTokens.clear();
       activeAdminTokens.clear();
       snap.forEach(doc => {
         const d = doc.data();
         const token = doc.id;
         const createdAt = typeof d.createdAt === 'number' ? d.createdAt : now;
         if (now - createdAt < TOKEN_TTL_MS) {
-          if (d.userId) {
-            userTokens.set(token, { userId: d.userId, createdAt });
-          }
           if (d.isAdmin) {
             activeAdminTokens.set(token, createdAt);
           }
@@ -832,8 +860,20 @@ async function setupFirestoreListeners(): Promise<void> {
     new Promise(r => setTimeout(r, 6000))
   ]);
 
+  // Purge legacy unlinked profile user-1791217178267 and clean up related state
+  const legacyId = 'user-1791217178267';
+  if (store.profiles.some((p: any) => p.id === legacyId)) {
+    store.profiles = store.profiles.filter((p: any) => p.id !== legacyId);
+    store.matches = store.matches.filter((m: any) => m.a_id !== legacyId && m.b_id !== legacyId);
+    store.posts = store.posts.filter((p: any) => p.author_id !== legacyId);
+    store.follows = store.follows.filter((f: any) => f.follower_id !== legacyId && f.following_id !== legacyId);
+    if (firestoreDb) {
+      firestoreDb.collection('profiles').doc(legacyId).delete().catch(() => {});
+    }
+  }
+
   console.log(`[Storage] Cloud Firestore real-time snapshot sync operational.`);
-  console.log(`[Storage] Warm cache: ${store.profiles.length} profiles, ${store.posts.length} posts, ${store.matches.length} matches, ${userTokens.size} sessions.`);
+  console.log(`[Storage] Warm cache: ${store.profiles.length} profiles, ${store.posts.length} posts, ${store.matches.length} matches.`);
 }
 
 async function initStorage(): Promise<void> {
@@ -848,6 +888,12 @@ async function initStorage(): Promise<void> {
       fbApp = getApps()[0]!;
     }
     firestoreDb = getFirestore(fbApp);
+    try {
+      adminAuth = getAdminAuth(fbApp);
+      console.log(`✅ [Firebase Admin] Auth initialized successfully for project "${FIREBASE_PROJECT_ID}"`);
+    } catch (authInitErr: any) {
+      console.warn(`[Firebase Admin] Auth initialization warning:`, authInitErr?.message || authInitErr);
+    }
   } catch (err: any) {
     if (isProduction) {
       console.error('FATAL: Could not initialize firebase-admin with projectId "kwegatta" in production:');
@@ -893,21 +939,65 @@ async function initStorage(): Promise<void> {
 }
 
 /* =========================================================================
-   AUTHENTICATION ENDPOINTS
+   AUTHENTICATION ENDPOINTS (Firebase Auth Integration)
    ========================================================================= */
+// Retrieve the authenticated Firebase user's profile on any device (Requirement 3)
+app.get('/api/auth/me', (req: Request, res: Response) => {
+  const authUser = (req as any).authUser;
+  if (!authUser || !authUser.uid) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  const profile = store.profiles.find((p: any) => p.account_uid === authUser.uid || p.id === authUser.uid);
+  return res.json({
+    success: true,
+    uid: authUser.uid,
+    email: authUser.email,
+    profile: profile || null
+  });
+});
+
+// Attach an existing profile to the current Firebase account (Requirement 5)
+app.post('/api/auth/claim-profile', async (req: Request, res: Response) => {
+  const authUserId = resolveAuthUserId(req);
+  if (!authUserId) {
+    return res.status(401).json({ error: 'Firebase authentication required to claim profile' });
+  }
+
+  const { profileId } = req.body || {};
+  if (!profileId || typeof profileId !== 'string') {
+    return res.status(400).json({ error: 'profileId is required' });
+  }
+
+  const profile = store.profiles.find((p: any) => p.id === profileId);
+  if (!profile) {
+    return res.status(404).json({ error: 'Profile not found' });
+  }
+
+  // Prevent hijacking: only allow claiming if profile has no account_uid or already belongs to this uid
+  if (profile.account_uid && profile.account_uid !== authUserId) {
+    return res.status(403).json({ error: 'This profile is already linked to another account' });
+  }
+
+  profile.account_uid = authUserId;
+  const userEmail = (req as any).authUser?.email;
+  if (!profile.email && userEmail) {
+    profile.email = userEmail;
+  }
+
+  await persistDoc('profiles', profile.id, profile);
+  console.log(`[Auth] Existing profile ${profile.id} (${profile.name}) claimed by Firebase UID: ${authUserId}`);
+
+  return res.json({ success: true, profile });
+});
+
+// Compatibility token endpoint (returns current Firebase user verification)
 app.post('/api/auth/token', (req: Request, res: Response) => {
-  const { userId } = req.body || {};
-  if (!userId) {
-    return res.status(400).json({ error: 'userId is required' });
+  const authUserId = resolveAuthUserId(req);
+  if (authUserId) {
+    return res.json({ success: true, userId: authUserId });
   }
-
-  const exists = store.profiles.some(p => p.id === userId);
-  if (!exists) {
-    return res.status(404).json({ error: 'Member profile not found' });
-  }
-
-  const token = issueUserToken(userId);
-  return res.json({ success: true, token, userId });
+  return res.json({ success: false, message: 'Authenticate via Firebase Web SDK' });
 });
 
 /* =========================================================================
@@ -917,7 +1007,9 @@ app.post('/api/auth/token', (req: Request, res: Response) => {
    ========================================================================= */
 const ALLOWED_OPEN_WEIGHT_MODELS = ['gemma-4-26b-a4b-it', 'gemma-4-31b-it'];
 const DEFAULT_OPEN_WEIGHT_MODEL = 'gemma-4-26b-a4b-it';
-const GEMMA_TIMEOUT_MS = 60000; // 60 seconds timeout
+// GEMMA TAIL LATENCY CONSTANTS
+const GEMMA_HEDGE_DELAY_MS = 4000; // Start 2nd identical request after 4 seconds of silence
+const GEMMA_HARD_TIMEOUT_MS = 20000; // Give up with clear error after 20 seconds
 
 // Pair Match Cache: key(`${idA}_${idB}`) -> { versionA, versionB, result, updatedAt }
 const matchPairCache = new Map<string, { versionA: string; versionB: string; result: any; updatedAt: string }>();
@@ -960,96 +1052,186 @@ app.post('/api/gemma', gemmaLimiter, async (req: Request, res: Response) => {
     });
   }
 
-  // Attempt up to 2 times (retry immediately once on 500, 503, or timeout)
-  let lastError: any = null;
-  const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
-
   aiMetrics.totalCalls++;
   const callStartTime = Date.now();
+  const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), GEMMA_TIMEOUT_MS);
-
-    try {
-      console.log(`[Gemma 4] Invoking ${targetModel} (attempt ${attempt}/2)...`);
-      
-      const userConfig = (generationConfig && typeof generationConfig === 'object') ? generationConfig : {};
-      const { temperature, thinkingConfig, ...safeConfig } = userConfig as any;
-      const requestPayload: any = {
-        contents,
-        generationConfig: {
-          ...safeConfig,
-          thinkingConfig: {
-            thinkingLevel: 'MINIMAL'
-          }
-        }
-      };
-
-      const apiResponse = await fetch(targetUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestPayload),
-        signal: controller.signal
-      });
-
-      clearTimeout(timeout);
-
-      // On 500 or 503, retry once immediately before failing
-      if (apiResponse.status === 500 || apiResponse.status === 503) {
-        const errorText = await apiResponse.text().catch(() => '');
-        console.warn(`[Gemma 4] Upstream returned status ${apiResponse.status} on attempt ${attempt}:`, errorText.slice(0, 150));
-        lastError = new Error(`Gemma upstream error ${apiResponse.status}: ${errorText.slice(0, 150)}`);
-        if (attempt < 2) {
-          console.log('[Gemma 4] Retrying request immediately...');
-          continue;
-        }
-        aiMetrics.fallbackCalls++;
-        return res.status(apiResponse.status).json({ error: { message: lastError.message } });
+  const userConfig = (generationConfig && typeof generationConfig === 'object') ? generationConfig : {};
+  const { temperature, thinkingConfig, ...safeConfig } = userConfig as any;
+  const requestPayload = {
+    contents,
+    generationConfig: {
+      ...safeConfig,
+      thinkingConfig: {
+        thinkingLevel: 'MINIMAL'
       }
+    }
+  };
 
-      const data = await apiResponse.json();
-      if (!apiResponse.ok) {
-        console.warn(`[Gemma 4] Returned non-200 status ${apiResponse.status}:`, data);
-        aiMetrics.fallbackCalls++;
-        return res.status(apiResponse.status).json(data);
+  const payloadString = JSON.stringify(requestPayload);
+
+  // Resilient Hedged Execution Pattern:
+  // 1. Start Request #1.
+  // 2. If 4 seconds pass with no answer, start Request #2 in parallel.
+  // 3. When an upstream request fails with 500 or 503:
+  //    - Do NOT return the error immediately.
+  //    - If another request is currently running, wait for it.
+  //    - If no other request is running and time remains (<20s), immediately launch another attempt.
+  // 4. Return an error only when all attempts have failed or 20 seconds have passed.
+  let isResolved = false;
+  let timer4s: NodeJS.Timeout | null = null;
+  let timer20s: NodeJS.Timeout | null = null;
+  const activeControllers = new Map<number, AbortController>();
+  let nextRequestId = 1;
+  let lastError: any = null;
+  let totalAttempts = 0;
+
+  const cleanup = () => {
+    if (timer4s) clearTimeout(timer4s);
+    if (timer20s) clearTimeout(timer20s);
+  };
+
+  return new Promise<void>((resolve) => {
+    const handleWinner = (requestId: number, result: { status: number; data: any }) => {
+      if (isResolved) return;
+      isResolved = true;
+      cleanup();
+
+      // Cancel all other in-flight requests immediately
+      for (const [id, ctrl] of activeControllers.entries()) {
+        if (id !== requestId) {
+          try { ctrl.abort(); } catch (_) {}
+        }
       }
+      activeControllers.clear();
 
+      const elapsed = Date.now() - callStartTime;
       aiMetrics.successfulCalls++;
-      aiMetrics.durations.push(Date.now() - callStartTime);
-      console.log(`[Gemma 4] Succeeded on attempt ${attempt} in ${Date.now() - callStartTime}ms`);
-      return res.json(data);
-    } catch (error: any) {
-      clearTimeout(timeout);
-      const isTimeout = error.name === 'AbortError' || error.message?.includes('abort');
-      console.warn(`[Gemma 4] Error on attempt ${attempt}:`, isTimeout ? 'Timed out' : error.message);
-      lastError = error;
+      aiMetrics.durations.push(elapsed);
+      console.log(`[Gemma 4 Hedging] Request #${requestId} won in ${elapsed}ms for ${targetModel}`);
+      res.status(result.status).json(result.data);
+      resolve();
+    };
 
-      if (attempt < 2) {
-        console.log('[Gemma 4] Retrying request immediately after error...');
-        continue;
-      }
+    const startAttempt = async (forcedId?: number) => {
+      if (isResolved) return;
+      const requestId = forcedId || nextRequestId++;
+      totalAttempts++;
+      const controller = new AbortController();
+      activeControllers.set(requestId, controller);
 
-      aiMetrics.fallbackCalls++;
-      return res.status(500).json({
-        error: {
-          message: isTimeout
-            ? 'Gemma model request timed out'
-            : (error.message || 'Server error communicating with Gemma 4')
+      console.log(`[Gemma 4 Hedging] Invoking attempt #${requestId} for ${targetModel}...`);
+
+      try {
+        const resp = await fetch(targetUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payloadString,
+          signal: controller.signal
+        });
+
+        if (isResolved) return;
+
+        // On 500 or 503 upstream failures: do not return error immediately
+        if (resp.status === 500 || resp.status === 503) {
+          const errText = await resp.text().catch(() => '');
+          lastError = new Error(`Upstream HTTP ${resp.status}: ${errText.slice(0, 150)}`);
+          console.warn(`[Gemma 4 Hedging] Attempt #${requestId} returned ${resp.status}. Active remaining: ${activeControllers.size - 1}`);
+          activeControllers.delete(requestId);
+
+          if (isResolved) return;
+
+          // If another request is currently running in parallel, wait for it
+          if (activeControllers.size > 0) {
+            console.log(`[Gemma 4 Hedging] Waiting on other active in-flight request...`);
+            return;
+          }
+
+          // Otherwise start one more attempt if under limit and 20s budget
+          if (totalAttempts < 4 && Date.now() - callStartTime < 18000) {
+            console.log(`[Gemma 4 Hedging] No other request running. Starting replacement attempt #${nextRequestId}...`);
+            startAttempt();
+            return;
+          }
+
+          // If all attempts failed or budget exceeded: return error
+          isResolved = true;
+          cleanup();
+          aiMetrics.fallbackCalls++;
+          res.status(500).json({ error: { message: lastError.message || 'Failed to get response from Gemma 4' } });
+          resolve();
+          return;
         }
-      });
-    }
-  }
 
-  aiMetrics.fallbackCalls++;
-  return res.status(500).json({
-    error: {
-      message: lastError?.message || 'Failed to get response from Gemma 4'
-    }
+        const data = await resp.json();
+        if (!resp.ok) {
+          throw new Error(data?.error?.message || `Upstream error HTTP ${resp.status}`);
+        }
+
+        handleWinner(requestId, { status: resp.status, data });
+      } catch (err: any) {
+        activeControllers.delete(requestId);
+        if (isResolved) return;
+
+        const isAbort = err?.name === 'AbortError';
+        if (!isAbort) {
+          lastError = err;
+          console.warn(`[Gemma 4 Hedging] Attempt #${requestId} failed:`, err?.message || err);
+
+          // If another request is running, wait for it
+          if (activeControllers.size > 0) {
+            console.log(`[Gemma 4 Hedging] Another request is running, waiting...`);
+            return;
+          }
+
+          // If no running request and retry budget remains, start another attempt
+          if (totalAttempts < 4 && Date.now() - callStartTime < 18000) {
+            console.log(`[Gemma 4 Hedging] Starting replacement attempt #${nextRequestId}...`);
+            startAttempt();
+            return;
+          }
+
+          // All attempts failed
+          isResolved = true;
+          cleanup();
+          aiMetrics.fallbackCalls++;
+          res.status(500).json({ error: { message: lastError?.message || 'Failed to get response from Gemma 4' } });
+          resolve();
+        }
+      }
+    };
+
+    // 20s Hard Timeout
+    timer20s = setTimeout(() => {
+      if (isResolved) return;
+      isResolved = true;
+      cleanup();
+      for (const ctrl of activeControllers.values()) {
+        try { ctrl.abort(); } catch (_) {}
+      }
+      activeControllers.clear();
+      console.error(`[Gemma 4 Hedging] All requests timed out after 20 seconds.`);
+      aiMetrics.fallbackCalls++;
+      res.status(504).json({ error: { message: 'Gemma request timed out after 20 seconds' } });
+      resolve();
+    }, GEMMA_HARD_TIMEOUT_MS);
+
+    // Start Request #1 immediately
+    startAttempt(1);
+
+    // 4s Hedged Delay for Request #2
+    timer4s = setTimeout(() => {
+      if (isResolved) return;
+      if (activeControllers.size === 1) {
+        console.warn(`[Gemma 4 Hedging] 4s tail latency threshold reached without response. Starting parallel Request #2...`);
+        (aiMetrics as any).hedgedCalls = ((aiMetrics as any).hedgedCalls || 0) + 1;
+        startAttempt(2);
+      }
+    }, GEMMA_HEDGE_DELAY_MS);
   });
 });
 
-// STREAMING GEMMA TOKENS TO THE BROWSER (SSE)
+// STREAMING GEMMA TOKENS TO THE BROWSER (SSE) WITH 4s HEDGING AND RESILIENT 500/503 HANDLING
 app.post('/api/gemma/stream', gemmaLimiter, async (req: Request, res: Response) => {
   const { model = DEFAULT_OPEN_WEIGHT_MODEL, contents, generationConfig } = req.body || {};
   const targetModel = ALLOWED_OPEN_WEIGHT_MODELS.includes(model) ? model : DEFAULT_OPEN_WEIGHT_MODEL;
@@ -1076,25 +1258,43 @@ app.post('/api/gemma/stream', gemmaLimiter, async (req: Request, res: Response) 
     }
   };
 
+  const payloadString = JSON.stringify(requestPayload);
   const targetUrl = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const upstream = await fetch(targetUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestPayload)
-      });
+  let streamClaimed = false;
+  let timer4s: NodeJS.Timeout | null = null;
+  let timer20s: NodeJS.Timeout | null = null;
+  const activeControllers = new Map<number, AbortController>();
+  let nextRequestId = 1;
+  let totalAttempts = 0;
+  let lastError: any = null;
 
-      if (!upstream.ok) {
-        if ((upstream.status === 500 || upstream.status === 503) && attempt < 2) {
-          console.warn(`[Gemma Stream] Status ${upstream.status} on attempt ${attempt}, retrying immediately...`);
-          continue;
-        }
-        res.write(`data: ${JSON.stringify({ error: `Upstream error: ${upstream.status}` })}\n\n`);
-        return res.end();
+  const cleanup = () => {
+    if (timer4s) clearTimeout(timer4s);
+    if (timer20s) clearTimeout(timer20s);
+  };
+
+  const streamFromWinner = async (requestId: number, upstream: any) => {
+    if (streamClaimed) {
+      if (upstream.body) {
+        try { upstream.body.cancel(); } catch (_) {}
       }
+      return;
+    }
+    streamClaimed = true;
+    cleanup();
 
+    // Cancel all other requests
+    for (const [id, ctrl] of activeControllers.entries()) {
+      if (id !== requestId) {
+        try { ctrl.abort(); } catch (_) {}
+      }
+    }
+    activeControllers.clear();
+
+    console.log(`[Gemma Stream Hedging] Request #${requestId} claimed SSE stream output`);
+
+    try {
       const reader = upstream.body?.getReader();
       if (!reader) {
         res.write(`data: ${JSON.stringify({ error: 'No response body stream' })}\n\n`);
@@ -1132,13 +1332,221 @@ app.post('/api/gemma/stream', gemmaLimiter, async (req: Request, res: Response) 
       res.write(`data: [DONE]\n\n`);
       return res.end();
     } catch (err: any) {
-      if (attempt < 2) {
-        console.warn(`[Gemma Stream] Error on attempt ${attempt}, retrying immediately:`, err.message);
-        continue;
+      if (err.name !== 'AbortError') {
+        res.write(`data: ${JSON.stringify({ error: err.message || 'Stream processing error' })}\n\n`);
       }
-      res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
       return res.end();
     }
+  };
+
+  const startStreamAttempt = async (forcedId?: number) => {
+    if (streamClaimed) return;
+    const requestId = forcedId || nextRequestId++;
+    totalAttempts++;
+    const controller = new AbortController();
+    activeControllers.set(requestId, controller);
+
+    try {
+      const upstream = await fetch(targetUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payloadString,
+        signal: controller.signal
+      });
+
+      if (streamClaimed) return;
+
+      if (!upstream.ok) {
+        activeControllers.delete(requestId);
+        lastError = new Error(`Upstream stream error HTTP ${upstream.status}`);
+        console.warn(`[Gemma Stream Hedging] Stream attempt #${requestId} returned ${upstream.status}`);
+
+        // If another stream is active, let it continue
+        if (activeControllers.size > 0) return;
+
+        // If budget remains, try again
+        if (totalAttempts < 4) {
+          startStreamAttempt();
+          return;
+        }
+
+        res.write(`data: ${JSON.stringify({ error: lastError.message })}\n\n`);
+        return res.end();
+      }
+
+      await streamFromWinner(requestId, upstream);
+    } catch (err: any) {
+      activeControllers.delete(requestId);
+      if (streamClaimed) return;
+
+      if (err.name !== 'AbortError') {
+        lastError = err;
+        console.warn(`[Gemma Stream Hedging] Stream attempt #${requestId} failed:`, err.message);
+
+        if (activeControllers.size > 0) return;
+        if (totalAttempts < 4) {
+          startStreamAttempt();
+          return;
+        }
+
+        res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+        return res.end();
+      }
+    }
+  };
+
+  // 20s Hard Timeout
+  timer20s = setTimeout(() => {
+    if (streamClaimed) return;
+    streamClaimed = true;
+    cleanup();
+    for (const ctrl of activeControllers.values()) {
+      try { ctrl.abort(); } catch (_) {}
+    }
+    activeControllers.clear();
+    console.error(`[Gemma Stream Hedging] Both stream requests timed out after 20 seconds.`);
+    res.write(`data: ${JSON.stringify({ error: 'Gemma stream timed out after 20 seconds' })}\n\n`);
+    return res.end();
+  }, GEMMA_HARD_TIMEOUT_MS);
+
+  // Start Request #1 immediately
+  startStreamAttempt(1);
+
+  // 4s Hedged Request #2
+  timer4s = setTimeout(() => {
+    if (streamClaimed) return;
+    if (activeControllers.size === 1) {
+      console.warn(`[Gemma Stream Hedging] 4s threshold reached without stream start. Spawning parallel stream Request #2...`);
+      (aiMetrics as any).hedgedCalls = ((aiMetrics as any).hedgedCalls || 0) + 1;
+      startStreamAttempt(2);
+    }
+  }, GEMMA_HEDGE_DELAY_MS);
+});
+
+/* =========================================================================
+   PART D: ASK KWEGATTA (Natural Language Semantic Search with Gemma)
+   ========================================================================= */
+const askLimiter = createRateLimiter({
+  windowMs: 60000,
+  max: 20,
+  message: 'Search rate limit reached. Please wait a moment before searching again.'
+});
+
+app.post('/api/ai/ask-kwegatta', askLimiter, async (req: Request, res: Response) => {
+  const { query } = req.body || {};
+  const cleanQuery = typeof query === 'string' ? query.trim().slice(0, 300) : '';
+  if (!cleanQuery) {
+    return res.status(400).json({ error: 'Query is required' });
+  }
+
+  const callerId = resolveAuthUserId(req);
+  const isAdmin = checkAdmin(req);
+
+  // Require a valid signed-in session: 401 otherwise
+  if (!callerId && !isAdmin) {
+    return res.status(401).json({ error: 'Sign in required to ask Kwegatta' });
+  }
+
+  // Read active members (excluding unlinked legacy profiles and blocked members)
+  let activeMembers = store.profiles.filter(p => !p.hidden && Boolean(p.account_uid));
+  if (callerId) {
+    const callerProfile = store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId);
+    const callerBlocked = new Set(callerProfile?.blocked_ids || []);
+    activeMembers = activeMembers.filter(p => {
+      if (p.id === callerId || p.account_uid === callerId) return false;
+      if (callerBlocked.has(p.id)) return false;
+      if (Array.isArray(p.blocked_ids) && (p.blocked_ids.includes(callerId) || (callerProfile && p.blocked_ids.includes(callerProfile.id)))) return false;
+      return true;
+    });
+  }
+
+  if (activeMembers.length === 0) {
+    return res.json({ matches: [], query: cleanQuery });
+  }
+
+  // Member summaries strictly using what members wrote
+  const memberList = activeMembers.map(p => ({
+    id: p.id,
+    name: p.name,
+    role: p.role,
+    roles: p.roles || [],
+    headline: p.headline || '',
+    offers: p.offers || '',
+    needs: p.needs || '',
+    teaches: p.teaches || '',
+    learns: p.learns || '',
+    skills: p.skills || [],
+    tags: p.tags || [],
+    location: p.location || '',
+    research_area: p.research_area || '',
+    institution: p.institution || ''
+  }));
+
+  const systemPrompt = `You are Kwegatta's intelligent matchmaking engine.
+A user asked: "${cleanQuery}".
+Based STRICTLY and ONLY on what members wrote in their profiles below, select up to 5 best matching members.
+RULES:
+1. Never invent or hallucinate facts about any member. Only use facts explicitly written in their profile.
+2. For each recommended member, provide exactly one concise, helpful sentence explaining why they fit the user's request.
+3. Return a valid JSON array of objects: [{"profile_id": string, "reason": string}]
+4. If no members match, return an empty array [].`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: JSON.stringify({ user_query: cleanQuery, members: memberList }),
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: 'application/json'
+      }
+    });
+
+    let matchesRaw: any[] = [];
+    try {
+      const text = response.text?.trim() || '[]';
+      matchesRaw = JSON.parse(text);
+      if (!Array.isArray(matchesRaw)) {
+        matchesRaw = [];
+      }
+    } catch (_) {
+      matchesRaw = [];
+    }
+
+    const results = matchesRaw
+      .slice(0, 5)
+      .map((m: any) => {
+        const found = activeMembers.find(p => p.id === m.profile_id);
+        if (!found) return null;
+        return {
+          profile_id: found.id,
+          profile: sanitizePublicProfile(found, callerId, isAdmin),
+          reason: typeof m.reason === 'string' ? m.reason.slice(0, 300) : 'Matches your search request.'
+        };
+      })
+      .filter(Boolean);
+
+    return res.json({ matches: results, query: cleanQuery });
+  } catch (err: any) {
+    console.warn('[Ask Kwegatta AI] Note:', err?.message || err);
+    // Simple keyword fallback
+    const qLower = cleanQuery.toLowerCase();
+    const keywords = qLower.split(/\s+/).filter(w => w.length > 2);
+    const scored = activeMembers.map(p => {
+      const haystack = `${p.name} ${p.role} ${p.headline} ${p.offers} ${p.needs} ${p.teaches} ${p.learns} ${(p.skills || []).join(' ')} ${(p.tags || []).join(' ')} ${p.location || ''} ${p.research_area || ''} ${p.institution || ''}`.toLowerCase();
+      let score = 0;
+      for (const kw of keywords) {
+        if (haystack.includes(kw)) score++;
+      }
+      return { p, score };
+    }).filter(x => x.score > 0).sort((a, b) => b.score - a.score).slice(0, 5);
+
+    const fallbackResults = scored.map(s => ({
+      profile_id: s.p.id,
+      profile: sanitizePublicProfile(s.p, callerId, isAdmin),
+      reason: `Matches keywords in their offers, needs or skills (${s.p.role || s.p.name}).`
+    }));
+
+    return res.json({ matches: fallbackResults, query: cleanQuery });
   }
 });
 
@@ -1176,10 +1584,13 @@ app.post('/api/matches/pair-cache', (req: Request, res: Response) => {
    ========================================================================= */
 app.post('/api/admin/login', adminLoginLimiter, async (req: Request, res: Response) => {
   const { code } = req.body || {};
-  const expectedCode = process.env.ADMIN_CODE || 'kwegatta2026';
+  const expectedCode = process.env.ADMIN_CODE;
+  if (!expectedCode || !expectedCode.trim()) {
+    return res.status(503).json({ error: 'Admin access is not configured' });
+  }
   
   const inputStr = String(code || '').trim();
-  const expectedStr = String(expectedCode).trim();
+  const expectedStr = expectedCode.trim();
 
   // Timing-safe comparison to prevent timing side-channel attacks
   let isMatch = false;
@@ -1408,11 +1819,11 @@ app.post('/api/reports', async (req: Request, res: Response) => {
   }
 
   const reportedProfile = store.profiles.find((p: any) => p.id === reported_id);
-  const reporterProfile = authUserId ? store.profiles.find((p: any) => p.id === authUserId) : null;
+  const reporterProfile = authUserId ? store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId) : null;
 
   const report = {
     id: 'rep-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex'),
-    reporter_id: authUserId || 'anonymous',
+    reporter_id: reporterProfile?.id || authUserId || 'anonymous',
     reporter_name: reporterProfile?.name || 'Anonymous',
     reported_id,
     reported_name: reportedProfile?.name || 'Unknown',
@@ -1642,23 +2053,23 @@ app.post('/api/connect', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Target member ID is required' });
   }
 
-  if (target_id === authUserId) {
-    return res.status(400).json({ error: 'Cannot connect with yourself' });
-  }
-
   const target = store.profiles.find((p: any) => p.id === target_id);
   if (!target) {
     return res.status(404).json({ error: 'Target member not found' });
   }
 
-  const requester = store.profiles.find((p: any) => p.id === authUserId);
+  const requester = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
   const requesterName = requester ? requester.name : 'A member';
+
+  if (target_id === authUserId || (requester && target_id === requester.id)) {
+    return res.status(400).json({ error: 'Cannot connect with yourself' });
+  }
 
   // Dispatch a notification to the target member
   const notif = {
     id: 'notif-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
     to_id: target_id,
-    from_id: authUserId || 'admin',
+    from_id: requester?.id || authUserId || 'admin',
     type: 'connect',
     body: `${requesterName} reached out to connect: "${sanitizeText(reason || note || 'Let\'s collaborate!', 300)}"`,
     read: false,
@@ -1687,7 +2098,10 @@ app.delete('/api/profiles/:id', async (req: Request, res: Response) => {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  if (!isAdmin && authUserId !== id) {
+  const existing = store.profiles.find((p: any) => p.id === id);
+  const isOwner = authUserId && (id === authUserId || existing?.account_uid === authUserId);
+
+  if (!isAdmin && !isOwner) {
     return res.status(403).json({ error: 'Forbidden: You can only delete your own profile' });
   }
 
@@ -1711,6 +2125,17 @@ app.delete('/api/profiles/:id', async (req: Request, res: Response) => {
     if (deletedNotifs.length > 0) await batchRemoveDocs('notifications', deletedNotifs);
   } else {
     saveStore(store);
+  }
+
+  // Requirement 9: Deleting a profile also deletes the Firebase user account
+  const firebaseUidToDelete = existing?.account_uid || (id.startsWith('user-') || id.startsWith('demo-') ? null : id) || authUserId;
+  if (adminAuth && firebaseUidToDelete && !isAdmin) {
+    try {
+      await adminAuth.deleteUser(firebaseUidToDelete);
+      console.log(`[Firebase Admin] Deleted user account ${firebaseUidToDelete} with profile ${id}`);
+    } catch (authDelErr: any) {
+      console.warn(`[Firebase Admin] Could not delete user account ${firebaseUidToDelete}:`, authDelErr?.message || authDelErr);
+    }
   }
 
   return res.json({
@@ -1762,46 +2187,36 @@ app.get('/api/data/:collection', (req: Request, res: Response) => {
   items.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   const sliced = items.slice(0, limit);
 
-  // WHATSAPP VISIBILITY & BLOCKING PRIVACY PLAN:
-  // - Any signed-in member can see another member's WhatsApp number (unless hidden by member toggle).
-  // - Anonymous callers never receive WhatsApp numbers.
-  // - A blocked member no longer sees or matches the person who blocked them.
+  // WHATSAPP VISIBILITY & PRIVACY ENFORCEMENT:
+  // - Never return email, account_uid or auth secrets in public or member-facing responses.
+  // - A member's email is visible ONLY to that member and platform admins.
+  // - Any profile without an account is hidden from lists and matches.
   if (col === 'profiles') {
     const callerId = resolveAuthUserId(req);
+    const isAdmin = checkAdmin(req);
     let filteredProfiles = sliced;
+
+    // Requirement 3: From now on, any profile without an account is hidden from lists and matches
+    filteredProfiles = filteredProfiles.filter((p: any) => {
+      const isSelf = callerId && (p.id === callerId || p.account_uid === callerId);
+      if (isAdmin || isSelf) return true;
+      return Boolean(p.account_uid);
+    });
+
     if (callerId) {
-      const callerProfile = store.profiles.find((p: any) => p.id === callerId);
+      const callerProfile = store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId);
       const callerBlockedSet = new Set(callerProfile?.blocked_ids || []);
       filteredProfiles = filteredProfiles.filter((p: any) => {
-        if (p.id === callerId) return true;
+        if (p.id === callerId || p.account_uid === callerId) return true;
         // Do not show if caller blocked p
         if (callerBlockedSet.has(p.id)) return false;
         // Do not show if p blocked caller
-        if (Array.isArray(p.blocked_ids) && p.blocked_ids.includes(callerId)) return false;
+        if (Array.isArray(p.blocked_ids) && (p.blocked_ids.includes(callerId) || (callerProfile && p.blocked_ids.includes(callerProfile.id)))) return false;
         return true;
       });
     }
 
-    const safeProfiles = filteredProfiles.map(p => {
-      if (callerId) {
-        const isSelf = p.id === callerId;
-        const isHidden = Boolean(p.hide_whatsapp && !isSelf);
-        return {
-          ...p,
-          whatsapp: isHidden ? '' : (p.whatsapp || ''),
-          has_whatsapp: Boolean(p.whatsapp && String(p.whatsapp).trim().length > 0),
-          hide_whatsapp: Boolean(p.hide_whatsapp)
-        };
-      }
-
-      // Anonymous callers
-      return {
-        ...p,
-        whatsapp: '',
-        has_whatsapp: Boolean(p.whatsapp && String(p.whatsapp).trim().length > 0),
-        hide_whatsapp: Boolean(p.hide_whatsapp)
-      };
-    });
+    const safeProfiles = filteredProfiles.map(p => sanitizePublicProfile(p, callerId, isAdmin));
     return res.json(safeProfiles);
   }
 
@@ -1841,15 +2256,34 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
   // If creating or updating a profile:
   if (col === 'profiles') {
     const requestedId = raw.id ? sanitizeText(raw.id, 64) : null;
-    const isExisting = requestedId && store.profiles.some((p: any) => p.id === requestedId);
 
-    // Updating existing profile requires valid session
-    if (isExisting) {
-      if (!authUserId && !isAdmin) {
-        return res.status(401).json({ error: 'Authentication required to update profile' });
+    // Check if user already owns an existing profile (Requirement 3: One profile per account)
+    let existingProfile: any = null;
+    if (authUserId) {
+      existingProfile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
+    }
+    if (!existingProfile && requestedId) {
+      existingProfile = store.profiles.find((p: any) => p.id === requestedId);
+    }
+
+    const userEmail = (req as any).authUser?.email || sanitizeText(raw.email, 100);
+    if (!existingProfile && userEmail) {
+      const profileWithEmail = store.profiles.find((p: any) => p.email && p.email.toLowerCase() === userEmail.toLowerCase());
+      if (profileWithEmail) {
+        existingProfile = profileWithEmail;
       }
-      if (!isAdmin && authUserId !== requestedId) {
+    }
+
+    // Authorization check
+    if (existingProfile) {
+      const isOwner = authUserId && (existingProfile.id === authUserId || existingProfile.account_uid === authUserId || !existingProfile.account_uid);
+      if (!isOwner && !isAdmin) {
         return res.status(403).json({ error: 'Forbidden: You can only edit your own profile' });
+      }
+    } else {
+      // New profile creation requires Firebase authentication
+      if (!authUserId && !isAdmin) {
+        return res.status(401).json({ error: 'Firebase authentication required to create a profile' });
       }
     }
 
@@ -1860,14 +2294,18 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
     }
 
     const role = sanitizeText(raw.role, 50) || (Array.isArray(raw.roles) && raw.roles[0]) || 'Developer';
-    const id = (isExisting ? requestedId : null) || sanitizeText(raw.id, 64) || ('user-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex'));
+    const id = existingProfile ? existingProfile.id : (requestedId || authUserId || ('user-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex')));
+    const account_uid = authUserId || existingProfile?.account_uid || null;
 
     const row = {
       id,
+      account_uid,
+      email: userEmail || existingProfile?.email || '',
       name: sanitizeText(rawName, 100),
       role,
       roles: sanitizeArray(raw.roles, 2, 40),
       intent: sanitizeText(raw.intent, 100),
+      intents: sanitizeArray(raw.intents, 5, 100),
       stage: sanitizeText(raw.stage, 100),
       location: sanitizeText(raw.location, 100),
       hours_per_week: sanitizeText(raw.hours_per_week, 50),
@@ -1879,16 +2317,25 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
       learns: sanitizeText(raw.learns, 1000),
       tags: sanitizeArray(raw.tags, 15, 30),
       skills: sanitizeArray(raw.skills, 15, 40),
+      research_area: sanitizeText(raw.research_area, 200),
+      institution: sanitizeText(raw.institution, 200),
       github: sanitizeText(raw.github, 50).replace(/^@/, '').replace(/[^a-zA-Z0-9-_]/g, ''),
       linkedin: sanitizeUrl(raw.linkedin),
       website: sanitizeUrl(raw.website),
+      facebook: sanitizeUrl(raw.facebook),
+      tiktok: sanitizeUrl(raw.tiktok),
+      twitter: sanitizeUrl(raw.twitter || raw.x),
+      instagram: sanitizeUrl(raw.instagram),
+      youtube: sanitizeUrl(raw.youtube),
+      scholar: sanitizeUrl(raw.scholar || raw.google_scholar),
+      orcid: sanitizeUrl(raw.orcid),
       whatsapp: sanitizeText(raw.whatsapp, 30).replace(/[^0-9+]/g, ''),
       hide_whatsapp: Boolean(raw.hide_whatsapp),
       avatar: sanitizeAvatar(raw.avatar),
       status: sanitizeText(raw.status, 100),
       is_demo: Boolean(raw.is_demo),
-      created_at: sanitizeText(raw.created_at, 50) || new Date().toISOString(),
-      gh: raw.gh && typeof raw.gh === 'object' ? raw.gh : null,
+      created_at: sanitizeText(raw.created_at, 50) || existingProfile?.created_at || new Date().toISOString(),
+      gh: raw.gh && typeof raw.gh === 'object' ? raw.gh : (existingProfile?.gh || null),
       blocked_ids: sanitizeArray(raw.blocked_ids, 200, 64)
     };
 
@@ -1900,8 +2347,7 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
     }
 
     await persistDoc('profiles', row.id, row);
-    const token = issueUserToken(row.id);
-    return res.json({ ...row, token });
+    return res.json(sanitizePublicProfile(row, authUserId, isAdmin));
   }
 
   // ALL other collections REQUIRE a valid active session
@@ -1918,7 +2364,8 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
 
     const validKinds = ['idea', 'need', 'offer', 'question'];
     const kind = validKinds.includes(raw.kind) ? raw.kind : 'idea';
-    const authorId = authUserId || 'admin';
+    const myProfile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
+    const authorId = myProfile?.id || authUserId || 'admin';
 
     const row = {
       id: sanitizeText(raw.id, 64) || ('post-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex')),
@@ -1937,14 +2384,16 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
 
   // Follows: follower is strictly session user
   if (col === 'follows') {
+    const myProfile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
+    const followerId = myProfile?.id || authUserId!;
     const followingId = typeof raw.following_id === 'string' ? sanitizeText(raw.following_id, 64) : '';
-    if (!followingId || followingId === authUserId) {
+    if (!followingId || followingId === followerId || followingId === authUserId) {
       return res.status(400).json({ error: 'Invalid following target' });
     }
 
     const row = {
       id: sanitizeText(raw.id, 64) || ('follow-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex')),
-      follower_id: authUserId!,
+      follower_id: followerId,
       following_id: followingId,
       created_at: sanitizeText(raw.created_at, 50) || new Date().toISOString()
     };
@@ -2031,18 +2480,33 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
 
   const existing = store[col][index];
 
+  const myProfile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
+  const myProfileId = myProfile?.id;
+
   // Enforce resource-level authorization
-  if (col === 'profiles' && !isAdmin && authUserId !== id) {
-    return res.status(403).json({ error: 'Forbidden: You can only edit your own profile' });
+  if (col === 'profiles' && !isAdmin) {
+    const isOwner = authUserId === id || existing.account_uid === authUserId || myProfileId === id;
+    if (!isOwner) {
+      return res.status(403).json({ error: 'Forbidden: You can only edit your own profile' });
+    }
   }
-  if (col === 'posts' && !isAdmin && authUserId !== existing.author_id) {
-    return res.status(403).json({ error: 'Forbidden: You can only edit your own posts' });
+  if (col === 'posts' && !isAdmin) {
+    const isOwner = authUserId === existing.author_id || myProfileId === existing.author_id;
+    if (!isOwner) {
+      return res.status(403).json({ error: 'Forbidden: You can only edit your own posts' });
+    }
   }
-  if (col === 'follows' && !isAdmin && authUserId !== existing.follower_id) {
-    return res.status(403).json({ error: 'Forbidden: You can only edit your own follows' });
+  if (col === 'follows' && !isAdmin) {
+    const isOwner = authUserId === existing.follower_id || myProfileId === existing.follower_id;
+    if (!isOwner) {
+      return res.status(403).json({ error: 'Forbidden: You can only edit your own follows' });
+    }
   }
-  if (col === 'notifications' && !isAdmin && authUserId !== existing.to_id) {
-    return res.status(403).json({ error: 'Forbidden: You can only modify your own notifications' });
+  if (col === 'notifications' && !isAdmin) {
+    const isOwner = authUserId === existing.to_id || myProfileId === existing.to_id;
+    if (!isOwner) {
+      return res.status(403).json({ error: 'Forbidden: You can only modify your own notifications' });
+    }
   }
 
   // Validate patch fields
@@ -2074,13 +2538,82 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
     if (patch.hours_per_week !== undefined) {
       patch.hours_per_week = sanitizeText(patch.hours_per_week, 50);
     }
+    if (patch.headline !== undefined) {
+      patch.headline = sanitizeText(patch.headline, 200);
+    }
+    if (patch.bio !== undefined) {
+      patch.bio = sanitizeText(patch.bio, 1000);
+    }
+    if (patch.offers !== undefined) {
+      patch.offers = sanitizeText(patch.offers, 1000);
+    }
+    if (patch.needs !== undefined) {
+      patch.needs = sanitizeText(patch.needs, 1000);
+    }
+    if (patch.teaches !== undefined) {
+      patch.teaches = sanitizeText(patch.teaches, 1000);
+    }
+    if (patch.learns !== undefined) {
+      patch.learns = sanitizeText(patch.learns, 1000);
+    }
+    if (patch.tags !== undefined) {
+      patch.tags = sanitizeArray(patch.tags, 15, 30);
+    }
+    if (patch.skills !== undefined) {
+      patch.skills = sanitizeArray(patch.skills, 15, 40);
+    }
+    if (patch.intents !== undefined) {
+      patch.intents = sanitizeArray(patch.intents, 5, 100);
+    }
+    if (patch.research_area !== undefined) {
+      patch.research_area = sanitizeText(patch.research_area, 200);
+    }
+    if (patch.institution !== undefined) {
+      patch.institution = sanitizeText(patch.institution, 200);
+    }
+    if (patch.github !== undefined) {
+      patch.github = sanitizeText(patch.github, 50).replace(/^@/, '').replace(/[^a-zA-Z0-9-_]/g, '');
+    }
+    if (patch.linkedin !== undefined) {
+      patch.linkedin = sanitizeUrl(patch.linkedin);
+    }
     if (patch.website !== undefined) {
       patch.website = sanitizeUrl(patch.website);
+    }
+    if (patch.facebook !== undefined) {
+      patch.facebook = sanitizeUrl(patch.facebook);
+    }
+    if (patch.tiktok !== undefined) {
+      patch.tiktok = sanitizeUrl(patch.tiktok);
+    }
+    if (patch.twitter !== undefined || patch.x !== undefined) {
+      patch.twitter = sanitizeUrl(patch.twitter || patch.x);
+    }
+    if (patch.instagram !== undefined) {
+      patch.instagram = sanitizeUrl(patch.instagram);
+    }
+    if (patch.youtube !== undefined) {
+      patch.youtube = sanitizeUrl(patch.youtube);
+    }
+    if (patch.scholar !== undefined || patch.google_scholar !== undefined) {
+      patch.scholar = sanitizeUrl(patch.scholar || patch.google_scholar);
+    }
+    if (patch.orcid !== undefined) {
+      patch.orcid = sanitizeUrl(patch.orcid);
+    }
+    if (patch.whatsapp !== undefined) {
+      patch.whatsapp = sanitizeText(patch.whatsapp, 30).replace(/[^0-9+]/g, '');
+    }
+    if (patch.hide_whatsapp !== undefined) {
+      patch.hide_whatsapp = Boolean(patch.hide_whatsapp);
     }
   }
 
   store[col][index] = { ...existing, ...patch };
   await persistDoc(col, id, store[col][index]);
+  if (col === 'profiles') {
+    return res.json(sanitizePublicProfile(store[col][index], authUserId, isAdmin));
+  }
   return res.json(store[col][index]);
 });
 
@@ -2104,18 +2637,33 @@ app.delete('/api/data/:collection/:id', async (req: Request, res: Response) => {
     return res.json({ success: true, message: 'Item already not present' });
   }
 
+  const myProfile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
+  const myProfileId = myProfile?.id;
+
   // Enforce resource-level authorization
-  if (col === 'profiles' && !isAdmin && authUserId !== id) {
-    return res.status(403).json({ error: 'Forbidden: You can only delete your own profile' });
+  if (col === 'profiles' && !isAdmin) {
+    const isOwner = authUserId === id || existing.account_uid === authUserId || myProfileId === id;
+    if (!isOwner) {
+      return res.status(403).json({ error: 'Forbidden: You can only delete your own profile' });
+    }
   }
-  if (col === 'posts' && !isAdmin && authUserId !== existing.author_id) {
-    return res.status(403).json({ error: 'Forbidden: You can only delete your own posts' });
+  if (col === 'posts' && !isAdmin) {
+    const isOwner = authUserId === existing.author_id || myProfileId === existing.author_id;
+    if (!isOwner) {
+      return res.status(403).json({ error: 'Forbidden: You can only delete your own posts' });
+    }
   }
-  if (col === 'follows' && !isAdmin && authUserId !== existing.follower_id) {
-    return res.status(403).json({ error: 'Forbidden: You can only delete your own follows' });
+  if (col === 'follows' && !isAdmin) {
+    const isOwner = authUserId === existing.follower_id || myProfileId === existing.follower_id;
+    if (!isOwner) {
+      return res.status(403).json({ error: 'Forbidden: You can only delete your own follows' });
+    }
   }
-  if (col === 'notifications' && !isAdmin && authUserId !== existing.to_id) {
-    return res.status(403).json({ error: 'Forbidden: You can only delete your own notifications' });
+  if (col === 'notifications' && !isAdmin) {
+    const isOwner = authUserId === existing.to_id || myProfileId === existing.to_id;
+    if (!isOwner) {
+      return res.status(403).json({ error: 'Forbidden: You can only delete your own notifications' });
+    }
   }
 
   store[col] = store[col].filter((item: any) => item.id !== id);

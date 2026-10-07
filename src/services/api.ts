@@ -1,4 +1,4 @@
-import { Profile, MatchResult, LearnMatchResult, Post, NotificationItem, Follow, GitHubData } from '../types';
+import { Profile, MatchResult, LearnMatchResult, Post, NotificationItem, Follow, GitHubData, AskKwegattaMatch } from '../types';
 
 /* =========================================================================
    OPEN-WEIGHT GEMMA MODELS:
@@ -26,33 +26,39 @@ export function intersection<T>(a: Set<T>, b: Set<T>): T[] {
 }
 
 export function calculateHeuristicScore(me: Profile, candidate: Profile): number {
-  const myNeeds = extractKeywords(me.needs + ' ' + (me.learns || ''));
-  const theirNeeds = extractKeywords(candidate.needs + ' ' + (candidate.learns || ''));
+  const myNeeds = extractKeywords([me.needs, me.learns || '', me.research_area || '', ...(me.intents || [])].join(' '));
+  const theirNeeds = extractKeywords([candidate.needs, candidate.learns || '', candidate.research_area || '', ...(candidate.intents || [])].join(' '));
 
   const myOffers = extractKeywords(
-    [me.offers, me.teaches || '', ...(me.skills || []), ...(me.tags || [])].join(' ')
+    [me.offers, me.teaches || '', me.research_area || '', me.institution || '', ...(me.skills || []), ...(me.tags || [])].join(' ')
   );
   const theirOffers = extractKeywords(
-    [candidate.offers, candidate.teaches || '', ...(candidate.skills || []), ...(candidate.tags || [])].join(' ')
+    [candidate.offers, candidate.teaches || '', candidate.research_area || '', candidate.institution || '', ...(candidate.skills || []), ...(candidate.tags || [])].join(' ')
   );
 
   const complementCount = intersection(myNeeds, theirOffers).length + intersection(theirNeeds, myOffers).length;
   const tagOverlap = intersection(new Set(me.tags || []), new Set(candidate.tags || [])).length;
 
-  // Role complementarity: different roles get a bonus
+  // Role complementarity & synergy
   const myRoles = new Set(me.roles && me.roles.length ? me.roles : [me.role]);
   const theirRoles = new Set(candidate.roles && candidate.roles.length ? candidate.roles : [candidate.role]);
   const hasDistinctRole = [...myRoles].some(r => !theirRoles.has(r));
   const roleBonus = hasDistinctRole ? 15 : 0;
 
-  // Intent alignment bonus (e.g. technical seeker with developer, business seeker with business)
+  // Intent & research alignment bonus
   let intentBonus = 0;
-  const myIntent = (me.intent || '').toLowerCase();
-  const theirIntent = (candidate.intent || '').toLowerCase();
+  const myIntent = [me.intent || '', ...(me.intents || [])].join(' ').toLowerCase();
+  const theirIntent = [candidate.intent || '', ...(candidate.intents || [])].join(' ').toLowerCase();
   if (myIntent.includes('technical') && theirRoles.has('Developer')) intentBonus += 15;
   if (myIntent.includes('business') && (theirRoles.has('Business') || theirRoles.has('Founder'))) intentBonus += 15;
   if (myIntent.includes('co-founder') && theirIntent.includes('co-founder')) intentBonus += 12;
   if (myIntent.includes('mentor') && (candidate.teaches || theirRoles.has('Mentor'))) intentBonus += 12;
+  if ((myIntent.includes('research') || myRoles.has('Researcher')) && (theirRoles.has('Researcher') || theirIntent.includes('research') || theirIntent.includes('participant') || theirIntent.includes('data'))) {
+    intentBonus += 18;
+  }
+  if (me.institution && candidate.institution && me.institution.toLowerCase() === candidate.institution.toLowerCase()) {
+    intentBonus += 10;
+  }
 
   // Location compatibility bonus
   const locBonus = (me.location && candidate.location && (
@@ -98,7 +104,60 @@ export function createFallbackMatch(me: Profile, candidate: Profile, score: numb
   };
 }
 
-// Call the open-weight Gemma 4 model via server endpoint with retry
+// Track hedged request frequency for tail latency logging
+let gemmaTailHedgeOccurrences = 0;
+
+/**
+ * Hedged Fetch for Gemma requests:
+ * If no response has started after 4 seconds, start a second identical request
+ * and use whichever answers first. Cancel the other and log how often this occurs.
+ */
+async function fetchGemmaWithHedge(
+  url: string,
+  init: RequestInit,
+  timeoutMs = 4000
+): Promise<Response> {
+  const controller1 = new AbortController();
+  const controller2 = new AbortController();
+  let timer: any = null;
+  let firstCompleted = false;
+
+  const req1 = fetch(url, { ...init, signal: controller1.signal });
+
+  const hedgePromise = new Promise<Response>((resolve, reject) => {
+    timer = setTimeout(() => {
+      if (firstCompleted) return;
+      gemmaTailHedgeOccurrences++;
+      console.log(
+        `[Gemma Tail Latency Hedge] No response after ${timeoutMs / 1000}s. Starting parallel hedged request (occurrence count: ${gemmaTailHedgeOccurrences}).`
+      );
+      const req2 = fetch(url, { ...init, signal: controller2.signal });
+      req2.then(resolve).catch(reject);
+    }, timeoutMs);
+  });
+
+  try {
+    const winner = await Promise.race([
+      req1.then(res => {
+        firstCompleted = true;
+        clearTimeout(timer);
+        try { controller2.abort(); } catch (_) {}
+        return res;
+      }),
+      hedgePromise.then(res => {
+        clearTimeout(timer);
+        try { controller1.abort(); } catch (_) {}
+        return res;
+      })
+    ]);
+    return winner;
+  } catch (err: any) {
+    clearTimeout(timer);
+    throw err;
+  }
+}
+
+// Call the open-weight Gemma 4 model via server endpoint with retry & 4s hedging
 export async function callGemma(
   prompt: string,
   options: { json?: boolean; temperature?: number } = {},
@@ -108,7 +167,7 @@ export async function callGemma(
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetch('/api/gemma', {
+      const res = await fetchGemmaWithHedge('/api/gemma', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -169,13 +228,13 @@ export async function callGemma(
   throw lastError || new Error('Gemma call failed');
 }
 
-// Stream Gemma tokens directly to client
+// Stream Gemma tokens directly to client with 4s hedging
 export async function callGemmaStream(
   prompt: string,
   onChunk: (chunk: string) => void,
   options: { model?: string; temperature?: number } = {}
 ): Promise<string> {
-  const res = await fetch('/api/gemma/stream', {
+  const res = await fetchGemmaWithHedge('/api/gemma/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -488,6 +547,7 @@ export async function reportMember(
   details?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    await getFreshAuthToken();
     const res = await fetch('/api/reports', {
       method: 'POST',
       headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
@@ -669,15 +729,26 @@ export async function fetchGitHubData(input: string): Promise<GitHubData | null>
   return out;
 }
 
+import { auth, getCurrentIdToken } from './firebase';
+
 export function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
-  return localStorage.getItem('kw_auth_token');
+  return localStorage.getItem('kw_firebase_token') || localStorage.getItem('kw_auth_token');
 }
 
 export function setAuthToken(token: string) {
   if (typeof window !== 'undefined') {
-    localStorage.setItem('kw_auth_token', token);
+    localStorage.setItem('kw_firebase_token', token);
   }
+}
+
+export async function getFreshAuthToken(): Promise<string | null> {
+  const token = await getCurrentIdToken();
+  if (token) {
+    setAuthToken(token);
+    return token;
+  }
+  return getAuthToken();
 }
 
 export function getAuthHeaders(existingHeaders: Record<string, string> = {}): Record<string, string> {
@@ -695,26 +766,33 @@ export function getAuthHeaders(existingHeaders: Record<string, string> = {}): Re
   return headers;
 }
 
-export async function ensureAuthToken(userId: string): Promise<string | null> {
-  const existing = getAuthToken();
-  if (existing) return existing;
-  try {
-    const res = await fetch('/api/auth/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.token) {
-        setAuthToken(data.token);
-        return data.token;
-      }
-    }
-  } catch (e) {
-    // ignore
+export async function ensureAuthToken(userId?: string): Promise<string | null> {
+  return await getFreshAuthToken();
+}
+
+export async function claimExistingProfile(profileId: string): Promise<Profile | null> {
+  const token = await getFreshAuthToken();
+  const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch('/api/auth/claim-profile', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ profileId })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to link profile to account');
   }
-  return null;
+  const data = await res.json();
+  return data.profile || null;
+}
+
+export async function fetchMyAccountProfile(): Promise<Profile | null> {
+  await getFreshAuthToken();
+  const headers = getAuthHeaders();
+  const res = await fetch('/api/auth/me', { headers });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.profile || null;
 }
 
 // Explicit connection request (Digital Public Goods Privacy compliance)
@@ -723,6 +801,7 @@ export async function requestMemberConnect(
   targetId: string,
   reason?: string
 ): Promise<{ success: boolean; target_id: string; target_name: string; whatsapp: string; linkedin: string }> {
+  await getFreshAuthToken();
   const res = await fetch('/api/connect', {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
@@ -736,6 +815,7 @@ export async function requestMemberConnect(
 
 // Delete member profile permanently (Digital Public Goods privacy indicator)
 export async function deleteMemberProfile(profileId: string): Promise<boolean> {
+  await getFreshAuthToken();
   const res = await fetch(`/api/profiles/${encodeURIComponent(profileId)}`, {
     method: 'DELETE',
     headers: getAuthHeaders()
@@ -805,6 +885,7 @@ export const db = {
 
   async insert<T>(collection: string, row: Partial<T>): Promise<T> {
     try {
+      await getFreshAuthToken();
       const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
       const res = await fetch(`/api/data/${collection}`, {
         method: 'POST',
@@ -813,9 +894,6 @@ export const db = {
       });
       if (!res.ok) throw new Error(`Failed to insert into ${collection}`);
       const data = await res.json();
-      if (collection === 'profiles' && data.token) {
-        setAuthToken(data.token);
-      }
       return data;
     } catch (err: any) {
       console.warn(`[db.insert] error for ${collection}:`, err.message);
@@ -825,6 +903,7 @@ export const db = {
 
   async update<T>(collection: string, id: string, patch: Partial<T>): Promise<T> {
     try {
+      await getFreshAuthToken();
       const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
       const res = await fetch(`/api/data/${collection}/${encodeURIComponent(id)}`, {
         method: 'PATCH',
@@ -841,6 +920,7 @@ export const db = {
 
   async remove(collection: string, id: string): Promise<boolean> {
     try {
+      await getFreshAuthToken();
       const headers = getAuthHeaders();
       const res = await fetch(`/api/data/${collection}/${encodeURIComponent(id)}`, {
         method: 'DELETE',
@@ -886,3 +966,24 @@ export const db = {
     return result;
   }
 };
+
+/**
+ * PART D: ASK KWEGATTA
+ * Semantic AI matchmaking with Gemma based on user requests
+ */
+export async function askKwegatta(query: string): Promise<AskKwegattaMatch[]> {
+  try {
+    await getFreshAuthToken();
+    const res = await fetch('/api/ai/ask-kwegatta', {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ query })
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.matches) ? data.matches : [];
+  } catch (err) {
+    console.warn('[askKwegatta] client error:', err);
+    return [];
+  }
+}

@@ -312,14 +312,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
               type="password"
               value={passcode}
               onChange={e => setPasscode(e.target.value)}
-              placeholder="Enter passcode (e.g. kwegatta2026)"
+              placeholder="Passcode"
               required
               autoFocus
               className="kw-input font-mono"
             />
-            <p className="text-[11px] text-[var(--fg-subtle)]">
-              Default passcode: <code className="text-[var(--gold)] font-mono">kwegatta2026</code> (or your <code className="text-[var(--fg-muted)]">ADMIN_CODE</code> env variable).
-            </p>
           </div>
 
           <div className="flex gap-2">

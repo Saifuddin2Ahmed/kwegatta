@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sun, Moon, Bell, Search, X } from 'lucide-react';
+import { Sun, Moon, Bell, Search, X, ChevronDown, User, LogOut, Download } from 'lucide-react';
 import { Profile } from '../types';
 import { Avatar } from './Avatar';
 import { BrandLogo } from './BrandLogo';
@@ -13,6 +13,8 @@ interface HeaderProps {
   onSearchChange: (q: string) => void;
   onNavigate: (tab: string) => void;
   onJoin?: () => void;
+  onOpenSignIn?: () => void;
+  onSignOut?: () => void;
   activeTab?: string;
   isDemoMode?: boolean;
 }
@@ -26,11 +28,70 @@ export const Header: React.FC<HeaderProps> = ({
   onSearchChange,
   onNavigate,
   onJoin,
+  onOpenSignIn,
+  onSignOut,
   activeTab
 }) => {
   const [showMobileSearch, setShowMobileSearch] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isInstalled, setIsInstalled] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true;
+  });
+  const [isIosSafari, setIsIosSafari] = useState<boolean>(false);
+  const [showIosHint, setShowIosHint] = useState<boolean>(false);
+
   const searchInputRef = useRef<HTMLInputElement>(null);
   const mobileSearchInputRef = useRef<HTMLInputElement>(null);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const isIos = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    const isWebkit = typeof navigator !== 'undefined' && /WebKit/i.test(navigator.userAgent);
+    if (isIos && isWebkit && !isInstalled) {
+      setIsIosSafari(true);
+    }
+
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+
+    const handleAppInstalled = () => {
+      setIsInstalled(true);
+      setDeferredPrompt(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, [isInstalled]);
+
+  const handleInstallApp = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') {
+        setIsInstalled(true);
+      }
+      setDeferredPrompt(null);
+    }
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
+        setShowProfileMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Requirement 6: Search hint shows "Ctrl K" on Windows and Android, "⌘K" on Apple
   const isApple = typeof navigator !== 'undefined' && /(Mac|iPhone|iPod|iPad)/i.test(navigator.userAgent);
@@ -134,6 +195,29 @@ export const Header: React.FC<HeaderProps> = ({
             <Search className="w-4 h-4" />
           </button>
 
+          {/* Install app button when beforeinstallprompt fires, or iOS hint for iPhone */}
+          {!isInstalled && (deferredPrompt || isIosSafari) && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={isIosSafari ? () => setShowIosHint(!showIosHint) : handleInstallApp}
+                className="text-xs font-semibold py-1.5 px-3 rounded-xl border border-[var(--gold)]/40 bg-[var(--gold-subtle)] text-[var(--gold)] hover:bg-[var(--gold)] hover:text-[#0B1220] active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+                title="Install app"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Install app</span>
+              </button>
+              {isIosSafari && showIosHint && (
+                <div className="absolute right-0 top-full mt-2 w-56 p-3 bg-[var(--card)] border border-[var(--gold)]/40 rounded-xl shadow-2xl text-xs text-[var(--fg)] z-50 animate-in fade-in">
+                  <p className="font-bold text-[var(--gold)] mb-1">Install on iPhone:</p>
+                  <p className="text-[11px] text-[var(--fg-muted)]">
+                    Tap Share, then Add to Home Screen
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Theme Switcher */}
           <button
             onClick={onToggleTheme}
@@ -165,18 +249,65 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {/* Primary Action: Profile Avatar or Join CTA */}
-          {currentProfile ? (
+          {/* Sign In button for signed-out visitors */}
+          {!currentProfile && (
             <button
-              onClick={() => onNavigate('me')}
-              className="flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-full border border-[var(--card-border)] hover:border-[var(--gold)] bg-[var(--btn)] active:scale-95 transition-all cursor-pointer"
-              title="View your profile"
+              type="button"
+              onClick={onOpenSignIn}
+              className="text-xs font-semibold py-1.5 px-3 rounded-xl border border-[var(--card-border)] bg-[var(--btn)] hover:bg-[var(--btn-hover)] text-[var(--fg)] hover:border-[var(--gold)] active:scale-95 transition-all cursor-pointer shadow-xs"
             >
-              <Avatar profile={currentProfile} className="w-7 h-7" />
-              <span className="text-xs font-semibold text-[var(--fg)] max-w-[85px] truncate hidden sm:inline">
-                {currentProfile.name.split(' ')[0]}
-              </span>
+              Sign in
             </button>
+          )}
+
+          {/* Primary Action: Profile Avatar with Menu or Join CTA */}
+          {currentProfile ? (
+            <div className="relative" ref={profileMenuRef}>
+              <button
+                type="button"
+                onClick={() => setShowProfileMenu(!showProfileMenu)}
+                className="flex items-center gap-1.5 pl-1 pr-2.5 py-1 rounded-full border border-[var(--card-border)] hover:border-[var(--gold)] bg-[var(--btn)] active:scale-95 transition-all cursor-pointer shadow-xs"
+                title="Profile menu"
+                aria-expanded={showProfileMenu}
+              >
+                <Avatar profile={currentProfile} className="w-7 h-7" />
+                <span className="text-xs font-semibold text-[var(--fg)] max-w-[85px] truncate hidden sm:inline">
+                  {currentProfile.name.split(' ')[0]}
+                </span>
+                <ChevronDown className="w-3.5 h-3.5 text-[var(--fg-muted)]" />
+              </button>
+
+              {showProfileMenu && (
+                <div className="absolute right-0 top-full mt-2 w-48 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-2xl z-50 py-1.5 text-xs animate-in fade-in zoom-in-95">
+                  <div className="px-3.5 py-2 border-b border-[var(--card-border)]/60">
+                    <p className="font-bold text-[var(--fg)] truncate">{currentProfile.name}</p>
+                    <p className="text-[11px] text-[var(--fg-muted)] truncate">{currentProfile.email || currentProfile.role}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      onNavigate('me');
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-[var(--fg)] cursor-pointer"
+                  >
+                    <User className="w-4 h-4 text-[var(--gold)]" />
+                    <span>My profile</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowProfileMenu(false);
+                      if (onSignOut) onSignOut();
+                    }}
+                    className="w-full text-left px-3.5 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-rose-500 hover:text-rose-600 font-medium cursor-pointer"
+                  >
+                    <LogOut className="w-4 h-4 text-rose-500" />
+                    <span>Sign out</span>
+                  </button>
+                </div>
+              )}
+            </div>
           ) : (
             <button
               onClick={() => {
@@ -193,7 +324,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Mobile Nav Links Row (only for visitors who don't have NavTabs) */}
       {!currentProfile && (
-        <div className="md:hidden flex items-center gap-1 px-4 py-2 border-t border-[var(--card-border)] bg-[var(--bg-subtle)]/40 overflow-x-auto scrollbar-none text-xs">
+        <div className="md:hidden flex items-center gap-1 px-4 py-2 border-t border-[var(--card-border)] bg-[var(--bg-subtle)]/40 text-xs overflow-x-auto scrollbar-none">
           {navLinks.map(link => {
             const isActive = activeTab === link.id || (!activeTab && link.id === 'home');
             return (

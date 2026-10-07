@@ -198,7 +198,7 @@ export const HeroSection: React.FC<HeroProps> = ({
 
               <div className="flex items-center gap-2 text-xs sm:text-sm text-[var(--fg-muted)]">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                <span>Free and open source. No password needed.</span>
+                <span>Free and open source. Sign in with Google in one tap.</span>
               </div>
             </div>
           </div>

@@ -3,6 +3,7 @@ export type Role =
   | 'Business'
   | 'Developer'
   | 'Designer'
+  | 'Researcher'
   | 'Domain expert'
   | 'Mentor'
   | 'Student'
@@ -32,6 +33,7 @@ export interface Profile {
   role: Role | string;
   roles?: string[];
   intent?: string;
+  intents?: string[];
   stage?: string;
   location?: string;
   hours_per_week?: string;
@@ -46,6 +48,15 @@ export interface Profile {
   github?: string;
   linkedin?: string;
   website?: string;
+  facebook?: string;
+  tiktok?: string;
+  twitter?: string;
+  instagram?: string;
+  youtube?: string;
+  scholar?: string;
+  orcid?: string;
+  research_area?: string;
+  institution?: string;
   whatsapp?: string;
   hide_whatsapp?: boolean;
   has_whatsapp?: boolean;
@@ -56,6 +67,14 @@ export interface Profile {
   gh?: GitHubData | null;
   blocked_ids?: string[];
   hidden?: boolean;
+  account_uid?: string;
+  email?: string;
+}
+
+export interface AskKwegattaMatch {
+  profile_id: string;
+  profile?: Profile;
+  reason: string;
 }
 
 export interface ReportItem {

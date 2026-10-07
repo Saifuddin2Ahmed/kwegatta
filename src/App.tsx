@@ -17,7 +17,10 @@ import { PrivacyView } from './components/PrivacyView';
 import { LicenseView } from './components/LicenseView';
 import { Footer } from './components/Footer';
 import { Profile, Post, NotificationItem, Follow } from './types';
-import { db, APP_NAME, ensureAuthToken } from './services/api';
+import { db, APP_NAME, ensureAuthToken, claimExistingProfile, fetchMyAccountProfile } from './services/api';
+import { auth, handleRedirectResult, logOut } from './services/firebase';
+import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { AuthModal } from './components/AuthModal';
 
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
@@ -25,6 +28,8 @@ export default function App() {
   const [viewedProfileId, setViewedProfileId] = useState<string | null>(null);
 
   const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(() => auth.currentUser);
+  const [showSignInModal, setShowSignInModal] = useState<boolean>(false);
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
   const [follows, setFollows] = useState<Follow[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -237,10 +242,83 @@ export default function App() {
     }
   };
 
-  const handleSignOut = () => {
+  // Listen for Firebase auth state and handle redirect logins
+  useEffect(() => {
+    handleRedirectResult().catch(err => console.warn('[Firebase Auth] Redirect check:', err));
+
+    const unsubscribe = onAuthStateChanged(auth, async user => {
+      setFirebaseUser(user);
+      if (user) {
+        try {
+          const accountProfile = await fetchMyAccountProfile();
+          if (accountProfile) {
+            setCurrentProfile(accountProfile);
+            localStorage.setItem('kw_me', accountProfile.id);
+            localStorage.setItem('kwegatta_current_profile', JSON.stringify(accountProfile));
+            return;
+          }
+
+          const localKwMe = localStorage.getItem('kw_me');
+          if (localKwMe) {
+            const linked = await claimExistingProfile(localKwMe);
+            if (linked) {
+              setCurrentProfile(linked);
+              localStorage.setItem('kwegatta_current_profile', JSON.stringify(linked));
+              showToast('Your existing profile has been linked to your Google/Firebase account!');
+            }
+          }
+        } catch (e) {
+          console.warn('[Firebase Auth] Profile sync note:', e);
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleGlobalSignInSuccess = async (user: FirebaseUser) => {
+    setShowSignInModal(false);
+    setFirebaseUser(user);
+    try {
+      const accountProfile = await fetchMyAccountProfile();
+      if (accountProfile) {
+        setCurrentProfile(accountProfile);
+        localStorage.setItem('kw_me', accountProfile.id);
+        localStorage.setItem('kwegatta_current_profile', JSON.stringify(accountProfile));
+        navigateTo('home');
+        showToast(`Welcome back, ${accountProfile.name.split(' ')[0]}!`);
+        return;
+      }
+
+      const localKwMe = localStorage.getItem('kw_me');
+      if (localKwMe) {
+        const linked = await claimExistingProfile(localKwMe);
+        if (linked) {
+          setCurrentProfile(linked);
+          localStorage.setItem('kwegatta_current_profile', JSON.stringify(linked));
+          navigateTo('home');
+          showToast('Profile linked to your account!');
+          return;
+        }
+      }
+
+      navigateTo('onboard');
+      showToast(`Signed in as ${user.displayName || user.email}. Complete your profile to get matched!`);
+    } catch (err: any) {
+      showToast('Notice syncing account: ' + (err.message || 'Please try again'));
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await logOut();
+    } catch (_) {}
     localStorage.removeItem('kw_me');
+    localStorage.removeItem('kw_auth_token');
+    localStorage.removeItem('kw_firebase_token');
     localStorage.removeItem('kwegatta_current_profile');
     setCurrentProfile(null);
+    setFirebaseUser(null);
     navigateTo('onboard');
     showToast('Signed out successfully');
   };
@@ -284,6 +362,8 @@ export default function App() {
         }}
         onNavigate={navigateTo}
         onJoin={triggerJoinFlow}
+        onOpenSignIn={() => setShowSignInModal(true)}
+        onSignOut={handleSignOut}
         activeTab={activeTab}
         isDemoMode={isDemoMode}
       />
@@ -370,6 +450,7 @@ export default function App() {
             onSearchChange={setSearchQuery}
             selectedTag={selectedTag}
             onSelectTag={setSelectedTag}
+            onOpenSignIn={() => setShowSignInModal(true)}
           />
         ) : activeTab === 'feed' ? (
           <FeedView
@@ -431,12 +512,19 @@ export default function App() {
             }}
             onDeleteProfile={() => {
               localStorage.removeItem('kw_me');
+              localStorage.removeItem('kw_auth_token');
+              localStorage.removeItem('kw_firebase_token');
               localStorage.removeItem('kwegatta_current_profile');
+              if (auth.currentUser) {
+                auth.currentUser.delete().catch(() => logOut());
+              }
               setCurrentProfile(null);
+              setFirebaseUser(null);
               setAllProfiles(prev => prev.filter(p => p.id !== displayedProfile.id));
               navigateTo('onboard');
               showToast('Your profile and personal data have been completely deleted.');
             }}
+            onSignOut={handleSignOut}
             onToast={showToast}
           />
         ) : (
@@ -453,6 +541,17 @@ export default function App() {
       {/* Production-Grade Multi-Column Startup Footer */}
       <Footer onNavigate={navigateTo} onJoin={triggerJoinFlow} />
 
+      {/* Global Sign In Dialog for Visitors */}
+      {showSignInModal && (
+        <AuthModal
+          isOpen={showSignInModal}
+          onClose={() => setShowSignInModal(false)}
+          onSuccess={handleGlobalSignInSuccess}
+          title="Sign in to Kwegatta"
+          subtitle="Sign in with Google in one tap to access your profile, matches, and chats from any device."
+          existingProfile={currentProfile}
+        />
+      )}
     </div>
   );
 }
