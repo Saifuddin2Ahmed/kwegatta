@@ -49,7 +49,7 @@ import { generateQrCodeDataUrl, formatWhatsAppUrl, resizeImageFile } from '../ut
 import { Avatar } from './Avatar';
 import { SocialLinksRow } from './SocialLinksRow';
 import { ShareCardModal } from './ShareCardModal';
-import { auth } from '../services/firebase';
+import { auth, addPasswordToAccount, validatePasswordStrength, formatAuthError } from '../services/firebase';
 import { EmailAuthProvider, linkWithCredential } from 'firebase/auth';
 
 interface ProfileViewProps {
@@ -222,11 +222,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const handleAddPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser || !currentUser.email) {
-      setPasswordLinkError('User email not found. Please re-authenticate.');
+      setPasswordLinkError('User email not found. Please sign in again.');
       return;
     }
-    if (newPassword.length < 6) {
-      setPasswordLinkError('Password must be at least 6 characters.');
+
+    const strengthErr = validatePasswordStrength(newPassword);
+    if (strengthErr) {
+      setPasswordLinkError(strengthErr);
       return;
     }
 
@@ -234,15 +236,18 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     setPasswordLinkError(null);
 
     try {
-      const credential = EmailAuthProvider.credential(currentUser.email, newPassword);
-      await linkWithCredential(currentUser, credential);
+      const result = await addPasswordToAccount(newPassword);
       setPasswordLinkedSuccess(true);
       setShowAddPassword(false);
       setNewPassword('');
-      onToast('Password added! You can now sign in with either Google or email & password.');
+      if (result.isChange) {
+        onToast('Password updated! You can now sign in with your new password.');
+      } else {
+        onToast('Password added! You can now sign in with either Google or email & password.');
+      }
     } catch (err: any) {
-      console.warn('Password linking error:', err);
-      setPasswordLinkError(err.message || 'Could not add password to account.');
+      console.warn('Password linking/updating error:', err);
+      setPasswordLinkError(formatAuthError(err) || err.message || 'Could not update password on account.');
     } finally {
       setIsLinkingPassword(false);
     }
@@ -873,32 +878,50 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     ? `Signed in with Google as ${userEmail}`
                     : `Signed in as ${userEmail}`}
                 </p>
-                {hasPasswordProvider && (
-                  <div className="flex items-center gap-1 text-emerald-500 text-[11px] font-semibold">
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>Password credential linked</span>
+                {(hasPasswordProvider || passwordLinkedSuccess) ? (
+                  <div className="flex items-center justify-between pt-1">
+                    <div className="flex items-center gap-1.5 text-emerald-500 text-[11px] font-semibold">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Password credential linked</span>
+                    </div>
+                    {!showAddPassword && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAddPassword(true);
+                          setPasswordLinkError(null);
+                        }}
+                        className="text-[11px] font-medium text-[var(--gold)] hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        <KeyRound className="w-3 h-3" />
+                        <span>Change password</span>
+                      </button>
+                    )}
                   </div>
-                )}
+                ) : null}
               </div>
 
-              {/* Add a password for Google accounts */}
-              {isGoogleUser && !hasPasswordProvider && !passwordLinkedSuccess && (
+              {/* Add a password or Change password form */}
+              {((isGoogleUser && !hasPasswordProvider && !passwordLinkedSuccess) || (showAddPassword && (hasPasswordProvider || passwordLinkedSuccess))) && (
                 <div className="pt-2 border-t border-[var(--border-muted)] space-y-2">
                   {!showAddPassword ? (
                     <button
                       type="button"
-                      onClick={() => setShowAddPassword(true)}
+                      onClick={() => {
+                        setShowAddPassword(true);
+                        setPasswordLinkError(null);
+                      }}
                       className="primer-btn text-xs py-1.5 px-3 flex items-center gap-1.5 font-semibold text-[var(--gold)] border-[var(--gold)]/40 hover:bg-[var(--gold-subtle)] cursor-pointer"
                     >
                       <KeyRound className="w-3.5 h-3.5" />
                       <span>Add a password</span>
                     </button>
                   ) : (
-                    <form onSubmit={handleAddPassword} className="space-y-2 bg-[var(--card)] p-3 rounded-lg border border-[var(--card-border)] animate-in fade-in">
+                    <form onSubmit={handleAddPassword} className="space-y-2.5 bg-[var(--card)] p-3 rounded-lg border border-[var(--card-border)] animate-in fade-in">
                       <div className="flex items-center justify-between">
                         <label className="text-xs font-semibold text-[var(--fg)] flex items-center gap-1.5">
                           <Lock className="w-3.5 h-3.5 text-[var(--gold)]" />
-                          <span>Set account password</span>
+                          <span>{(hasPasswordProvider || passwordLinkedSuccess) ? 'Change account password' : 'Set account password'}</span>
                         </label>
                         <button
                           type="button"
@@ -906,38 +929,46 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                             setShowAddPassword(false);
                             setPasswordLinkError(null);
                           }}
-                          className="text-[var(--fg-muted)] hover:text-[var(--fg)]"
+                          className="text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
                         >
                           <X className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                      <p className="text-[11px] text-[var(--fg-muted)]">
-                        Add a password so you can sign in with your email and password on any device.
+                      <p className="text-[11px] text-[var(--fg-muted)] leading-relaxed">
+                        {(hasPasswordProvider || passwordLinkedSuccess)
+                          ? 'Set a new password for your email sign-in (min 8 characters).'
+                          : 'Add a password so you can sign in with your email and password on any device.'}
                       </p>
                       <input
                         type="password"
-                        placeholder="Create a password (min 6 characters)"
+                        placeholder="Enter password (min 8 characters)"
                         value={newPassword}
-                        onChange={e => setNewPassword(e.target.value)}
+                        onChange={e => {
+                          setNewPassword(e.target.value);
+                          if (passwordLinkError) setPasswordLinkError(null);
+                        }}
                         className="w-full p-2 text-xs bg-[var(--bg-subtle)] border border-[var(--card-border)] rounded-md focus:outline-none focus:border-[var(--gold)] text-[var(--fg)]"
                       />
                       {passwordLinkError && (
-                        <p className="text-[11px] text-red-500 font-medium">{passwordLinkError}</p>
+                        <p className="text-[11px] text-red-500 font-medium leading-tight">{passwordLinkError}</p>
                       )}
                       <div className="flex gap-2 justify-end pt-1">
                         <button
                           type="button"
-                          onClick={() => setShowAddPassword(false)}
+                          onClick={() => {
+                            setShowAddPassword(false);
+                            setPasswordLinkError(null);
+                          }}
                           className="primer-btn text-xs py-1 px-2.5"
                         >
                           Cancel
                         </button>
                         <button
                           type="submit"
-                          disabled={isLinkingPassword || newPassword.length < 6}
-                          className="kw-btn kw-btn-gold text-xs py-1 px-3.5 font-bold disabled:opacity-40"
+                          disabled={isLinkingPassword || newPassword.length < 8}
+                          className="kw-btn kw-btn-gold text-xs py-1 px-3.5 font-bold disabled:opacity-40 cursor-pointer"
                         >
-                          {isLinkingPassword ? 'Adding...' : 'Save password'}
+                          {isLinkingPassword ? 'Saving...' : ((hasPasswordProvider || passwordLinkedSuccess) ? 'Update password' : 'Save password')}
                         </button>
                       </div>
                     </form>

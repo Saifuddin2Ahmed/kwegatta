@@ -105,7 +105,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email) {
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
       setErrorMsg('Please enter your email address to receive password reset instructions.');
       return;
     }
@@ -114,10 +115,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoading(true);
     setLastAction('forgot');
     try {
-      await sendPasswordReset(email);
-      setSuccessNotice('Password reset link sent to ' + email + '. Please check your inbox.');
+      await sendPasswordReset(cleanEmail);
+      console.log(`[AuthModal] sendPasswordReset succeeded for: ${cleanEmail}`);
+      setSuccessNotice(`If an account exists for ${cleanEmail}, a reset link has been sent. Check spam too.`);
       setMode('signin');
     } catch (err: any) {
+      console.error('[AuthModal] sendPasswordReset failed:', err);
       setErrorMsg(formatAuthError(err));
     } finally {
       setIsLoading(false);
