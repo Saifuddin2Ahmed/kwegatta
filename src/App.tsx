@@ -8,19 +8,20 @@ import { FeedView } from './components/FeedView';
 import { InboxView } from './components/InboxView';
 import { ProfileView } from './components/ProfileView';
 import { HeroSection, KampalaStorySection } from './components/LivingNetworkHero';
-import { OnboardingChat } from './components/OnboardingChat';
-import { WallView } from './components/WallView';
-import { SetupView } from './components/SetupView';
-import { AdminView } from './components/AdminView';
-import { AboutView } from './components/AboutView';
-import { PrivacyView } from './components/PrivacyView';
-import { LicenseView } from './components/LicenseView';
 import { Footer } from './components/Footer';
 import { Profile, Post, NotificationItem, Follow } from './types';
 import { db, APP_NAME, ensureAuthToken, claimExistingProfile, fetchMyAccountProfile } from './services/api';
 import { auth, handleRedirectResult, logOut } from './services/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { AuthModal } from './components/AuthModal';
+
+const AdminView = React.lazy(() => import('./components/AdminView').then(m => ({ default: m.AdminView })));
+const WallView = React.lazy(() => import('./components/WallView').then(m => ({ default: m.WallView })));
+const SetupView = React.lazy(() => import('./components/SetupView').then(m => ({ default: m.SetupView })));
+const AboutView = React.lazy(() => import('./components/AboutView').then(m => ({ default: m.AboutView })));
+const PrivacyView = React.lazy(() => import('./components/PrivacyView').then(m => ({ default: m.PrivacyView })));
+const LicenseView = React.lazy(() => import('./components/LicenseView').then(m => ({ default: m.LicenseView })));
+const OnboardingChat = React.lazy(() => import('./components/OnboardingChat').then(m => ({ default: m.OnboardingChat })));
 
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
@@ -111,8 +112,31 @@ export default function App() {
 
   useEffect(() => {
     refreshData();
-    const interval = setInterval(refreshData, 15000);
-    return () => clearInterval(interval);
+
+    const runSync = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      refreshData();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        runSync();
+      }
+    };
+
+    const handleCustomRefresh = () => {
+      refreshData();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('kwegatta_refresh', handleCustomRefresh);
+    const interval = setInterval(runSync, 30000);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('kwegatta_refresh', handleCustomRefresh);
+    };
   }, [refreshData]);
 
   // Listen for live background AI profile polish updates
@@ -338,9 +362,11 @@ export default function App() {
   // Projector Wall Mode is full-screen standalone
   if (activeTab === 'wall') {
     return (
-      <WallView
-        onBack={() => navigateTo('home')}
-      />
+      <React.Suspense fallback={<div className="h-screen grid place-items-center"><div className="w-8 h-8 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin"></div></div>}>
+        <WallView
+          onBack={() => navigateTo('home')}
+        />
+      </React.Suspense>
     );
   }
 
@@ -407,14 +433,16 @@ export default function App() {
 
             {/* c) The onboarding chat, directly under the hero */}
             <div id="onboarding-composer">
-              <OnboardingChat
-                onCompleted={newProfile => {
-                  setCurrentProfile(newProfile);
-                  setAllProfiles(prev => [newProfile, ...prev]);
-                  navigateTo('home');
-                  showToast(`Welcome ${newProfile.name.split(' ')[0]}! Your matches are ready.`);
-                }}
-              />
+              <React.Suspense fallback={<div className="p-8 text-center"><div className="w-8 h-8 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin mx-auto"></div></div>}>
+                <OnboardingChat
+                  onCompleted={newProfile => {
+                    setCurrentProfile(newProfile);
+                    setAllProfiles(prev => [newProfile, ...prev]);
+                    navigateTo('home');
+                    showToast(`Welcome ${newProfile.name.split(' ')[0]}! Your matches are ready.`);
+                  }}
+                />
+              </React.Suspense>
             </div>
 
             {/* d) "Built in one day in Kampala": story, the two other photos, four facts, team */}
@@ -471,18 +499,22 @@ export default function App() {
             onViewProfile={navigateToProfile}
           />
         ) : activeTab === 'admin' ? (
-          <AdminView
-            onBack={() => navigateTo('home')}
-            onRefreshGlobalData={refreshData}
-            onToast={showToast}
-          />
-        ) : activeTab === 'setup' ? (
-          isAdminAuthenticated ? (
-            <SetupView
-              onSignOut={handleSignOut}
-              onRefreshData={refreshData}
+          <React.Suspense fallback={<div className="p-12 text-center"><div className="w-8 h-8 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin mx-auto"></div></div>}>
+            <AdminView
+              onBack={() => navigateTo('home')}
+              onRefreshGlobalData={refreshData}
               onToast={showToast}
             />
+          </React.Suspense>
+        ) : activeTab === 'setup' ? (
+          isAdminAuthenticated ? (
+            <React.Suspense fallback={<div className="p-12 text-center"><div className="w-8 h-8 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin mx-auto"></div></div>}>
+              <SetupView
+                onSignOut={handleSignOut}
+                onRefreshData={refreshData}
+                onToast={showToast}
+              />
+            </React.Suspense>
           ) : (
             <div className="kw-card p-12 text-center space-y-4 max-w-md mx-auto">
               <h3 className="font-bold text-base text-[var(--fg)]">Page not found</h3>
@@ -493,11 +525,17 @@ export default function App() {
             </div>
           )
         ) : activeTab === 'about' ? (
-          <AboutView onNavigateHome={() => navigateTo('home')} />
+          <React.Suspense fallback={<div className="p-12 text-center"><div className="w-8 h-8 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin mx-auto"></div></div>}>
+            <AboutView onNavigateHome={() => navigateTo('home')} />
+          </React.Suspense>
         ) : activeTab === 'privacy' ? (
-          <PrivacyView onBack={() => navigateTo('home')} />
+          <React.Suspense fallback={<div className="p-12 text-center"><div className="w-8 h-8 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin mx-auto"></div></div>}>
+            <PrivacyView onBack={() => navigateTo('home')} />
+          </React.Suspense>
         ) : activeTab === 'license' ? (
-          <LicenseView onBack={() => navigateTo('home')} />
+          <React.Suspense fallback={<div className="p-12 text-center"><div className="w-8 h-8 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin mx-auto"></div></div>}>
+            <LicenseView onBack={() => navigateTo('home')} />
+          </React.Suspense>
         ) : displayedProfile ? (
           <ProfileView
             profile={displayedProfile}

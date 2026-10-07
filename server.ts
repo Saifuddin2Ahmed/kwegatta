@@ -19,17 +19,67 @@ app.disable('x-powered-by');
 
 // Security Headers Middleware
 app.use((_req, res, next) => {
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://accounts.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://apis.google.com https://accounts.google.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://*.firebaseio.com https://*.googleapis.com; frame-src 'self' https://accounts.google.com https://*.firebaseapp.com; object-src 'none'; base-uri 'self';"
+  );
   next();
 });
 
 app.use(express.json({ limit: '50mb' }));
 
+interface AuthUserData {
+  uid: string;
+  email?: string;
+  name?: string;
+}
+
+// Global Auth middleware: verifies Firebase ID tokens on every request via firebase-admin
+app.use(async (req: Request, _res: Response, next: () => void) => {
+  const authHeader = req.headers['authorization'] || '';
+  let token = '';
+  if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+    token = authHeader.slice(7).trim();
+  } else if (req.headers['x-auth-token']) {
+    token = String(req.headers['x-auth-token']).trim();
+  } else if (req.headers['x-firebase-token']) {
+    token = String(req.headers['x-firebase-token']).trim();
+  }
+
+  if (token && adminAuth) {
+    try {
+      const decoded = await adminAuth.verifyIdToken(token);
+      if (decoded && decoded.uid) {
+        (req as any).authUserId = decoded.uid;
+        (req as any).authUser = {
+          uid: decoded.uid,
+          email: decoded.email,
+          name: decoded.name
+        } as AuthUserData;
+      }
+    } catch (err: any) {
+      // Token expired, malformed, or dev domain
+    }
+  }
+
+  next();
+});
+
+function resolveAuthUserId(req: Request): string | null {
+  return (req as any).authUserId || null;
+}
+
 /* =========================================================================
-   RATE LIMITING MIDDLEWARE (Sliding window per IP)
+   RATE LIMITING MIDDLEWARE
+   - Signed-in accounts: 240 req/min each
+   - Visitors (anonymous): 1200 req/min per IP (high limit for shared networks)
+   - Gemma models: 25 req/min per IP
    ========================================================================= */
 interface RateLimitOptions {
   windowMs: number;
@@ -73,12 +123,56 @@ function createRateLimiter(options: RateLimitOptions) {
   };
 }
 
-// Global API rate limit: 180 requests per minute per IP
-const globalApiLimiter = createRateLimiter({
-  windowMs: 60000,
-  max: 180,
-  message: 'API rate limit exceeded. Please try again shortly.'
-});
+function createSmartApiRateLimiter() {
+  const hits = new Map<string, { count: number; resetTime: number }>();
+
+  // Cleanup stale records every 3 minutes
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, val] of hits.entries()) {
+      if (val.resetTime <= now) hits.delete(key);
+    }
+  }, 180000);
+
+  return (req: Request, res: Response, next: () => void) => {
+    const authUserId = resolveAuthUserId(req);
+    const now = Date.now();
+    let key: string;
+    let limit: number;
+
+    if (authUserId) {
+      key = `user:${authUserId}`;
+      limit = 240; // 240 requests per minute per signed-in account
+    } else {
+      const forwarded = req.headers['x-forwarded-for'];
+      const ip = (typeof forwarded === 'string' ? forwarded.split(',')[0] : '') || req.ip || req.socket.remoteAddress || 'unknown';
+      key = `ip:${String(ip).trim()}`;
+      limit = 1200; // 1200 requests per minute for visitors on shared event/university networks
+    }
+
+    const record = hits.get(key);
+    if (!record || record.resetTime <= now) {
+      hits.set(key, { count: 1, resetTime: now + 60000 });
+      return next();
+    }
+
+    record.count++;
+    if (record.count > limit) {
+      const retryAfterSec = Math.ceil((record.resetTime - now) / 1000);
+      res.setHeader('Retry-After', retryAfterSec);
+      return res.status(429).json({
+        error: authUserId
+          ? 'Account rate limit exceeded (240 req/min). Please slow down and try again.'
+          : 'Network rate limit exceeded (1200 req/min). Please slow down and try again.'
+      });
+    }
+
+    next();
+  };
+}
+
+// Global API rate limit: smart 240/min per account or 1200/min per IP
+const globalApiLimiter = createSmartApiRateLimiter();
 app.use('/api/', globalApiLimiter);
 
 // Gemma model rate limit: 25 calls per minute per IP
@@ -374,48 +468,6 @@ function issueAdminToken(): string {
   return token;
 }
 
-interface AuthUserData {
-  uid: string;
-  email?: string;
-  name?: string;
-}
-
-// Global Auth middleware: verifies Firebase ID tokens on every write/request via firebase-admin
-app.use(async (req: Request, _res: Response, next: () => void) => {
-  const authHeader = req.headers['authorization'] || '';
-  let token = '';
-  if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
-    token = authHeader.slice(7).trim();
-  } else if (req.headers['x-auth-token']) {
-    token = String(req.headers['x-auth-token']).trim();
-  } else if (req.headers['x-firebase-token']) {
-    token = String(req.headers['x-firebase-token']).trim();
-  }
-
-  if (token && adminAuth) {
-    try {
-      const decoded = await adminAuth.verifyIdToken(token);
-      if (decoded && decoded.uid) {
-        (req as any).authUserId = decoded.uid;
-        (req as any).authUser = {
-          uid: decoded.uid,
-          email: decoded.email,
-          name: decoded.name
-        } as AuthUserData;
-      }
-    } catch (err: any) {
-      // Token expired, malformed, or dev domain
-      // console.warn('[Firebase Admin] verifyIdToken note:', err?.message || err);
-    }
-  }
-
-  next();
-});
-
-function resolveAuthUserId(req: Request): string | null {
-  return (req as any).authUserId || null;
-}
-
 function checkAdmin(req: Request): boolean {
   const token = (req.headers['x-admin-token'] as string) || (req.query.token as string);
   if (!token || !activeAdminTokens.has(token)) return false;
@@ -474,7 +526,7 @@ function sanitizeArray(arr: any, maxItems = 15, maxItemLength = 50): string[] {
  * Never return email, account_uid or auth secrets in public or member-facing responses.
  * A member's email is visible ONLY to that member and platform admins.
  */
-function sanitizePublicProfile(p: any, callerAuthUid: string | null, isAdmin: boolean): any {
+export function sanitizePublicProfile(p: any, callerAuthUid: string | null, isAdmin: boolean = false): any {
   if (!p) return null;
   const isSelf = Boolean(callerAuthUid && (p.account_uid === callerAuthUid || p.id === callerAuthUid));
   const canSeeEmail = isSelf || isAdmin;
@@ -488,6 +540,7 @@ function sanitizePublicProfile(p: any, callerAuthUid: string | null, isAdmin: bo
     ...(canSeeEmail && email ? { email } : {}),
     ...(canSeeEmail && account_uid ? { account_uid } : {}),
     ...(isSelf && blocked_ids ? { blocked_ids } : {}),
+    avatar: p.avatar && p.avatar.startsWith('data:') ? `/api/avatar/${p.id}` : (p.avatar || ''),
     whatsapp: canSeeWhatsApp ? (p.whatsapp || '') : '',
     has_whatsapp: Boolean(p.whatsapp && String(p.whatsapp).trim().length > 0),
     hide_whatsapp: Boolean(p.hide_whatsapp)
@@ -1593,37 +1646,77 @@ app.post('/api/matches/pair-cache', (req: Request, res: Response) => {
 });
 
 /* =========================================================================
-   ADMIN ENDPOINTS
+   ADMIN ENDPOINTS & 15-MINUTE LOCKOUT SECURITY
    ========================================================================= */
-app.post('/api/admin/login', adminLoginLimiter, async (req: Request, res: Response) => {
-  const { code } = req.body || {};
-  const expectedCode = process.env.ADMIN_CODE;
-  if (!expectedCode || !expectedCode.trim()) {
-    return res.status(503).json({ error: 'Admin access is not configured' });
-  }
-  
-  const inputStr = String(code || '').trim();
-  const expectedStr = expectedCode.trim();
+interface AdminLockoutInfo {
+  failedAttempts: number;
+  lockedUntil: number;
+}
+const adminLockoutMap = new Map<string, AdminLockoutInfo>();
 
-  // Timing-safe comparison to prevent timing side-channel attacks
+app.post('/api/admin/login', async (req: Request, res: Response) => {
+  const forwarded = req.headers['x-forwarded-for'];
+  const clientIp = (typeof forwarded === 'string' ? forwarded.split(',')[0] : '') || req.ip || req.socket.remoteAddress || 'unknown';
+  const ipKey = String(clientIp).trim();
+  const now = Date.now();
+
+  const lockout = adminLockoutMap.get(ipKey) || { failedAttempts: 0, lockedUntil: 0 };
+
+  // If currently locked out for 15 minutes
+  if (lockout.lockedUntil > now) {
+    const auditEntry = {
+      id: 'audit-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
+      timestamp: new Date().toISOString(),
+      action: 'ADMIN_LOGIN_LOCKED',
+      details: `Admin login rejected: locked out due to repeated failed attempts from IP ${clientIp}.`,
+      admin: 'admin'
+    };
+    store.audit_log.unshift(auditEntry);
+    await persistDoc('audit_log', auditEntry.id, auditEntry);
+    return res.status(401).json({ error: 'Wrong username or password' });
+  }
+
+  const { username, password, code, passcode } = req.body || {};
+  const inputUsername = String(username || '').trim();
+  const inputPassword = String(password || code || passcode || '').trim();
+  const expectedCode = (process.env.ADMIN_CODE || '').trim();
+
   let isMatch = false;
-  if (inputStr.length === expectedStr.length && inputStr.length > 0) {
-    const inputBuf = Buffer.from(inputStr);
-    const expectedBuf = Buffer.from(expectedStr);
+  if (inputUsername === 'admin' && expectedCode.length > 0 && inputPassword.length === expectedCode.length) {
+    const inputBuf = Buffer.from(inputPassword);
+    const expectedBuf = Buffer.from(expectedCode);
     isMatch = crypto.timingSafeEqual(inputBuf, expectedBuf);
   }
 
   if (!isMatch) {
-    return res.status(401).json({ error: 'Invalid admin passcode' });
+    lockout.failedAttempts += 1;
+    if (lockout.failedAttempts >= 5) {
+      lockout.lockedUntil = now + 15 * 60 * 1000; // 15-minute lockout
+    }
+    adminLockoutMap.set(ipKey, lockout);
+
+    const auditEntry = {
+      id: 'audit-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
+      timestamp: new Date().toISOString(),
+      action: 'ADMIN_LOGIN_FAILED',
+      details: `Failed admin login attempt (${lockout.failedAttempts}/5) from IP ${clientIp}.${lockout.failedAttempts >= 5 ? ' Account locked for 15 minutes.' : ''}`,
+      admin: inputUsername || 'unknown'
+    };
+    store.audit_log.unshift(auditEntry);
+    await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+    return res.status(401).json({ error: 'Wrong username or password' });
   }
 
-  const token = issueAdminToken();
+  // Successful login - clear lockout state
+  adminLockoutMap.delete(ipKey);
 
+  const token = issueAdminToken();
   const auditEntry = {
-    id: 'audit-' + Date.now(),
+    id: 'audit-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
     timestamp: new Date().toISOString(),
-    action: 'ADMIN_LOGIN',
-    details: 'Admin logged in successfully.',
+    action: 'ADMIN_LOGIN_SUCCESS',
+    details: `Admin logged in successfully from IP ${clientIp}.`,
     admin: 'admin'
   };
   store.audit_log.unshift(auditEntry);
@@ -2167,7 +2260,130 @@ app.get('/api/config', (_req: Request, res: Response) => {
     hasServerApiKey: Boolean(process.env.GEMINI_API_KEY),
     isDemoMode,
     storage: storageMode,
-    appUrl: process.env.APP_URL || ''
+    appUrl: process.env.PUBLIC_APP_URL || process.env.APP_URL || 'https://kwegatta.ai.studio'
+  });
+});
+
+// System Healthz Endpoint
+app.get('/healthz', (_req: Request, res: Response) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: Math.floor(process.uptime()),
+    storage: {
+      mode: storageMode,
+      firestore: storageMode === 'firestore' && Boolean(firestoreDb),
+      profiles_count: store.profiles?.length || 0,
+      posts_count: store.posts?.length || 0,
+      matches_count: store.matches?.length || 0,
+      audit_log_count: store.audit_log?.length || 0
+    },
+    model: {
+      provider: 'gemma',
+      default_model: DEFAULT_OPEN_WEIGHT_MODEL,
+      allowed_models: ALLOWED_OPEN_WEIGHT_MODELS,
+      guard_active: true
+    }
+  });
+});
+
+// Avatar Photo Endpoint with Cache-Control and ETag
+app.get('/api/avatar/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const profile = store.profiles.find((p: any) => p.id === id);
+
+  if (!profile || !profile.avatar) {
+    const name = profile?.name || '?';
+    const initial = name.charAt(0).toUpperCase();
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><rect width="128" height="128" rx="64" fill="#1e293b"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" fill="#F0F3F6" font-family="sans-serif" font-size="52" font-weight="bold">${initial}</text></svg>`;
+    const etag = `W/"svg-${id}-${initial}"`;
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+    res.setHeader('Content-Type', 'image/svg+xml');
+    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+    res.setHeader('ETag', etag);
+    return res.send(svg);
+  }
+
+  const avatar = String(profile.avatar);
+  if (avatar.startsWith('data:')) {
+    const match = avatar.match(/^data:([^;]+);base64,(.+)$/);
+    if (match) {
+      const mimeType = match[1];
+      const buffer = Buffer.from(match[2], 'base64');
+      const hash = crypto.createHash('md5').update(buffer).digest('hex');
+      const etag = `"${hash}"`;
+
+      if (req.headers['if-none-match'] === etag) {
+        return res.status(304).end();
+      }
+
+      res.setHeader('Content-Type', mimeType);
+      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+      res.setHeader('ETag', etag);
+      return res.send(buffer);
+    }
+  } else if (avatar.startsWith('http')) {
+    return res.redirect(avatar);
+  }
+
+  return res.status(404).send('Avatar not found');
+});
+
+// Polling Delta Sync Endpoint
+app.get('/api/sync', (req: Request, res: Response) => {
+  const callerId = resolveAuthUserId(req);
+  const isAdmin = checkAdmin(req);
+  const sinceQuery = req.query.since as string;
+  const sinceTime = sinceQuery ? new Date(sinceQuery).getTime() : 0;
+
+  // Filter profiles
+  let activeProfiles = store.profiles.filter(p => !p.hidden);
+  if (!isAdmin) {
+    activeProfiles = activeProfiles.filter(p => Boolean(p.account_uid));
+  }
+  if (callerId) {
+    const callerProfile = store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId);
+    const callerBlockedSet = new Set(callerProfile?.blocked_ids || []);
+    activeProfiles = activeProfiles.filter(p => {
+      if (p.id === callerId || p.account_uid === callerId) return true;
+      if (callerBlockedSet.has(p.id)) return false;
+      if (Array.isArray(p.blocked_ids) && (p.blocked_ids.includes(callerId) || (callerProfile && p.blocked_ids.includes(callerProfile.id)))) return false;
+      return true;
+    });
+  }
+
+  const changedProfiles = sinceTime > 0
+    ? activeProfiles.filter(p => {
+        const created = new Date(p.created_at || 0).getTime();
+        const updated = new Date(p.updated_at || p.created_at || 0).getTime();
+        return updated > sinceTime || created > sinceTime;
+      })
+    : activeProfiles;
+
+  const safeProfiles = changedProfiles.map(p => sanitizePublicProfile(p, callerId, isAdmin));
+
+  // Filter posts
+  const posts = store.posts || [];
+  const changedPosts = sinceTime > 0
+    ? posts.filter(p => new Date(p.created_at || 0).getTime() > sinceTime)
+    : posts.slice(0, 100);
+
+  // Filter notifications (if caller is signed in)
+  const notifs = callerId
+    ? (store.notifications || []).filter(n => n.to_id === callerId && (sinceTime === 0 || new Date(n.created_at || 0).getTime() > sinceTime))
+    : [];
+
+  return res.json({
+    timestamp: new Date().toISOString(),
+    profiles: safeProfiles,
+    posts: changedPosts,
+    notifications: notifs,
+    counts: {
+      members: activeProfiles.length,
+      posts: posts.length
+    }
   });
 });
 
@@ -2796,7 +3012,9 @@ async function setupVite() {
   });
 }
 
-setupVite().catch(err => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
-});
+if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
+  setupVite().catch(err => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  });
+}

@@ -189,7 +189,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({
       const qrX = width - qrSize - 64;
       const qrY = height - qrSize - 64;
 
-      const profileUrl = `${window.location.origin}${window.location.pathname}#/u/${profile.id}`;
+      const profileUrl = `https://kwegatta.ai.studio/#/u/${profile.id}`;
       const qrData = await generateQrCodeDataUrl(profileUrl, 240);
 
       const qrImg = new Image();
@@ -241,7 +241,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({
   };
 
   const handleShare = async () => {
-    const profileUrl = `${window.location.origin}${window.location.pathname}#/u/${profile.id}`;
+    const profileUrl = `https://kwegatta.ai.studio/#/u/${profile.id}`;
     if (navigator.share) {
       try {
         await navigator.share({

@@ -69,7 +69,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
   onRefreshGlobalData,
   onToast
 }) => {
-  const [passcode, setPasscode] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [adminToken, setAdminToken] = useState<string | null>(() => sessionStorage.getItem('kw_admin_token'));
   const [isVerifying, setIsVerifying] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -107,19 +108,19 @@ export const AdminView: React.FC<AdminViewProps> = ({
       const res = await fetch('/api/admin/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: passcode })
+        body: JSON.stringify({ username, password })
       });
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Invalid admin passcode');
+        throw new Error(data.error || 'Wrong username or password');
       }
 
       setAdminToken(data.token);
       sessionStorage.setItem('kw_admin_token', data.token);
-      onToast('Admin verified successfully');
+      onToast('Signed in successfully');
     } catch (err: any) {
-      setErrorMsg(err.message || 'Authentication failed');
+      setErrorMsg(err.message || 'Wrong username or password');
     } finally {
       setIsVerifying(false);
     }
@@ -288,16 +289,6 @@ export const AdminView: React.FC<AdminViewProps> = ({
   if (!adminToken) {
     return (
       <div className="max-w-md mx-auto my-12 p-6 sm:p-8 kw-card space-y-6">
-        <div className="text-center space-y-2">
-          <div className="w-12 h-12 rounded-full bg-[var(--gold-subtle)] text-[var(--gold)] mx-auto grid place-items-center">
-            <Lock className="w-6 h-6" />
-          </div>
-          <h2 className="text-xl font-bold font-display">Organiser & Admin Access</h2>
-          <p className="text-xs text-[var(--fg-muted)]">
-            Enter the secure admin passcode configured on the server environment.
-          </p>
-        </div>
-
         {errorMsg && (
           <div className="p-3 rounded-lg bg-[var(--danger-subtle)] border border-[var(--danger)] text-xs text-[var(--danger)] flex items-center gap-2">
             <AlertCircle className="w-4 h-4 flex-shrink-0" />
@@ -307,35 +298,35 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-[var(--fg-muted)] block">Admin Passcode</label>
+            <label className="text-xs font-semibold text-[var(--fg-muted)] block">Username</label>
             <input
-              type="password"
-              value={passcode}
-              onChange={e => setPasscode(e.target.value)}
-              placeholder="Passcode"
+              type="text"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
               required
               autoFocus
-              className="kw-input font-mono"
+              className="kw-input"
             />
           </div>
 
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onBack}
-              className="kw-btn flex-1"
-            >
-              Back
-            </button>
-            <button
-              type="submit"
-              disabled={isVerifying || !passcode}
-              className="kw-btn kw-btn-gold flex-1"
-            >
-              <ShieldCheck className="w-4 h-4" />
-              <span>{isVerifying ? 'Verifying...' : 'Unlock Admin'}</span>
-            </button>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-[var(--fg-muted)] block">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+              className="kw-input"
+            />
           </div>
+
+          <button
+            type="submit"
+            disabled={isVerifying || !username || !password}
+            className="kw-btn kw-btn-primary w-full"
+          >
+            <span>{isVerifying ? 'Signing in...' : 'Sign in'}</span>
+          </button>
         </form>
       </div>
     );

@@ -48,9 +48,10 @@ import {
 import { generateQrCodeDataUrl, formatWhatsAppUrl, resizeImageFile } from '../utils';
 import { Avatar } from './Avatar';
 import { SocialLinksRow } from './SocialLinksRow';
-import { ShareCardModal } from './ShareCardModal';
 import { auth, addPasswordToAccount, validatePasswordStrength, formatAuthError } from '../services/firebase';
 import { EmailAuthProvider, linkWithCredential } from 'firebase/auth';
+
+const ShareCardModal = React.lazy(() => import('./ShareCardModal').then(m => ({ default: m.ShareCardModal })));
 
 interface ProfileViewProps {
   profile: Profile;
@@ -146,7 +147,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const userEmail = currentUser?.email || profile.email || 'your account';
 
   useEffect(() => {
-    const profileUrl = `${window.location.origin}${window.location.pathname}#/u/${profile.id}`;
+    const profileUrl = `https://kwegatta.ai.studio/#/u/${profile.id}`;
     generateQrCodeDataUrl(profileUrl, 240).then(setQrCodeDataUrl);
   }, [profile.id]);
 
@@ -349,7 +350,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   };
 
   const handleShareLink = () => {
-    const url = `${window.location.origin}${window.location.pathname}#/u/${profile.id}`;
+    const url = `https://kwegatta.ai.studio/#/u/${profile.id}`;
     if (navigator.clipboard) {
       navigator.clipboard.writeText(url);
       onToast('Profile link copied to clipboard');
@@ -447,12 +448,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in">
       {/* Modal for 1200 x 630 Share Card */}
       {showShareCardModal && (
-        <ShareCardModal
-          profile={profile}
-          isOpen={showShareCardModal}
-          onClose={() => setShowShareCardModal(false)}
-          onToast={onToast}
-        />
+        <React.Suspense fallback={null}>
+          <ShareCardModal
+            profile={profile}
+            isOpen={showShareCardModal}
+            onClose={() => setShowShareCardModal(false)}
+            onToast={onToast}
+          />
+        </React.Suspense>
       )}
 
       {/* Modal for Fullscreen QR Code */}

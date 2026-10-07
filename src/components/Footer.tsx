@@ -169,14 +169,6 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate, onJoin }) => {
                   <ExternalLink className="w-2.5 h-2.5 opacity-60" />
                 </a>
               </li>
-              <li>
-                <button
-                  onClick={() => navigateToSection('admin')}
-                  className="hover:text-[var(--fg)] hover:underline transition-colors cursor-pointer text-[var(--fg-subtle)] hover:text-[var(--fg)]"
-                >
-                  Organiser Dashboard
-                </button>
-              </li>
             </ul>
           </div>
 

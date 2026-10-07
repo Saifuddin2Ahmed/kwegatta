@@ -1,4 +1,3 @@
-import QRCode from 'qrcode';
 import { Profile } from './types';
 
 export function getInitials(name: string): string {
@@ -52,6 +51,7 @@ export function formatTimeAgo(isoString: string): string {
 
 export async function generateQrCodeDataUrl(text: string, width = 160): Promise<string> {
   try {
+    const QRCode = (await import('qrcode')).default;
     return await QRCode.toDataURL(text, {
       width,
       margin: 1,
