@@ -6,7 +6,10 @@ import {
   DEFAULT_OPEN_WEIGHT_MODEL,
   getAdminEmailsList,
   ALLOWED_GEMMA_TASKS,
-  buildGemmaPrompt
+  buildGemmaPrompt,
+  canApproveEvent,
+  canEditEvent,
+  filterEventsForCaller
 } from '../server';
 import { validatePasswordStrength } from '../src/services/firebase';
 
@@ -143,3 +146,85 @@ describe('Password Validation', () => {
     expect(validatePasswordStrength('C0llab0rat10nSecure!')).toBeNull();
   });
 });
+
+describe('Member-Submitted Events & Approval Permissions', () => {
+  it('a member cannot approve (only admins can approve)', () => {
+    // Normal member (isAdmin: false) cannot approve
+    expect(canApproveEvent(false)).toBe(false);
+
+    // Admin (isAdmin: true) can approve
+    expect(canApproveEvent(true)).toBe(true);
+  });
+
+  it("a member cannot edit someone else's item", () => {
+    const aliceId = 'member-alice-123';
+    const bobId = 'member-bob-456';
+    const bobsEventAuthorId = bobId;
+
+    // Alice attempts to edit Bob's event as a member -> denied
+    expect(canEditEvent(aliceId, bobsEventAuthorId, false)).toBe(false);
+
+    // Alice can edit her own event -> allowed
+    expect(canEditEvent(aliceId, aliceId, false)).toBe(true);
+
+    // Unauthenticated caller cannot edit Bob's event -> denied
+    expect(canEditEvent(null, bobsEventAuthorId, false)).toBe(false);
+
+    // Admin can edit any item -> allowed
+    expect(canEditEvent(aliceId, bobsEventAuthorId, true)).toBe(true);
+  });
+
+  it('a pending item is not returned to other members', () => {
+    const aliceId = 'member-alice-123';
+    const bobId = 'member-bob-456';
+
+    const events = [
+      {
+        id: 'event-pub-1',
+        title: 'Kampala Open Source Meetup',
+        author_id: 'admin',
+        status: 'published',
+        published: true
+      },
+      {
+        id: 'event-alice-pending',
+        title: 'Alice AI Hackathon',
+        author_id: aliceId,
+        status: 'pending',
+        published: false
+      },
+      {
+        id: 'event-bob-pending',
+        title: 'Bob Robotics Workshop',
+        author_id: bobId,
+        status: 'pending',
+        published: false
+      }
+    ];
+
+    // For Bob (a regular member who is not Alice):
+    // Bob should see the published event and his OWN pending event,
+    // but Alice's pending event MUST NOT be returned to Bob.
+    const bobsVisible = filterEventsForCaller(events, bobId, false);
+    const bobsVisibleIds = bobsVisible.map(e => e.id);
+    expect(bobsVisibleIds).toContain('event-pub-1');
+    expect(bobsVisibleIds).toContain('event-bob-pending');
+    expect(bobsVisibleIds).not.toContain('event-alice-pending');
+
+    // For an unauthenticated visitor:
+    // Only published events are returned; NO pending items returned.
+    const guestVisible = filterEventsForCaller(events, null, false);
+    const guestVisibleIds = guestVisible.map(e => e.id);
+    expect(guestVisibleIds).toEqual(['event-pub-1']);
+
+    // For an admin:
+    // All items including all members' pending items are returned.
+    const adminVisible = filterEventsForCaller(events, 'admin-id', true);
+    expect(adminVisible.map(e => e.id)).toEqual([
+      'event-pub-1',
+      'event-alice-pending',
+      'event-bob-pending'
+    ]);
+  });
+});
+

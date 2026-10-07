@@ -33,6 +33,7 @@ import {
   UserCheck,
   Mail,
   Megaphone,
+  Clock,
   X
 } from 'lucide-react';
 import { Profile, Post, EventOpportunityItem } from '../types';
@@ -52,6 +53,9 @@ import {
   createEvent,
   updateEvent,
   deleteEvent,
+  approveEvent,
+  rejectEvent,
+  toggleOrganiserRole,
   pinAnnouncement,
   unpinAnnouncement,
   fetchPinnedAnnouncement,
@@ -158,6 +162,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [oppLink, setOppLink] = useState('');
   const [eventPublished, setEventPublished] = useState(true);
   const [viewingAttendeesEvent, setViewingAttendeesEvent] = useState<any | null>(null);
+
+  // Review & Approval State
+  const [rejectingEvent, setRejectingEvent] = useState<any | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [isApprovingOnSave, setIsApprovingOnSave] = useState(false);
 
   // Pinned Announcement state
   const [pinnedAnnouncement, setPinnedAnnouncement] = useState<any | null>(null);
@@ -382,8 +391,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
       }
 
       if (editingEventId) {
-        await updateEvent(editingEventId, itemPayload);
-        onToast('Item updated successfully');
+        if (isApprovingOnSave) {
+          await approveEvent(editingEventId, itemPayload);
+          onToast('Item edited and approved! Author and members notified.');
+        } else {
+          await updateEvent(editingEventId, itemPayload);
+          onToast('Item updated successfully');
+        }
       } else {
         await createEvent(itemPayload);
         onToast(eventPublished ? 'Item published! Members notified.' : 'Draft saved.');
@@ -400,6 +414,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const resetEventForm = () => {
     setIsCreatingEvent(false);
     setEditingEventId(null);
+    setIsApprovingOnSave(false);
     setEventKind('event');
     setEventTitle('');
     setEventDesc('');
@@ -415,6 +430,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   const handleEditEventClick = (item: any) => {
     setEditingEventId(item.id);
+    setIsApprovingOnSave(false);
     setEventKind(item.kind);
     setEventTitle(item.title || '');
     setEventDesc(item.description || '');
@@ -430,6 +446,54 @@ export const AdminView: React.FC<AdminViewProps> = ({
       setOppLink(item.link || '');
     }
     setIsCreatingEvent(true);
+  };
+
+  const handleApproveEvent = async (item: any) => {
+    try {
+      await approveEvent(item.id);
+      onToast(`Approved "${item.title}". Author and members notified!`);
+      fetchAdminData();
+      onRefreshGlobalData();
+    } catch (err: any) {
+      onToast('Failed to approve: ' + err.message);
+    }
+  };
+
+  const handleEditAndApproveClick = (item: any) => {
+    handleEditEventClick(item);
+    setIsApprovingOnSave(true);
+    setEventPublished(true);
+  };
+
+  const handleOpenRejectModal = (item: any) => {
+    setRejectingEvent(item);
+    setRejectReason('Does not align with community guidelines');
+  };
+
+  const handleConfirmReject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rejectingEvent) return;
+    try {
+      await rejectEvent(rejectingEvent.id, rejectReason.trim() || 'Does not align with community guidelines');
+      onToast(`Rejected "${rejectingEvent.title}". Author notified.`);
+      setRejectingEvent(null);
+      setRejectReason('');
+      fetchAdminData();
+      onRefreshGlobalData();
+    } catch (err: any) {
+      onToast('Failed to reject: ' + err.message);
+    }
+  };
+
+  const handleToggleOrganiser = async (memberId: string, currentStatus?: boolean) => {
+    try {
+      const nextStatus = !currentStatus;
+      await toggleOrganiserRole(memberId, nextStatus);
+      onToast(nextStatus ? 'Granted Organiser label' : 'Removed Organiser label');
+      onRefreshGlobalData();
+    } catch (err: any) {
+      onToast('Failed to update organiser status: ' + err.message);
+    }
   };
 
   const handleTogglePublish = async (item: any) => {
@@ -792,27 +856,119 @@ export const AdminView: React.FC<AdminViewProps> = ({
       </div>
 
       {/* TAB: EVENTS & OPPORTUNITIES */}
-      {activeTab === 'events' && (
-        <div className="space-y-6">
-          {/* Top Action Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 p-4 kw-card">
-            <div>
-              <h3 className="font-bold font-display text-sm text-[var(--fg)]">Events & Opportunities Manager</h3>
-              <p className="text-xs text-[var(--fg-muted)]">
-                Create items, track RSVP attendees, and pin global announcements.
-              </p>
+      {activeTab === 'events' && (() => {
+        const pendingEvents = (adminEvents || []).filter((e: any) => e.status === 'pending');
+        return (
+          <div className="space-y-6">
+            {/* 1. Awaiting Approval List at top of Events Tab with Counter Badge */}
+            <div className="kw-card overflow-hidden border-amber-500/40">
+              <div className="p-4 border-b border-[var(--card-border)] bg-amber-500/10 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-amber-400" />
+                  <h4 className="font-bold text-sm text-[var(--fg)]">Awaiting approval</h4>
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/25 text-amber-300 border border-amber-500/40">
+                    {pendingEvents.length}
+                  </span>
+                </div>
+                <span className="text-xs text-[var(--fg-muted)]">
+                  {pendingEvents.length === 1 ? '1 submission awaiting review' : `${pendingEvents.length} submissions awaiting review`}
+                </span>
+              </div>
+
+              {pendingEvents.length === 0 ? (
+                <div className="p-6 text-center text-xs text-[var(--fg-muted)] flex items-center justify-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  <span>No pending submissions awaiting approval. All caught up!</span>
+                </div>
+              ) : (
+                <div className="divide-y divide-[var(--card-border)]">
+                  {pendingEvents.map(item => (
+                    <div key={item.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-[var(--bg-subtle)]">
+                      <div className="space-y-1.5 min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              item.kind === 'event'
+                                ? 'bg-amber-500/15 text-[var(--gold)]'
+                                : 'bg-emerald-500/15 text-emerald-400'
+                            }`}
+                          >
+                            {item.kind === 'event' ? 'Event' : item.opportunity_type || 'Opportunity'}
+                          </span>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                            Pending Approval
+                          </span>
+                          <span className="text-[11px] text-[var(--fg-muted)]">
+                            {item.datetime || `Deadline: ${item.deadline}`}
+                          </span>
+                        </div>
+                        <h4 className="text-sm font-bold text-[var(--fg)]">{item.title}</h4>
+                        <p className="text-xs text-[var(--fg-muted)] line-clamp-2">{item.description}</p>
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--fg-muted)]">
+                          <span>
+                            Submitted by <strong className="text-[var(--gold)]">{item.author_name || item.author_id}</strong>
+                            {item.author_is_organiser && (
+                              <span className="ml-1 px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                                Organiser
+                              </span>
+                            )}
+                          </span>
+                          {item.location && <span>• 📍 {item.location}</span>}
+                          {item.link && <span>• 🔗 {item.link}</span>}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+                        <button
+                          onClick={() => handleApproveEvent(item)}
+                          className="kw-btn kw-btn-gold text-xs py-1.5 px-3 font-bold flex items-center gap-1.5"
+                          title="Approve immediately"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Approve</span>
+                        </button>
+                        <button
+                          onClick={() => handleEditAndApproveClick(item)}
+                          className="kw-btn text-xs py-1.5 px-3 font-medium flex items-center gap-1.5"
+                          title="Edit details and approve"
+                        >
+                          <Settings className="w-3.5 h-3.5 text-[var(--gold)]" />
+                          <span>Edit & approve</span>
+                        </button>
+                        <button
+                          onClick={() => handleOpenRejectModal(item)}
+                          className="kw-btn kw-btn-danger text-xs py-1.5 px-3 font-medium flex items-center gap-1.5"
+                          title="Reject with short reason"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>Reject</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <button
-              onClick={() => {
-                if (isCreatingEvent) resetEventForm();
-                else setIsCreatingEvent(true);
-              }}
-              className="kw-btn kw-btn-gold text-xs py-2 px-4 flex items-center gap-1.5 font-bold"
-            >
-              {isCreatingEvent ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-              <span>{isCreatingEvent ? 'Cancel Form' : 'Create New Item'}</span>
-            </button>
-          </div>
+
+            {/* Top Action Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 kw-card">
+              <div>
+                <h3 className="font-bold font-display text-sm text-[var(--fg)]">Events & Opportunities Manager</h3>
+                <p className="text-xs text-[var(--fg-muted)]">
+                  Create items, track RSVP attendees, and pin global announcements.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  if (isCreatingEvent) resetEventForm();
+                  else setIsCreatingEvent(true);
+                }}
+                className="kw-btn kw-btn-gold text-xs py-2 px-4 flex items-center gap-1.5 font-bold"
+              >
+                {isCreatingEvent ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                <span>{isCreatingEvent ? 'Cancel Form' : 'Create New Item'}</span>
+              </button>
+            </div>
 
           {/* Form: Create or Edit Event/Opportunity */}
           {isCreatingEvent && (
@@ -1209,8 +1365,69 @@ export const AdminView: React.FC<AdminViewProps> = ({
               </button>
             </form>
           </div>
+
+          {/* Modal: Reject Submission with short reason */}
+          {rejectingEvent && (
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4">
+              <div className="kw-card max-w-md w-full p-6 space-y-4 border-rose-500/40 animate-in fade-in zoom-in-95 duration-150">
+                <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+                  <div>
+                    <h4 className="font-bold text-sm text-[var(--fg)]">Reject Submission</h4>
+                    <p className="text-xs text-[var(--fg-muted)]">
+                      Notify author why "{rejectingEvent.title}" is not approved
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setRejectingEvent(null);
+                      setRejectReason('');
+                    }}
+                    className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)]"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleConfirmReject} className="space-y-4 text-xs">
+                  <div>
+                    <label className="font-semibold text-[var(--fg)] block mb-1">Reason for Rejection *</label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={300}
+                      value={rejectReason}
+                      onChange={e => setRejectReason(e.target.value)}
+                      placeholder="e.g. Does not align with guidelines, missing venue details, etc."
+                      className="kw-input text-xs"
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-[var(--card-border)]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRejectingEvent(null);
+                        setRejectReason('');
+                      }}
+                      className="kw-btn py-1.5 px-3 text-xs"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="kw-btn kw-btn-danger py-1.5 px-3.5 text-xs font-bold"
+                    >
+                      Reject Submission
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
-      )}
+        );
+      })()}
 
       {/* TAB: ADMIN ACCOUNTS MANAGEMENT */}
       {activeTab === 'admins' && (
@@ -1396,6 +1613,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         <td className="p-3 whitespace-nowrap">
                           <div className="font-semibold text-[var(--fg)] flex items-center gap-2">
                             <span>{member.name}</span>
+                            {member.is_organiser && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 inline-flex items-center gap-0.5">
+                                <Award className="w-2.5 h-2.5" />
+                                Organiser
+                              </span>
+                            )}
                             {member.suspended && (
                               <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                                 Suspended
@@ -1441,6 +1664,20 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             >
                               {member.hidden ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                               <span>{member.hidden ? 'Unhide' : 'Hide'}</span>
+                            </button>
+
+                            {/* Trusted Organiser Toggle */}
+                            <button
+                              onClick={() => handleToggleOrganiser(member.id, member.is_organiser)}
+                              className={`kw-btn text-[10px] py-1 px-2 ${
+                                member.is_organiser
+                                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                                  : 'text-purple-400 hover:bg-purple-500/10'
+                              }`}
+                              title={member.is_organiser ? 'Revoke trusted Organiser label' : 'Mark as trusted Organiser'}
+                            >
+                              <Award className="w-3 h-3" />
+                              <span>{member.is_organiser ? 'Revoke Organiser' : 'Make Organiser'}</span>
                             </button>
 
                             {/* Suspend member (Beside Delete member) */}

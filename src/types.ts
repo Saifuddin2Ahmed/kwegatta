@@ -68,6 +68,7 @@ export interface Profile {
   blocked_ids?: string[];
   hidden?: boolean;
   suspended?: boolean;
+  is_organiser?: boolean;
   account_uid?: string;
   email?: string;
 }
@@ -149,6 +150,8 @@ export interface Post {
 
 export type OpportunityType = 'Grant' | 'Hackathon' | 'Job' | 'Training' | 'Call for partners';
 
+export type EventStatus = 'pending' | 'published' | 'rejected';
+
 export interface EventOpportunityItem {
   id: string;
   kind: 'event' | 'opportunity';
@@ -166,6 +169,14 @@ export interface EventOpportunityItem {
   // Attendees / RSVPs:
   created_at: string;
   created_by?: string;
+  author_id?: string;
+  author_name?: string;
+  author_is_organiser?: boolean;
+  status?: EventStatus;
+  rejection_reason?: string;
+  approved_by?: string;
+  approved_at?: string;
+  last_update_sent_at?: string;
   published: boolean;
   attendee_ids: string[];
 }

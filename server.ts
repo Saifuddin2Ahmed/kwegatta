@@ -562,6 +562,15 @@ function sanitizeUrl(val: any): string {
   return '';
 }
 
+export function sanitizeHttpsUrl(val: any): string {
+  if (typeof val !== 'string') return '';
+  const trimmed = val.trim();
+  if (/^https:\/\/[^\s]+$/i.test(trimmed)) {
+    return trimmed.slice(0, 500);
+  }
+  return '';
+}
+
 function sanitizeAvatar(val: any): string {
   if (typeof val !== 'string') return '';
   const trimmed = val.trim();
@@ -2968,12 +2977,45 @@ app.post('/api/admin/members/:id/unsuspend', async (req: Request, res: Response)
 });
 
 // Events & Opportunities Endpoints
+export function canApproveEvent(isAdmin: boolean): boolean {
+  return Boolean(isAdmin);
+}
+
+export function canEditEvent(
+  callerId: string | null | undefined,
+  itemAuthorId: string | null | undefined,
+  isAdmin: boolean
+): boolean {
+  if (isAdmin) return true;
+  if (!callerId || !itemAuthorId) return false;
+  return callerId === itemAuthorId;
+}
+
+export function filterEventsForCaller(
+  events: any[],
+  callerId: string | null | undefined,
+  isAdmin: boolean
+): any[] {
+  if (isAdmin) return Array.isArray(events) ? [...events] : [];
+  return (events || []).filter((item: any) => {
+    // Pending or rejected submissions are visible ONLY to their author and admins
+    if (item.status === 'pending' || item.status === 'rejected') {
+      return Boolean(callerId && item.author_id === callerId);
+    }
+    return item.published !== false && item.status !== 'rejected';
+  });
+}
+
 app.get('/api/events', (req: Request, res: Response) => {
   const isAdmin = checkAdmin(req);
+  const callerId = resolveAuthUserId(req);
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
+
   let list = Array.isArray(store.events) ? [...store.events] : [];
 
   if (!isAdmin) {
-    list = list.filter((item: any) => item.published !== false);
+    list = filterEventsForCaller(list, callerProfileId || callerId, false);
   }
 
   // Sort: upcoming first (by datetime or deadline asc), past items at the end
@@ -2997,13 +3039,18 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
   const { id } = req.params;
   const callerId = resolveAuthUserId(req);
   const isAdmin = checkAdmin(req);
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
 
   const item = (store.events || []).find((e: any) => e.id === id);
   if (!item) {
     return res.status(404).json({ error: 'Event or Opportunity not found' });
   }
 
-  if (!isAdmin && item.published === false) {
+  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
+
+  // Pending, unpublished, or rejected items are visible ONLY to their author and admins
+  if (!isAdmin && !isAuthor && (item.published === false || item.status === 'pending' || item.status === 'rejected')) {
     return res.status(404).json({ error: 'Event not found or unpublished' });
   }
 
@@ -3022,7 +3069,6 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
   // Compute "People you should meet there" for signed-in caller
   let peopleToMeet: Array<{ profile: any; reason: string; score: number }> = [];
   if (callerId) {
-    const callerProfile = store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId);
     if (callerProfile) {
       const otherAttendees = store.profiles.filter(
         (p: any) => attendeeIds.includes(p.id) && p.id !== callerProfile.id && !p.hidden && !p.suspended
@@ -3119,8 +3165,14 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
 });
 
 app.post('/api/events', async (req: Request, res: Response) => {
-  const admin = verifyAdmin(req, res);
-  if (!admin) return;
+  const adminInfo = resolveAdminInfo(req);
+  const isAdmin = adminInfo.isAdmin;
+  const callerId = resolveAuthUserId(req);
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+
+  if (!isAdmin && !callerId) {
+    return res.status(401).json({ error: 'Please sign in to suggest an event or opportunity.' });
+  }
 
   const raw = req.body || {};
   const kind = raw.kind === 'opportunity' ? 'opportunity' : 'event';
@@ -3131,6 +3183,50 @@ app.post('/api/events', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Title and description are required.' });
   }
 
+  // Links must be https
+  let registration_link: string | undefined = undefined;
+  if (raw.registration_link) {
+    registration_link = sanitizeHttpsUrl(raw.registration_link);
+    if (!registration_link) {
+      return res.status(400).json({ error: 'Registration link must be a valid https:// URL.' });
+    }
+  }
+
+  let link: string | undefined = undefined;
+  if (raw.link) {
+    link = sanitizeHttpsUrl(raw.link);
+    if (!link) {
+      return res.status(400).json({ error: 'Link must be a valid https:// URL.' });
+    }
+  }
+
+  const authorId = callerProfile?.id || callerId || 'admin';
+  const authorName = isAdmin ? adminInfo.adminName : (callerProfile?.name || 'Member');
+  const isOrganiser = Boolean(callerProfile?.is_organiser);
+
+  // Limits for non-admin: max 3 pending submissions, max 5 a week
+  if (!isAdmin) {
+    const pendingCount = (store.events || []).filter((e: any) =>
+      (e.author_id === authorId || e.author_id === callerId) && e.status === 'pending'
+    ).length;
+    if (pendingCount >= 3) {
+      return res.status(400).json({ error: 'Limit reached: You have 3 pending submissions awaiting approval.' });
+    }
+
+    const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const weekCount = (store.events || []).filter((e: any) =>
+      (e.author_id === authorId || e.author_id === callerId) &&
+      new Date(e.created_at).getTime() > oneWeekAgo
+    ).length;
+    if (weekCount >= 5) {
+      return res.status(400).json({ error: 'Limit reached: Maximum 5 submissions per week.' });
+    }
+  }
+
+  // Organiser or admin items are published at once; others are pending approval
+  const status = (isAdmin || isOrganiser) ? 'published' : 'pending';
+  const published = status === 'published';
+
   const item: any = {
     id: (kind === 'event' ? 'event-' : 'opp-') + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
     kind,
@@ -3139,21 +3235,25 @@ app.post('/api/events', async (req: Request, res: Response) => {
     datetime: raw.datetime ? sanitizeText(raw.datetime, 60) : undefined,
     location: raw.location ? sanitizeText(raw.location, 200) : undefined,
     cover_image: raw.cover_image ? sanitizeAvatar(raw.cover_image) : undefined,
-    registration_link: raw.registration_link ? sanitizeUrl(raw.registration_link) : undefined,
+    registration_link,
     opportunity_type: raw.opportunity_type ? sanitizeText(raw.opportunity_type, 50) : undefined,
     deadline: raw.deadline ? sanitizeText(raw.deadline, 60) : undefined,
-    link: raw.link ? sanitizeUrl(raw.link) : undefined,
-    published: raw.published !== false,
+    link,
+    author_id: authorId,
+    author_name: authorName,
+    author_is_organiser: isOrganiser,
+    status,
+    published,
     attendee_ids: [],
     created_at: new Date().toISOString(),
-    created_by: admin.adminName
+    created_by: authorName
   };
 
   if (!store.events) store.events = [];
   store.events.unshift(item);
   await persistDoc('events', item.id, item);
 
-  // Requirement 4: Publishing an item sends one notification to members
+  // If published (admin or trusted organiser), broadcast notification to members
   if (item.published) {
     const notifBody = kind === 'event'
       ? `📅 New Event: ${item.title}`
@@ -3161,7 +3261,7 @@ app.post('/api/events', async (req: Request, res: Response) => {
 
     const newNotifs: Array<{ id: string; data: any }> = [];
     for (const p of store.profiles) {
-      if (p.hidden || p.suspended) continue;
+      if (p.hidden || p.suspended || p.id === authorId) continue;
       const notif = {
         id: 'notif-ev-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
         to_id: p.id,
@@ -3177,14 +3277,30 @@ app.post('/api/events', async (req: Request, res: Response) => {
     if (newNotifs.length > 0) {
       await batchPersistDocs('notifications', newNotifs);
     }
+  } else {
+    // Notify admins of new pending submission awaiting approval
+    const adminEmails = getAdminEmailsList();
+    for (const p of store.profiles) {
+      if (p.email && adminEmails.includes(p.email.toLowerCase())) {
+        store.notifications.unshift({
+          id: 'notif-pending-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+          to_id: p.id,
+          from_id: 'system',
+          type: 'system',
+          body: `📋 New event submission awaiting approval: "${item.title}" by ${authorName}`,
+          read: false,
+          created_at: new Date().toISOString()
+        });
+      }
+    }
   }
 
   const auditEntry = {
     id: 'audit-' + Date.now(),
     timestamp: new Date().toISOString(),
-    action: 'CREATE_EVENT',
-    details: `Created ${kind}: "${item.title}" (${item.published ? 'Published' : 'Draft'})`,
-    admin: admin.adminName
+    action: isAdmin ? 'CREATE_EVENT' : 'SUBMIT_EVENT',
+    details: `${isAdmin ? 'Created' : 'Submitted'} ${kind}: "${item.title}" (${status})`,
+    admin: isAdmin ? adminInfo.adminName : authorName
   };
   store.audit_log.unshift(auditEntry);
   await persistDoc('audit_log', auditEntry.id, auditEntry);
@@ -3194,8 +3310,11 @@ app.post('/api/events', async (req: Request, res: Response) => {
 });
 
 app.patch('/api/events/:id', async (req: Request, res: Response) => {
-  const admin = verifyAdmin(req, res);
-  if (!admin) return;
+  const adminInfo = resolveAdminInfo(req);
+  const isAdmin = adminInfo.isAdmin;
+  const callerId = resolveAuthUserId(req);
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
 
   const { id } = req.params;
   const item = (store.events || []).find((e: any) => e.id === id);
@@ -3203,19 +3322,55 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Event or Opportunity not found' });
   }
 
+  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
+  if (!canEditEvent(callerProfileId || callerId, item.author_id, isAdmin)) {
+    return res.status(403).json({ error: 'Forbidden: You can only edit your own submissions.' });
+  }
+
   const raw = req.body || {};
   const wasUnpublished = item.published === false;
+
+  const dateChanged = raw.datetime !== undefined && raw.datetime !== item.datetime;
+  const placeChanged = raw.location !== undefined && raw.location !== item.location;
+  const linkChanged = (raw.link !== undefined && raw.link !== item.link) ||
+                      (raw.registration_link !== undefined && raw.registration_link !== item.registration_link);
 
   if (raw.title !== undefined) item.title = sanitizeText(raw.title, 150);
   if (raw.description !== undefined) item.description = sanitizeText(raw.description, 2000);
   if (raw.datetime !== undefined) item.datetime = sanitizeText(raw.datetime, 60);
   if (raw.location !== undefined) item.location = sanitizeText(raw.location, 200);
   if (raw.cover_image !== undefined) item.cover_image = sanitizeAvatar(raw.cover_image);
-  if (raw.registration_link !== undefined) item.registration_link = sanitizeUrl(raw.registration_link);
+  if (raw.registration_link !== undefined) item.registration_link = sanitizeHttpsUrl(raw.registration_link);
   if (raw.opportunity_type !== undefined) item.opportunity_type = sanitizeText(raw.opportunity_type, 50);
   if (raw.deadline !== undefined) item.deadline = sanitizeText(raw.deadline, 60);
-  if (raw.link !== undefined) item.link = sanitizeUrl(raw.link);
-  if (raw.published !== undefined) item.published = Boolean(raw.published);
+  if (raw.link !== undefined) item.link = sanitizeHttpsUrl(raw.link);
+
+  if (isAdmin && raw.published !== undefined) {
+    item.published = Boolean(raw.published);
+    if (item.published) item.status = 'published';
+  }
+
+  // Requirement 5: Editing date, place or link of an approved item by a non-organiser sends it back to "pending"
+  if (!isAdmin && !callerProfile?.is_organiser && item.status === 'published' && (dateChanged || placeChanged || linkChanged)) {
+    item.status = 'pending';
+    item.published = false;
+
+    // Notify admins of re-submission
+    const adminEmails = getAdminEmailsList();
+    for (const p of store.profiles) {
+      if (p.email && adminEmails.includes(p.email.toLowerCase())) {
+        store.notifications.unshift({
+          id: 'notif-pending-edit-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+          to_id: p.id,
+          from_id: 'system',
+          type: 'system',
+          body: `📋 Event details updated, awaiting re-approval: "${item.title}" by ${item.author_name || 'Member'}`,
+          read: false,
+          created_at: new Date().toISOString()
+        });
+      }
+    }
+  }
 
   // If newly published, broadcast one notification
   if (wasUnpublished && item.published) {
@@ -3225,7 +3380,7 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
 
     const newNotifs: Array<{ id: string; data: any }> = [];
     for (const p of store.profiles) {
-      if (p.hidden || p.suspended) continue;
+      if (p.hidden || p.suspended || p.id === item.author_id) continue;
       const notif = {
         id: 'notif-ev-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
         to_id: p.id,
@@ -3249,8 +3404,8 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
     id: 'audit-' + Date.now(),
     timestamp: new Date().toISOString(),
     action: 'UPDATE_EVENT',
-    details: `Updated ${item.kind}: "${item.title}" (${item.published ? 'Published' : 'Unpublished'})`,
-    admin: admin.adminName
+    details: `Updated ${item.kind}: "${item.title}" (${item.status || (item.published ? 'Published' : 'Unpublished')})`,
+    admin: isAdmin ? adminInfo.adminName : (item.author_name || 'Member')
   };
   store.audit_log.unshift(auditEntry);
   await persistDoc('audit_log', auditEntry.id, auditEntry);
@@ -3260,13 +3415,21 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
 });
 
 app.delete('/api/events/:id', async (req: Request, res: Response) => {
-  const admin = verifyAdmin(req, res);
-  if (!admin) return;
+  const adminInfo = resolveAdminInfo(req);
+  const isAdmin = adminInfo.isAdmin;
+  const callerId = resolveAuthUserId(req);
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
 
   const { id } = req.params;
   const item = (store.events || []).find((e: any) => e.id === id);
   if (!item) {
     return res.status(404).json({ error: 'Event or Opportunity not found' });
+  }
+
+  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
+  if (!canEditEvent(callerProfileId || callerId, item.author_id, isAdmin)) {
+    return res.status(403).json({ error: 'Forbidden: You can only delete your own submissions.' });
   }
 
   store.events = (store.events || []).filter((e: any) => e.id !== id);
@@ -3277,13 +3440,224 @@ app.delete('/api/events/:id', async (req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
     action: 'DELETE_EVENT',
     details: `Deleted ${item.kind}: "${item.title}"`,
-    admin: admin.adminName
+    admin: isAdmin ? adminInfo.adminName : (item.author_name || 'Author')
   };
   store.audit_log.unshift(auditEntry);
   await persistDoc('audit_log', auditEntry.id, auditEntry);
 
   if (storageMode === 'disk') saveStore(store);
   return res.json({ success: true, message: 'Event or Opportunity deleted' });
+});
+
+// Admin Review: Approve pending event/opportunity
+app.post('/api/admin/events/:id/approve', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) return res.status(404).json({ error: 'Event or Opportunity not found' });
+
+  // Optional edits while approving
+  const raw = req.body || {};
+  if (raw.title !== undefined) item.title = sanitizeText(raw.title, 150);
+  if (raw.description !== undefined) item.description = sanitizeText(raw.description, 2000);
+  if (raw.datetime !== undefined) item.datetime = sanitizeText(raw.datetime, 60);
+  if (raw.location !== undefined) item.location = sanitizeText(raw.location, 200);
+  if (raw.cover_image !== undefined) item.cover_image = sanitizeAvatar(raw.cover_image);
+  if (raw.registration_link !== undefined) item.registration_link = sanitizeHttpsUrl(raw.registration_link);
+  if (raw.opportunity_type !== undefined) item.opportunity_type = sanitizeText(raw.opportunity_type, 50);
+  if (raw.deadline !== undefined) item.deadline = sanitizeText(raw.deadline, 60);
+  if (raw.link !== undefined) item.link = sanitizeHttpsUrl(raw.link);
+
+  item.status = 'published';
+  item.published = true;
+  item.approved_by = admin.adminName;
+  item.approved_at = new Date().toISOString();
+
+  // Author gets a notification: approved (with the link)
+  if (item.author_id) {
+    const notif = {
+      id: 'notif-appr-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      to_id: item.author_id,
+      from_id: 'organiser',
+      type: 'digest',
+      body: `🎉 Your event "${item.title}" was approved! Check it out: /?tab=events&id=${item.id}`,
+      read: false,
+      created_at: new Date().toISOString()
+    };
+    store.notifications.unshift(notif);
+    await persistDoc('notifications', notif.id, notif);
+  }
+
+  // Broadcast notification to community members
+  const notifBody = item.kind === 'event'
+    ? `📅 New Event: ${item.title}`
+    : `💡 New Opportunity (${item.opportunity_type || 'General'}): ${item.title}`;
+
+  const newNotifs: Array<{ id: string; data: any }> = [];
+  for (const p of store.profiles) {
+    if (p.hidden || p.suspended || p.id === item.author_id) continue;
+    const notif = {
+      id: 'notif-ev-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      to_id: p.id,
+      from_id: 'organiser',
+      type: 'digest',
+      body: notifBody,
+      read: false,
+      created_at: new Date().toISOString()
+    };
+    store.notifications.unshift(notif);
+    newNotifs.push({ id: notif.id, data: notif });
+  }
+  if (newNotifs.length > 0) {
+    await batchPersistDocs('notifications', newNotifs);
+  }
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'APPROVE_EVENT',
+    details: `Approved ${item.kind}: "${item.title}" (Author: ${item.author_name || item.author_id})`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  await persistDoc('events', item.id, item);
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true, item });
+});
+
+// Admin Review: Reject pending event/opportunity with short reason
+app.post('/api/admin/events/:id/reject', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) return res.status(404).json({ error: 'Event or Opportunity not found' });
+
+  const reason = sanitizeText(req.body?.reason, 300) || 'Does not align with community guidelines';
+
+  item.status = 'rejected';
+  item.published = false;
+  item.rejection_reason = reason;
+  item.rejected_by = admin.adminName;
+  item.rejected_at = new Date().toISOString();
+
+  // Author gets a notification: rejected (with the reason)
+  if (item.author_id) {
+    const notif = {
+      id: 'notif-rej-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      to_id: item.author_id,
+      from_id: 'organiser',
+      type: 'digest',
+      body: `⚠️ Your event submission "${item.title}" was not approved: ${reason}`,
+      read: false,
+      created_at: new Date().toISOString()
+    };
+    store.notifications.unshift(notif);
+    await persistDoc('notifications', notif.id, notif);
+  }
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'REJECT_EVENT',
+    details: `Rejected ${item.kind}: "${item.title}" Reason: "${reason}"`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  await persistDoc('events', item.id, item);
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true, item });
+});
+
+// Admin: Toggle Organiser label on a member
+app.post('/api/admin/members/:id/organiser', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { id } = req.params;
+  const target = store.profiles.find((p: any) => p.id === id);
+  if (!target) return res.status(404).json({ error: 'Member not found' });
+
+  target.is_organiser = req.body?.is_organiser !== undefined ? Boolean(req.body.is_organiser) : !target.is_organiser;
+  await persistDoc('profiles', target.id, target);
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: target.is_organiser ? 'GRANT_ORGANISER' : 'REVOKE_ORGANISER',
+    details: `${target.is_organiser ? 'Granted' : 'Revoked'} Organiser label for ${target.name} (${target.id})`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true, is_organiser: target.is_organiser });
+});
+
+// Author Controls: Send 1 update a day to attendees as a notification
+app.post('/api/events/:id/update', async (req: Request, res: Response) => {
+  const callerId = resolveAuthUserId(req);
+  const adminInfo = resolveAdminInfo(req);
+  const isAdmin = adminInfo.isAdmin;
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
+
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) return res.status(404).json({ error: 'Event or Opportunity not found' });
+
+  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
+  if (!isAdmin && !isAuthor) {
+    return res.status(403).json({ error: 'Forbidden: Only the author or an admin can send updates to attendees.' });
+  }
+
+  const message = sanitizeText(req.body?.message, 500);
+  if (!message) return res.status(400).json({ error: 'Update message is required.' });
+
+  // Rate limit: 1 update a day (24 hours)
+  if (item.last_update_sent_at) {
+    const diff = Date.now() - new Date(item.last_update_sent_at).getTime();
+    if (diff < 24 * 60 * 60 * 1000) {
+      const hoursLeft = Math.ceil((24 * 60 * 60 * 1000 - diff) / (60 * 60 * 1000));
+      return res.status(429).json({ error: `You can only send one update a day. Next update available in ${hoursLeft} hour(s).` });
+    }
+  }
+
+  item.last_update_sent_at = new Date().toISOString();
+  await persistDoc('events', item.id, item);
+
+  const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
+  const notifs: Array<{ id: string; data: any }> = [];
+  const authorName = item.author_name || callerProfile?.name || 'Organizer';
+
+  for (const attId of attendeeIds) {
+    const notif = {
+      id: 'notif-upd-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      to_id: attId,
+      from_id: item.author_id || 'organiser',
+      type: 'digest',
+      body: `📢 Update on "${item.title}" from ${authorName}: ${message}`,
+      read: false,
+      created_at: new Date().toISOString()
+    };
+    store.notifications.unshift(notif);
+    notifs.push({ id: notif.id, data: notif });
+  }
+
+  if (notifs.length > 0) {
+    await batchPersistDocs('notifications', notifs);
+  }
+
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true, count: attendeeIds.length });
 });
 
 app.get('/api/events/:id/export', (req: Request, res: Response) => {

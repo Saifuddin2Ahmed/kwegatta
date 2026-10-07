@@ -1185,3 +1185,52 @@ export async function fetchAdminStatus(): Promise<{ isAdmin: boolean; adminName:
   }
 }
 
+export async function approveEvent(id: string, edits?: any): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/events/${encodeURIComponent(id)}/approve`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(edits || {})
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to approve item');
+  return data.item;
+}
+
+export async function rejectEvent(id: string, reason: string): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/events/${encodeURIComponent(id)}/reject`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ reason })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to reject item');
+  return data.item;
+}
+
+export async function toggleOrganiserRole(id: string, isOrganiser?: boolean): Promise<boolean> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/members/${encodeURIComponent(id)}/organiser`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ is_organiser: isOrganiser })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to update organiser role');
+  return Boolean(data.is_organiser);
+}
+
+export async function sendEventAttendeeUpdate(id: string, message: string): Promise<{ success: boolean; count: number }> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(id)}/update`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ message })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to send update');
+  return data;
+}
+
+
