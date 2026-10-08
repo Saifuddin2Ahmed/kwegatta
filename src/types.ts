@@ -27,6 +27,11 @@ export interface GitHubData {
   notfound?: boolean;
 }
 
+export interface CustomLink {
+  label: string;
+  url: string;
+}
+
 export interface Profile {
   id: string;
   name: string;
@@ -36,6 +41,7 @@ export interface Profile {
   intents?: string[];
   stage?: string;
   location?: string;
+  city?: string;
   hours_per_week?: string;
   headline: string;
   bio: string;
@@ -55,6 +61,13 @@ export interface Profile {
   youtube?: string;
   scholar?: string;
   orcid?: string;
+  huggingface?: string;
+  kaggle?: string;
+  gitlab?: string;
+  google_play?: string;
+  google_dev?: string;
+  ieee?: string;
+  custom_links?: CustomLink[];
   research_area?: string;
   institution?: string;
   whatsapp?: string;
@@ -64,6 +77,7 @@ export interface Profile {
   status?: string;
   is_demo?: boolean;
   created_at: string;
+  updated_at?: string;
   gh?: GitHubData | null;
   blocked_ids?: string[];
   hidden?: boolean;

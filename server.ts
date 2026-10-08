@@ -545,6 +545,7 @@ interface StoreData {
     details: string;
     admin: string;
   }>;
+  migrations?: Record<string, any>;
 }
 
 // Active admin session tokens with creation timestamps (emergency fallback passcode flow)
@@ -682,6 +683,37 @@ export function sanitizeHttpsUrl(val: any): string {
   return '';
 }
 
+export function sanitizeDomainUrl(val: any, allowedDomains: string[]): string {
+  if (typeof val !== 'string') return '';
+  const trimmed = val.trim();
+  if (!trimmed) return '';
+  try {
+    const urlStr = trimmed.startsWith('http') ? trimmed : `https://${trimmed}`;
+    const parsed = new URL(urlStr);
+    const host = parsed.hostname.toLowerCase();
+    const isAllowed = allowedDomains.some(d => host === d.toLowerCase() || host.endsWith('.' + d.toLowerCase()));
+    if (isAllowed) {
+      return parsed.href.slice(0, 500);
+    }
+  } catch (_) {}
+  return '';
+}
+
+export function sanitizeCustomLinks(arr: any): Array<{ label: string; url: string }> {
+  if (!Array.isArray(arr)) return [];
+  const results: Array<{ label: string; url: string }> = [];
+  for (const item of arr) {
+    if (results.length >= 3) break;
+    if (!item || typeof item !== 'object') continue;
+    const label = sanitizeText(item.label, 24);
+    const rawUrl = typeof item.url === 'string' ? item.url.trim() : '';
+    if (label && /^https:\/\/[^\s]+$/i.test(rawUrl)) {
+      results.push({ label, url: rawUrl.slice(0, 500) });
+    }
+  }
+  return results;
+}
+
 function sanitizeAvatar(val: any): string {
   if (typeof val !== 'string') return '';
   const trimmed = val.trim();
@@ -770,6 +802,9 @@ function loadStore(): StoreData {
         }
         if (!parsed.audit_log || !Array.isArray(parsed.audit_log)) {
           parsed.audit_log = [];
+        }
+        if (!parsed.migrations || typeof parsed.migrations !== 'object') {
+          parsed.migrations = {};
         }
         // Cleanup any security test post with empty body or anonymous author
         if (Array.isArray(parsed.posts)) {
@@ -895,7 +930,8 @@ function loadStore(): StoreData {
         details: isDemoMode ? 'Kwegatta system loaded in Demo Mode with sample cohort.' : 'Kwegatta system loaded in clean production state.',
         admin: 'system'
       }
-    ]
+    ],
+    migrations: {}
   };
 
   saveStore(initial);
@@ -1243,6 +1279,159 @@ async function initStorage(): Promise<void> {
       store = loadStore();
     }
   }
+
+  // Run one-time Saifuddin profile migration if target exists and flag has not yet been set
+  try {
+    await runSaifuddinProfileMigration();
+  } catch (mErr: any) {
+    console.warn('[Migration] Notice during Saifuddin profile migration:', mErr?.message || mErr);
+  }
+}
+
+/* =========================================================================
+   ONE-TIME PROFILE MIGRATION
+   Target: member profile with GitHub username "Saifuddin2Ahmed" and account email in ADMIN_EMAILS.
+   Preserves: photo, WhatsApp number, visibility settings, roles, account.
+   Records execution in Firestore and local store so it never runs twice or overwrites later edits.
+   Clears cached matches for this member so they are recalculated from the new profile.
+   ========================================================================= */
+export const SAIFUDDIN_PROFILE_MIGRATION_FLAG = 'saifuddin_profile_migration_v1';
+
+export async function runSaifuddinProfileMigration(): Promise<boolean> {
+  // Flag check: stops it running twice or overwriting later edits
+  if (store.migrations && store.migrations[SAIFUDDIN_PROFILE_MIGRATION_FLAG]?.completed) {
+    return false;
+  }
+  if (storageMode === 'firestore' && firestoreDb) {
+    try {
+      const docSnap = await firestoreDb.collection('migrations').doc(SAIFUDDIN_PROFILE_MIGRATION_FLAG).get();
+      if (docSnap.exists && docSnap.data()?.completed) {
+        if (!store.migrations) store.migrations = {};
+        store.migrations[SAIFUDDIN_PROFILE_MIGRATION_FLAG] = { completed: true };
+        return false;
+      }
+    } catch (_) {}
+  }
+
+  const adminEmails = getAdminEmailsList().map(e => e.toLowerCase());
+
+  // Find target member profile in memory store
+  let target: any = (store.profiles || []).find((p: any) => {
+    const isGh = p.github && String(p.github).trim().toLowerCase() === 'saifuddin2ahmed';
+    const isEmail = p.email && adminEmails.includes(String(p.email).trim().toLowerCase());
+    return isGh && isEmail;
+  });
+
+  // If not found by direct email, check account_uid via adminAuth if available
+  if (!target && adminAuth) {
+    for (const p of (store.profiles || [])) {
+      if (p.github && String(p.github).trim().toLowerCase() === 'saifuddin2ahmed' && p.account_uid) {
+        try {
+          const u = await adminAuth.getUser(p.account_uid);
+          if (u.email && adminEmails.includes(u.email.toLowerCase())) {
+            target = p;
+            break;
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  // If not found in memory store and in firestore mode, query Firestore
+  if (!target && storageMode === 'firestore' && firestoreDb) {
+    try {
+      const snap = await firestoreDb.collection('profiles').where('github', '==', 'Saifuddin2Ahmed').get();
+      for (const doc of snap.docs) {
+        const d = doc.data();
+        let email = d.email;
+        if (!email && d.account_uid && adminAuth) {
+          try {
+            const u = await adminAuth.getUser(d.account_uid);
+            email = u.email;
+          } catch (_) {}
+        }
+        if (email && adminEmails.includes(email.toLowerCase())) {
+          target = { ...d, id: doc.id };
+          break;
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (!target) {
+    return false;
+  }
+
+  // Apply updates exactly as requested without Gemma processing and without touching photo, WhatsApp, visibility, roles, account
+  target.headline = 'Software and AI engineer building for communities';
+  target.bio = 'Electronic control engineer and AI researcher with five years of software development, building intelligent systems for businesses and communities across Africa and the Middle East. I focus on solutions that keep working without constant internet, and I created Kwegatta.';
+  target.offers = 'Software and AI engineering, cloud and ERP systems, offline-first solutions for remote communities, taking a product from idea to launch';
+  target.needs = 'Universities, NGOs and communities to pilot Kwegatta, plus designers and community organisers';
+  target.teaches = 'Python, AI and deep learning foundations, building with open models, cloud deployment';
+  target.learns = 'Product design, growth and community building';
+  target.location = 'Kampala';
+  target.city = 'Kampala';
+  target.linkedin = 'https://www.linkedin.com/in/saifuddin2ahmed';
+  target.github = 'Saifuddin2Ahmed';
+  target.website = 'https://otwox.com/en/about-us/founder';
+  target.twitter = 'https://x.com/Saifuddin1Ahmed';
+  target.instagram = 'https://www.instagram.com/saifuddin1ahmed';
+  target.facebook = 'https://www.facebook.com/Saifuddin2Ahmed';
+  target.huggingface = 'https://huggingface.co/saifuddin2ahmed';
+  target.kaggle = 'https://www.kaggle.com/saifuddinahmed';
+  target.gitlab = 'https://gitlab.com/saifuddinahmed';
+  target.google_play = 'https://play.google.com/store/apps/dev?id=6759566582761793518';
+  target.google_dev = 'https://g.dev/SaifuddinAhmed';
+  target.ieee = 'https://ieee-collabratec.ieee.org/app/p/SaifuddinAhmed';
+  target.updated_at = new Date().toISOString();
+
+  // Save to memory store
+  const idx = store.profiles.findIndex((p: any) => p.id === target.id);
+  if (idx >= 0) {
+    store.profiles[idx] = target;
+  } else {
+    store.profiles.push(target);
+  }
+
+  // Persist updated profile
+  await persistDoc('profiles', target.id, target);
+
+  // Clear cached matches for this member so they are recalculated from the new profile
+  const memberId = target.id;
+  store.matches = store.matches.filter((m: any) => m.a_id !== memberId && m.b_id !== memberId);
+  if (storageMode === 'firestore' && firestoreDb) {
+    try {
+      const snapA = await firestoreDb.collection('matches').where('a_id', '==', memberId).get();
+      const snapB = await firestoreDb.collection('matches').where('b_id', '==', memberId).get();
+      const batch = firestoreDb.batch();
+      snapA.forEach(doc => batch.delete(doc.ref));
+      snapB.forEach(doc => batch.delete(doc.ref));
+      await batch.commit();
+    } catch (_) {}
+  }
+
+  // Record in Firestore and local store that migration has run, preventing it from running twice
+  const record = {
+    completed: true,
+    target_id: memberId,
+    migrated_at: new Date().toISOString()
+  };
+  if (!store.migrations) store.migrations = {};
+  store.migrations[SAIFUDDIN_PROFILE_MIGRATION_FLAG] = record;
+
+  if (storageMode === 'disk') {
+    saveStore(store);
+  }
+  if (storageMode === 'firestore' && firestoreDb) {
+    try {
+      await firestoreDb.collection('migrations').doc(SAIFUDDIN_PROFILE_MIGRATION_FLAG).set(record);
+    } catch (e) {
+      console.warn('[Migration] Warning persisting migration flag in Firestore:', e);
+    }
+  }
+
+  console.log(`[Migration] Profile migration ${SAIFUDDIN_PROFILE_MIGRATION_FLAG} successfully executed for member ${target.name} (${target.id})`);
+  return true;
 }
 
 /* =========================================================================
@@ -4277,6 +4466,13 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
       youtube: sanitizeUrl(raw.youtube),
       scholar: sanitizeUrl(raw.scholar || raw.google_scholar),
       orcid: sanitizeUrl(raw.orcid),
+      huggingface: sanitizeDomainUrl(raw.huggingface, ['huggingface.co']),
+      kaggle: sanitizeDomainUrl(raw.kaggle, ['kaggle.com']),
+      gitlab: sanitizeDomainUrl(raw.gitlab, ['gitlab.com']),
+      google_play: sanitizeDomainUrl(raw.google_play, ['play.google.com']),
+      google_dev: sanitizeDomainUrl(raw.google_dev, ['g.dev', 'developers.google.com']),
+      ieee: sanitizeDomainUrl(raw.ieee, ['ieee-collabratec.ieee.org']),
+      custom_links: sanitizeCustomLinks(raw.custom_links),
       whatsapp: sanitizeText(raw.whatsapp, 30).replace(/[^0-9+]/g, ''),
       hide_whatsapp: Boolean(raw.hide_whatsapp),
       avatar: sanitizeAvatar(raw.avatar),
@@ -4548,6 +4744,27 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
     }
     if (patch.orcid !== undefined) {
       patch.orcid = sanitizeUrl(patch.orcid);
+    }
+    if (patch.huggingface !== undefined) {
+      patch.huggingface = sanitizeDomainUrl(patch.huggingface, ['huggingface.co']);
+    }
+    if (patch.kaggle !== undefined) {
+      patch.kaggle = sanitizeDomainUrl(patch.kaggle, ['kaggle.com']);
+    }
+    if (patch.gitlab !== undefined) {
+      patch.gitlab = sanitizeDomainUrl(patch.gitlab, ['gitlab.com']);
+    }
+    if (patch.google_play !== undefined) {
+      patch.google_play = sanitizeDomainUrl(patch.google_play, ['play.google.com']);
+    }
+    if (patch.google_dev !== undefined) {
+      patch.google_dev = sanitizeDomainUrl(patch.google_dev, ['g.dev', 'developers.google.com']);
+    }
+    if (patch.ieee !== undefined) {
+      patch.ieee = sanitizeDomainUrl(patch.ieee, ['ieee-collabratec.ieee.org']);
+    }
+    if (patch.custom_links !== undefined) {
+      patch.custom_links = sanitizeCustomLinks(patch.custom_links);
     }
     if (patch.whatsapp !== undefined) {
       patch.whatsapp = sanitizeText(patch.whatsapp, 30).replace(/[^0-9+]/g, '');

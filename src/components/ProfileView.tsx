@@ -34,9 +34,10 @@ import {
   Lock,
   KeyRound,
   Shield,
-  CheckCircle2
+  CheckCircle2,
+  Plus
 } from 'lucide-react';
-import { Profile, MatchResult } from '../types';
+import { Profile, MatchResult, CustomLink } from '../types';
 import {
   buildProfileWithGemma,
   matchCandidatesWithGemma,
@@ -136,6 +137,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [editYoutube, setEditYoutube] = useState(profile.youtube || '');
   const [editScholar, setEditScholar] = useState(profile.scholar || '');
   const [editOrcid, setEditOrcid] = useState(profile.orcid || '');
+  const [editHuggingface, setEditHuggingface] = useState(profile.huggingface || '');
+  const [editKaggle, setEditKaggle] = useState(profile.kaggle || '');
+  const [editGitlab, setEditGitlab] = useState(profile.gitlab || '');
+  const [editGooglePlay, setEditGooglePlay] = useState(profile.google_play || '');
+  const [editGoogleDev, setEditGoogleDev] = useState(profile.google_dev || '');
+  const [editIeee, setEditIeee] = useState(profile.ieee || '');
+  const [editCustomLinks, setEditCustomLinks] = useState<CustomLink[]>(() => {
+    return Array.isArray(profile.custom_links)
+      ? profile.custom_links.slice(0, 3).map(c => ({ label: c.label || '', url: c.url || '' }))
+      : [];
+  });
 
   const [gemmaInstruction, setGemmaInstruction] = useState('');
   const [isRewriting, setIsRewriting] = useState(false);
@@ -208,7 +220,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         instagram: editInstagram.trim(),
         youtube: editYoutube.trim(),
         scholar: editScholar.trim(),
-        orcid: editOrcid.trim()
+        orcid: editOrcid.trim(),
+        huggingface: editHuggingface.trim(),
+        kaggle: editKaggle.trim(),
+        gitlab: editGitlab.trim(),
+        google_play: editGooglePlay.trim(),
+        google_dev: editGoogleDev.trim(),
+        ieee: editIeee.trim(),
+        custom_links: editCustomLinks
+          .map(c => ({ label: c.label.trim().slice(0, 24), url: c.url.trim() }))
+          .filter(c => c.label && /^https:\/\/[^\s]+$/i.test(c.url))
+          .slice(0, 3)
       };
 
       await db.update('profiles', profile.id, updated);
@@ -1222,112 +1244,266 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   </div>
                 </div>
 
-                {/* Social & Academic Links Editing */}
-                <div className="space-y-2.5 pt-2 border-t border-[var(--border-muted)]">
-                  <span className="text-xs font-bold text-[var(--fg)] block">
-                    Social &amp; Academic Links (Optional)
-                  </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">LinkedIn</label>
-                      <input
-                        type="text"
-                        placeholder="https://linkedin.com/in/username"
-                        value={editLinkedin}
-                        onChange={e => setEditLinkedin(e.target.value)}
-                        className="primer-input text-xs w-full"
-                      />
+                {/* Profile Links Grouped */}
+                <div className="space-y-4 pt-3 border-t border-[var(--border-muted)]">
+                  <div>
+                    <span className="text-xs font-bold text-[var(--fg)] block">
+                      Profile Links (Optional)
+                    </span>
+                    <p className="text-[11px] text-[var(--fg-muted)]">
+                      Connect your profiles across professional, social, and academic networks.
+                    </p>
+                  </div>
+
+                  {/* 1. Professional Group */}
+                  <div className="space-y-2 p-3 rounded-xl bg-[var(--bg)] border border-[var(--card-border)]">
+                    <span className="text-xs font-semibold text-[var(--fg)] block">
+                      Professional
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">LinkedIn</label>
+                        <input
+                          type="text"
+                          placeholder="https://linkedin.com/in/username"
+                          value={editLinkedin}
+                          onChange={e => setEditLinkedin(e.target.value)}
+                          className="primer-input text-xs w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">GitHub</label>
+                        <input
+                          type="text"
+                          placeholder="username or github.com/username"
+                          value={editGithub}
+                          onChange={e => setEditGithub(e.target.value)}
+                          className="primer-input text-xs w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">GitLab (gitlab.com)</label>
+                        <input
+                          type="text"
+                          placeholder="https://gitlab.com/username"
+                          value={editGitlab}
+                          onChange={e => setEditGitlab(e.target.value)}
+                          className="primer-input text-xs w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Google Play Developer (play.google.com)</label>
+                        <input
+                          type="text"
+                          placeholder="https://play.google.com/store/apps/dev?id=..."
+                          value={editGooglePlay}
+                          onChange={e => setEditGooglePlay(e.target.value)}
+                          className="primer-input text-xs w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Google Developer Profile (g.dev)</label>
+                        <input
+                          type="text"
+                          placeholder="https://g.dev/username"
+                          value={editGoogleDev}
+                          onChange={e => setEditGoogleDev(e.target.value)}
+                          className="primer-input text-xs w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Personal Website</label>
+                        <input
+                          type="text"
+                          placeholder="https://yoursite.com"
+                          value={editWebsite}
+                          onChange={e => setEditWebsite(e.target.value)}
+                          className="primer-input text-xs w-full"
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">GitHub</label>
-                      <input
-                        type="text"
-                        placeholder="username or github.com/username"
-                        value={editGithub}
-                        onChange={e => setEditGithub(e.target.value)}
-                        className="primer-input text-xs w-full"
-                      />
+                  </div>
+
+                  {/* 2. Social Group */}
+                  <div className="space-y-2 p-3 rounded-xl bg-[var(--bg)] border border-[var(--card-border)]">
+                    <span className="text-xs font-semibold text-[var(--fg)] block">
+                      Social
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">X (Twitter)</label>
+                        <input
+                          type="text"
+                          placeholder="https://x.com/username"
+                          value={editTwitter}
+                          onChange={e => setEditTwitter(e.target.value)}
+                          className="primer-input text-xs w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Facebook</label>
+                        <input
+                          type="text"
+                          placeholder="https://facebook.com/username"
+                          value={editFacebook}
+                          onChange={e => setEditFacebook(e.target.value)}
+                          className="primer-input text-xs w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Instagram</label>
+                        <input
+                          type="text"
+                          placeholder="https://instagram.com/username"
+                          value={editInstagram}
+                          onChange={e => setEditInstagram(e.target.value)}
+                          className="primer-input text-xs w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">TikTok</label>
+                        <input
+                          type="text"
+                          placeholder="https://tiktok.com/@username"
+                          value={editTiktok}
+                          onChange={e => setEditTiktok(e.target.value)}
+                          className="primer-input text-xs w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">YouTube</label>
+                        <input
+                          type="text"
+                          placeholder="https://youtube.com/@channel"
+                          value={editYoutube}
+                          onChange={e => setEditYoutube(e.target.value)}
+                          className="primer-input text-xs w-full"
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Personal Website</label>
-                      <input
-                        type="text"
-                        placeholder="https://yoursite.com"
-                        value={editWebsite}
-                        onChange={e => setEditWebsite(e.target.value)}
-                        className="primer-input text-xs w-full"
-                      />
+                  </div>
+
+                  {/* 3. Academic Group */}
+                  <div className="space-y-2 p-3 rounded-xl bg-[var(--bg)] border border-[var(--card-border)]">
+                    <span className="text-xs font-semibold text-[var(--fg)] block">
+                      Academic
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Google Scholar</label>
+                        <input
+                          type="text"
+                          placeholder="https://scholar.google.com/citations?user=..."
+                          value={editScholar}
+                          onChange={e => setEditScholar(e.target.value)}
+                          className="primer-input text-xs w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">ORCID</label>
+                        <input
+                          type="text"
+                          placeholder="https://orcid.org/0000-0000-0000-0000"
+                          value={editOrcid}
+                          onChange={e => setEditOrcid(e.target.value)}
+                          className="primer-input text-xs w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">IEEE Collabratec (ieee-collabratec.ieee.org)</label>
+                        <input
+                          type="text"
+                          placeholder="https://ieee-collabratec.ieee.org/app/p/..."
+                          value={editIeee}
+                          onChange={e => setEditIeee(e.target.value)}
+                          className="primer-input text-xs w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Hugging Face (huggingface.co)</label>
+                        <input
+                          type="text"
+                          placeholder="https://huggingface.co/username"
+                          value={editHuggingface}
+                          onChange={e => setEditHuggingface(e.target.value)}
+                          className="primer-input text-xs w-full"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Kaggle (kaggle.com)</label>
+                        <input
+                          type="text"
+                          placeholder="https://kaggle.com/username"
+                          value={editKaggle}
+                          onChange={e => setEditKaggle(e.target.value)}
+                          className="primer-input text-xs w-full"
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">X (Twitter)</label>
-                      <input
-                        type="text"
-                        placeholder="https://x.com/username"
-                        value={editTwitter}
-                        onChange={e => setEditTwitter(e.target.value)}
-                        className="primer-input text-xs w-full"
-                      />
+                  </div>
+
+                  {/* 4. Custom Links (up to 3) */}
+                  <div className="space-y-2 p-3 rounded-xl bg-[var(--bg)] border border-[var(--card-border)]">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-semibold text-[var(--fg)] block">Custom Links</span>
+                        <span className="text-[11px] text-[var(--fg-muted)]">Up to 3 custom links with a short label and https URL</span>
+                      </div>
+                      {editCustomLinks.length < 3 && (
+                        <button
+                          type="button"
+                          onClick={() => setEditCustomLinks([...editCustomLinks, { label: '', url: '' }])}
+                          className="text-xs px-2.5 py-1 rounded-lg border border-[var(--gold)]/40 text-[var(--gold)] hover:bg-[var(--gold)]/10 font-medium flex items-center gap-1 cursor-pointer transition-colors"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Add another link</span>
+                        </button>
+                      )}
                     </div>
-                    <div>
-                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">TikTok</label>
-                      <input
-                        type="text"
-                        placeholder="https://tiktok.com/@username"
-                        value={editTiktok}
-                        onChange={e => setEditTiktok(e.target.value)}
-                        className="primer-input text-xs w-full"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Instagram</label>
-                      <input
-                        type="text"
-                        placeholder="https://instagram.com/username"
-                        value={editInstagram}
-                        onChange={e => setEditInstagram(e.target.value)}
-                        className="primer-input text-xs w-full"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">YouTube</label>
-                      <input
-                        type="text"
-                        placeholder="https://youtube.com/@channel"
-                        value={editYoutube}
-                        onChange={e => setEditYoutube(e.target.value)}
-                        className="primer-input text-xs w-full"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Facebook</label>
-                      <input
-                        type="text"
-                        placeholder="https://facebook.com/profile"
-                        value={editFacebook}
-                        onChange={e => setEditFacebook(e.target.value)}
-                        className="primer-input text-xs w-full"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Google Scholar</label>
-                      <input
-                        type="text"
-                        placeholder="https://scholar.google.com/citations?user=..."
-                        value={editScholar}
-                        onChange={e => setEditScholar(e.target.value)}
-                        className="primer-input text-xs w-full"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">ORCID</label>
-                      <input
-                        type="text"
-                        placeholder="https://orcid.org/0000-0000-0000-0000"
-                        value={editOrcid}
-                        onChange={e => setEditOrcid(e.target.value)}
-                        className="primer-input text-xs w-full"
-                      />
-                    </div>
+
+                    {editCustomLinks.length === 0 ? (
+                      <p className="text-[11px] text-[var(--fg-subtle)] italic">No custom links added yet.</p>
+                    ) : (
+                      <div className="space-y-2 pt-1">
+                        {editCustomLinks.map((custom, index) => (
+                          <div key={index} className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                            <input
+                              type="text"
+                              maxLength={24}
+                              placeholder="Label (max 24 chars)"
+                              value={custom.label}
+                              onChange={e => {
+                                const next = [...editCustomLinks];
+                                next[index] = { ...next[index], label: e.target.value.slice(0, 24) };
+                                setEditCustomLinks(next);
+                              }}
+                              className="primer-input text-xs w-full sm:w-44"
+                            />
+                            <input
+                              type="url"
+                              placeholder="https://..."
+                              value={custom.url}
+                              onChange={e => {
+                                const next = [...editCustomLinks];
+                                next[index] = { ...next[index], url: e.target.value };
+                                setEditCustomLinks(next);
+                              }}
+                              className="primer-input text-xs flex-1 w-full"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditCustomLinks(editCustomLinks.filter((_, i) => i !== index));
+                              }}
+                              className="p-1.5 rounded-lg text-rose-400 hover:bg-rose-500/10 cursor-pointer self-end sm:self-center"
+                              title="Remove link"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 

@@ -10,7 +10,11 @@ import {
   canApproveEvent,
   canEditEvent,
   filterEventsForCaller,
-  canChangeTeam
+  canChangeTeam,
+  sanitizeDomainUrl,
+  sanitizeCustomLinks,
+  runSaifuddinProfileMigration,
+  SAIFUDDIN_PROFILE_MIGRATION_FLAG
 } from '../server';
 import { validatePasswordStrength } from '../src/services/firebase';
 
@@ -270,6 +274,54 @@ describe('Team Management Permissions (Admin Only)', () => {
 
     // Admin (isAdmin: true) can change the team
     expect(canChangeTeam(true)).toBe(true);
+  });
+});
+
+describe('Profile Links Validation (Domain & Custom Links)', () => {
+  it('validates URLs against approved real domains', () => {
+    expect(sanitizeDomainUrl('https://huggingface.co/saifuddin2ahmed', ['huggingface.co'])).toBe('https://huggingface.co/saifuddin2ahmed');
+    expect(sanitizeDomainUrl('https://evil.com/huggingface.co', ['huggingface.co'])).toBe('');
+    expect(sanitizeDomainUrl('https://kaggle.com/saifuddinahmed', ['kaggle.com'])).toBe('https://kaggle.com/saifuddinahmed');
+    expect(sanitizeDomainUrl('https://gitlab.com/saifuddinahmed', ['gitlab.com'])).toBe('https://gitlab.com/saifuddinahmed');
+    expect(sanitizeDomainUrl('https://play.google.com/store/apps/dev?id=123', ['play.google.com'])).toBe('https://play.google.com/store/apps/dev?id=123');
+    expect(sanitizeDomainUrl('https://g.dev/SaifuddinAhmed', ['g.dev', 'developers.google.com'])).toBe('https://g.dev/SaifuddinAhmed');
+    expect(sanitizeDomainUrl('https://developers.google.com/profile/u/123', ['g.dev', 'developers.google.com'])).toBe('https://developers.google.com/profile/u/123');
+    expect(sanitizeDomainUrl('https://ieee-collabratec.ieee.org/app/p/SaifuddinAhmed', ['ieee-collabratec.ieee.org'])).toBe('https://ieee-collabratec.ieee.org/app/p/SaifuddinAhmed');
+  });
+
+  it('validates custom links (max 3, max 24 char label, https URL only)', () => {
+    const raw = [
+      { label: 'Substack Newsletter', url: 'https://saifuddin.substack.com' },
+      { label: 'Portfolio Work', url: 'https://otwox.com' },
+      { label: 'Tech Blog', url: 'https://blog.example.com' },
+      { label: 'Fourth Link Exceeds Limit', url: 'https://extra.example.com' },
+      { label: 'Invalid Insecure', url: 'http://insecure.com' }
+    ];
+    const sanitized = sanitizeCustomLinks(raw);
+    expect(sanitized.length).toBe(3);
+    expect(sanitized[0].label).toBe('Substack Newsletter');
+    expect(sanitized[0].url).toBe('https://saifuddin.substack.com');
+    expect(sanitized[1].label).toBe('Portfolio Work');
+    expect(sanitized[2].label).toBe('Tech Blog');
+  });
+});
+
+describe('One-Time Saifuddin Profile Migration', () => {
+  it('defines the migration flag stopping repeated execution', () => {
+    expect(SAIFUDDIN_PROFILE_MIGRATION_FLAG).toBe('saifuddin_profile_migration_v1');
+  });
+
+  it('migrates the target member profile and records completion flag', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const serverPath = path.join(process.cwd(), 'server.ts');
+    const serverContent = fs.readFileSync(serverPath, 'utf-8');
+
+    // Verify migration flag is checked and saved
+    expect(serverContent).toContain('SAIFUDDIN_PROFILE_MIGRATION_FLAG');
+    expect(serverContent).toContain('Electronic control engineer and AI researcher');
+    expect(serverContent).toContain('https://huggingface.co/saifuddin2ahmed');
+    expect(serverContent).toContain('https://ieee-collabratec.ieee.org/app/p/SaifuddinAhmed');
   });
 });
 

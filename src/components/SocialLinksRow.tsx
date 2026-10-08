@@ -25,7 +25,9 @@ function isValidDomain(url: string | undefined, domainSubstring: string): boolea
   if (!trimmed) return false;
   try {
     const parsed = new URL(trimmed.startsWith('http') ? trimmed : `https://${trimmed}`);
-    return parsed.hostname.toLowerCase().includes(domainSubstring.toLowerCase());
+    const host = parsed.hostname.toLowerCase();
+    const d = domainSubstring.toLowerCase();
+    return host === d || host.endsWith('.' + d);
   } catch (_) {
     return trimmed.toLowerCase().includes(domainSubstring.toLowerCase());
   }
@@ -50,7 +52,7 @@ export const SocialLinksRow: React.FC<SocialLinksRowProps> = ({
     colorClass: string;
   }[] = [];
 
-  // 1. LinkedIn
+  // 1. LinkedIn (linkedin.com)
   if (profile.linkedin && (isValidDomain(profile.linkedin, 'linkedin.com') || profile.linkedin.includes('linkedin'))) {
     links.push({
       key: 'linkedin',
@@ -73,7 +75,97 @@ export const SocialLinksRow: React.FC<SocialLinksRowProps> = ({
     });
   }
 
-  // 3. Website / Portfolio
+  // 3. GitLab (gitlab.com)
+  if (profile.gitlab && (isValidDomain(profile.gitlab, 'gitlab.com') || profile.gitlab.includes('gitlab.com'))) {
+    links.push({
+      key: 'gitlab',
+      label: 'GitLab',
+      url: normalizeUrl(profile.gitlab),
+      icon: (
+        <svg className={iconSize} viewBox="0 0 24 24" fill="currentColor">
+          <path d="m23.6 9.58-1.54-4.75a.99.99 0 0 0-.37-.47 1 1 0 0 0-.6-.19.98.98 0 0 0-.59.2 1 1 0 0 0-.36.47L18.6 9.58H5.4l-1.54-4.75a.99.99 0 0 0-.37-.47 1 1 0 0 0-.6-.19.98.98 0 0 0-.59.2 1 1 0 0 0-.36.47L.4 9.58a1.27 1.27 0 0 0 .46 1.42L12 19.34l11.14-8.34a1.27 1.27 0 0 0 .46-1.42z" />
+        </svg>
+      ),
+      colorClass: 'text-orange-500 hover:text-orange-400 hover:bg-orange-500/10 border-orange-500/30'
+    });
+  }
+
+  // 4. Google Play Developer Page (play.google.com)
+  if (profile.google_play && (isValidDomain(profile.google_play, 'play.google.com') || profile.google_play.includes('play.google.com'))) {
+    links.push({
+      key: 'google_play',
+      label: 'Google Play',
+      url: normalizeUrl(profile.google_play),
+      icon: (
+        <svg className={iconSize} viewBox="0 0 24 24" fill="currentColor">
+          <path d="M3.609 1.814L13.792 12 3.61 22.186c-.37-.362-.61-.925-.61-1.632V3.446c0-.707.24-1.27.61-1.632zM15.207 13.414l2.457 2.457-11.83 6.83 9.373-9.287zm0-2.828L5.834 1.299l11.83 6.83-2.457 2.457zm1.414 1.414l3.528 2.037c.732.423.732 1.115 0 1.538l-3.528 2.037-2.121-2.121 2.121-2.121z" />
+        </svg>
+      ),
+      colorClass: 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 border-emerald-500/30'
+    });
+  }
+
+  // 5. Google Developer Profile (g.dev or developers.google.com)
+  if (profile.google_dev && (isValidDomain(profile.google_dev, 'g.dev') || isValidDomain(profile.google_dev, 'developers.google.com') || profile.google_dev.includes('g.dev') || profile.google_dev.includes('developers.google.com'))) {
+    links.push({
+      key: 'google_dev',
+      label: 'Google Developer',
+      url: normalizeUrl(profile.google_dev),
+      icon: (
+        <svg className={iconSize} viewBox="0 0 24 24" fill="currentColor">
+          <path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/>
+        </svg>
+      ),
+      colorClass: 'text-blue-500 hover:text-blue-400 hover:bg-blue-500/10 border-blue-500/30'
+    });
+  }
+
+  // 6. Hugging Face (huggingface.co)
+  if (profile.huggingface && (isValidDomain(profile.huggingface, 'huggingface.co') || profile.huggingface.includes('huggingface.co'))) {
+    links.push({
+      key: 'huggingface',
+      label: 'Hugging Face',
+      url: normalizeUrl(profile.huggingface),
+      icon: (
+        <svg className={iconSize} viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C6.477 2 2 6.477 2 12c0 2.237.734 4.304 1.973 5.975-.12.434-.403 1.488-.707 2.65-.184.706.446 1.336 1.152 1.152 1.162-.304 2.216-.587 2.65-.707C8.696 21.266 10.763 22 12 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm-3.5 8a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm7 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm-7 4.5c.5-1 2-2 3.5-2s3 1 3.5 2c.2.4-.1.8-.5.8h-6c-.4 0-.7-.4-.5-.8z" />
+        </svg>
+      ),
+      colorClass: 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 border-amber-500/30'
+    });
+  }
+
+  // 7. Kaggle (kaggle.com)
+  if (profile.kaggle && (isValidDomain(profile.kaggle, 'kaggle.com') || profile.kaggle.includes('kaggle.com'))) {
+    links.push({
+      key: 'kaggle',
+      label: 'Kaggle',
+      url: normalizeUrl(profile.kaggle),
+      icon: (
+        <svg className={iconSize} viewBox="0 0 24 24" fill="currentColor">
+          <path d="M18.825 23.859c-.022.092-.117.141-.281.141h-3.139c-.187 0-.351-.082-.492-.248l-5.178-6.589-2.06 1.98v4.577c0 .235-.117.36-.351.36H4.351c-.234 0-.351-.125-.351-.36V.36C4 .125 4.117 0 4.351 0h2.973c.234 0 .351.125.351.36v15.068l6.985-7.145c.14-.14.293-.21.457-.21h3.313c.164 0 .258.058.281.176.023.14-.035.246-.176.316l-7.395 7.426 7.535 9.539c.14.164.187.27.14.329z" />
+        </svg>
+      ),
+      colorClass: 'text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 border-cyan-500/30'
+    });
+  }
+
+  // 8. IEEE Collabratec (ieee-collabratec.ieee.org)
+  if (profile.ieee && (isValidDomain(profile.ieee, 'ieee-collabratec.ieee.org') || profile.ieee.includes('ieee-collabratec.ieee.org'))) {
+    links.push({
+      key: 'ieee',
+      label: 'IEEE Collabratec',
+      url: normalizeUrl(profile.ieee),
+      icon: (
+        <svg className={iconSize} viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2L2 12l10 10 10-10L12 2zm0 3.5L18.5 12 12 18.5 5.5 12 12 5.5zM11 8v8h2V8h-2z" />
+        </svg>
+      ),
+      colorClass: 'text-sky-400 hover:text-sky-300 hover:bg-sky-500/10 border-sky-500/30'
+    });
+  }
+
+  // 9. Website / Portfolio
   if (profile.website && (profile.website.startsWith('http') || profile.website.includes('.'))) {
     links.push({
       key: 'website',
@@ -84,7 +176,7 @@ export const SocialLinksRow: React.FC<SocialLinksRowProps> = ({
     });
   }
 
-  // 4. X / Twitter
+  // 10. X / Twitter
   const xUrl = profile.twitter;
   if (xUrl && (isValidDomain(xUrl, 'twitter.com') || isValidDomain(xUrl, 'x.com') || xUrl.includes('x.com') || xUrl.includes('twitter.com'))) {
     links.push({
@@ -100,7 +192,7 @@ export const SocialLinksRow: React.FC<SocialLinksRowProps> = ({
     });
   }
 
-  // 5. Facebook
+  // 11. Facebook
   if (profile.facebook && (isValidDomain(profile.facebook, 'facebook.com') || profile.facebook.includes('facebook.com'))) {
     links.push({
       key: 'facebook',
@@ -111,7 +203,7 @@ export const SocialLinksRow: React.FC<SocialLinksRowProps> = ({
     });
   }
 
-  // 6. Instagram
+  // 12. Instagram
   if (profile.instagram && (isValidDomain(profile.instagram, 'instagram.com') || profile.instagram.includes('instagram.com'))) {
     links.push({
       key: 'instagram',
@@ -122,7 +214,7 @@ export const SocialLinksRow: React.FC<SocialLinksRowProps> = ({
     });
   }
 
-  // 7. TikTok
+  // 13. TikTok
   if (profile.tiktok && (isValidDomain(profile.tiktok, 'tiktok.com') || profile.tiktok.includes('tiktok.com'))) {
     links.push({
       key: 'tiktok',
@@ -137,7 +229,7 @@ export const SocialLinksRow: React.FC<SocialLinksRowProps> = ({
     });
   }
 
-  // 8. YouTube
+  // 14. YouTube
   if (profile.youtube && (isValidDomain(profile.youtube, 'youtube.com') || isValidDomain(profile.youtube, 'youtu.be') || profile.youtube.includes('youtube'))) {
     links.push({
       key: 'youtube',
@@ -148,7 +240,7 @@ export const SocialLinksRow: React.FC<SocialLinksRowProps> = ({
     });
   }
 
-  // 9. Google Scholar
+  // 15. Google Scholar
   if (profile.scholar && (isValidDomain(profile.scholar, 'scholar.google.com') || profile.scholar.includes('scholar.google'))) {
     links.push({
       key: 'scholar',
@@ -159,7 +251,7 @@ export const SocialLinksRow: React.FC<SocialLinksRowProps> = ({
     });
   }
 
-  // 10. ORCID
+  // 16. ORCID
   if (profile.orcid && (isValidDomain(profile.orcid, 'orcid.org') || profile.orcid.includes('orcid.org') || /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/.test(profile.orcid.trim()))) {
     const orcidUrl = profile.orcid.startsWith('http') ? profile.orcid : `https://orcid.org/${profile.orcid.trim()}`;
     links.push({
@@ -171,7 +263,14 @@ export const SocialLinksRow: React.FC<SocialLinksRowProps> = ({
     });
   }
 
-  if (links.length === 0) return null;
+  // Custom Links (up to 3, with short label max 24 chars and https URL)
+  const customLinks = Array.isArray(profile.custom_links)
+    ? profile.custom_links
+        .filter(c => c && typeof c.url === 'string' && /^https:\/\/[^\s]+$/i.test(c.url.trim()) && c.label && String(c.label).trim())
+        .slice(0, 3)
+    : [];
+
+  if (links.length === 0 && customLinks.length === 0) return null;
 
   return (
     <div className={`flex flex-wrap items-center gap-1.5 ${className}`}>
@@ -186,6 +285,21 @@ export const SocialLinksRow: React.FC<SocialLinksRowProps> = ({
           className={`p-2 rounded-xl border bg-[var(--card)] transition-all active:scale-95 flex items-center justify-center cursor-pointer shadow-xs ${l.colorClass}`}
         >
           {l.icon}
+        </a>
+      ))}
+
+      {customLinks.map((c, idx) => (
+        <a
+          key={`custom-${idx}`}
+          href={c.url.trim()}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={c.label.trim()}
+          aria-label={c.label.trim()}
+          className="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] text-xs text-[var(--fg)] hover:text-[var(--gold)] hover:border-[var(--gold)]/40 transition-all active:scale-95 shadow-xs"
+        >
+          <ExternalLink className="w-3.5 h-3.5 text-[var(--fg-muted)]" />
+          <span className="font-medium truncate max-w-[140px]">{c.label.trim().slice(0, 24)}</span>
         </a>
       ))}
     </div>
