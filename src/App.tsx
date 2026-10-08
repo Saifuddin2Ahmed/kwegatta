@@ -12,7 +12,21 @@ import { Footer } from './components/Footer';
 import { EventsView } from './components/EventsView';
 import { PinnedAnnouncementBar } from './components/PinnedAnnouncementBar';
 import { Profile, Post, NotificationItem, Follow } from './types';
-import { db, APP_NAME, ensureAuthToken, claimExistingProfile, fetchMyAccountProfile } from './services/api';
+import {
+  db,
+  APP_NAME,
+  ensureAuthToken,
+  claimExistingProfile,
+  fetchMyAccountProfile
+} from './services/api';
+import {
+  ThemePreference,
+  getStoredThemePreference,
+  saveThemePreference,
+  resolveTheme,
+  getNextThemePreference,
+  applyThemeToDocument
+} from './utils';
 import { auth, handleRedirectResult, logOut } from './services/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { AuthModal } from './components/AuthModal';
@@ -26,7 +40,7 @@ const LicenseView = React.lazy(() => import('./components/LicenseView').then(m =
 const OnboardingChat = React.lazy(() => import('./components/OnboardingChat').then(m => ({ default: m.OnboardingChat })));
 
 export default function App() {
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [themePreference, setThemePreference] = useState<ThemePreference>(getStoredThemePreference);
   const [activeTab, setActiveTab] = useState<string>('home');
   const [viewedProfileId, setViewedProfileId] = useState<string | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
@@ -84,26 +98,44 @@ export default function App() {
     };
   }, []);
 
-  // Initialize theme (default to dark ink theme)
+  // Initialize theme: follows device preference by default, syncs with media query
   useEffect(() => {
-    const savedTheme = (localStorage.getItem('kw_theme') as 'dark' | 'light') || 'dark';
-    setTheme(savedTheme);
-    document.documentElement.dataset.theme = savedTheme;
+    const pref = getStoredThemePreference();
+    setThemePreference(pref);
+    const resolved = resolveTheme(pref);
+    applyThemeToDocument(resolved);
 
-    // Check system config
-    fetch('/api/config')
-      .then(res => res.json())
-      .then(cfg => {
-        if (cfg?.isDemoMode) setIsDemoMode(true);
-      })
-      .catch(() => {});
+    // Listen to device preference change if preference is 'system'
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      const mql = window.matchMedia('(prefers-color-scheme: light)');
+      const handler = (e: MediaQueryListEvent) => {
+        if (getStoredThemePreference() === 'system') {
+          const nextResolved = e.matches ? 'light' : 'dark';
+          applyThemeToDocument(nextResolved);
+        }
+      };
+      mql.addEventListener('change', handler);
+      return () => mql.removeEventListener('change', handler);
+    }
   }, []);
 
-  const toggleTheme = () => {
-    const next = theme === 'dark' ? 'light' : 'dark';
-    setTheme(next);
-    document.documentElement.dataset.theme = next;
-    localStorage.setItem('kw_theme', next);
+  // Ensure live projector wall (#/wall) is always dark
+  useEffect(() => {
+    if (activeTab === 'wall') {
+      applyThemeToDocument('dark');
+    } else {
+      applyThemeToDocument(resolveTheme(themePreference));
+    }
+  }, [activeTab, themePreference]);
+
+  const cycleTheme = () => {
+    const nextPref = getNextThemePreference(themePreference);
+    setThemePreference(nextPref);
+    saveThemePreference(nextPref);
+    const nextResolved = resolveTheme(nextPref);
+    if (activeTab !== 'wall') {
+      applyThemeToDocument(nextResolved);
+    }
   };
 
   const showToast = (msg: string) => {
@@ -430,8 +462,8 @@ export default function App() {
       <Header
         currentProfile={currentProfile}
         unreadCount={unreadCount}
-        theme={theme}
-        onToggleTheme={toggleTheme}
+        themePreference={themePreference}
+        onCycleTheme={cycleTheme}
         searchQuery={searchQuery}
         onSearchChange={q => {
           setSearchQuery(q);
@@ -445,10 +477,10 @@ export default function App() {
         isDemoMode={isDemoMode}
       />
 
-      {/* Navigation tabs (visible when user is onboarded) */}
+      {/* Mobile bottom tab bar for signed-in members */}
       {currentProfile && activeTab !== 'onboard' && (
         <NavTabs
-          activeTab={activeTab === 'userProfile' ? '' : activeTab}
+          activeTab={activeTab === 'userProfile' ? 'me' : activeTab}
           unreadCount={unreadCount}
           onTabChange={navigateTo}
         />
@@ -456,11 +488,11 @@ export default function App() {
 
       {/* Toast Notification Banner */}
       {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 max-w-sm p-4 rounded-xl bg-[var(--card)] border border-[var(--card-border)] shadow-2xl text-xs font-medium text-[var(--fg)] flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-3">
+        <div className="fixed bottom-5 right-5 z-50 max-w-sm p-4 rounded-xl bg-[var(--card)] border border-[var(--card-border)] shadow-2xl text-[13px] font-medium text-[var(--fg)] flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-3">
           <span>{toastMessage}</span>
           <button
             onClick={() => setToastMessage(null)}
-            className="text-[var(--fg-muted)] hover:text-[var(--fg)] text-xs font-bold p-1 cursor-pointer"
+            className="text-[var(--fg-muted)] hover:text-[var(--fg)] text-[13px] font-bold p-1 cursor-pointer"
             aria-label="Dismiss toast"
           >
             ✕
@@ -468,28 +500,37 @@ export default function App() {
         </div>
       )}
 
-      {/* New Version Ready Notification Bar */}
+      {/* New Version Ready Notification Bar - small dismissible bar that never covers nav or page title */}
       {showUpdateBar && (
         <aside
           role="status"
           aria-live="polite"
-          className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center justify-between gap-4 px-4 py-2.5 rounded-xl bg-[var(--card)] border border-[var(--gold)] shadow-2xl text-xs sm:text-sm font-medium text-[var(--fg)] max-w-md w-[calc(100%-2rem)] animate-in fade-in slide-in-from-bottom-3"
+          className="fixed bottom-20 md:bottom-6 right-4 sm:right-6 z-50 flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl bg-[var(--card)] border border-[var(--gold)] shadow-2xl text-[13px] font-medium text-[var(--fg)] max-w-sm w-[calc(100%-2rem)] sm:w-auto animate-in fade-in slide-in-from-bottom-3"
         >
           <div className="flex items-center gap-2">
             <span className="inline-block w-2 h-2 rounded-full bg-[var(--gold)] animate-pulse" />
             <span>A new version is ready</span>
           </div>
-          <button
-            onClick={() => window.location.reload()}
-            className="kw-btn kw-btn-gold text-xs py-1.5 px-3 font-semibold cursor-pointer"
-          >
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => window.location.reload()}
+              className="kw-btn kw-btn-primary text-[13px] py-1 px-3 font-semibold cursor-pointer"
+            >
+              Refresh
+            </button>
+            <button
+              onClick={() => setShowUpdateBar(false)}
+              className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] rounded cursor-pointer transition-colors"
+              aria-label="Dismiss update notification"
+            >
+              ✕
+            </button>
+          </div>
         </aside>
       )}
 
-      {/* Main Content Container with standard max-width and balanced vertical rhythm */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-8">
+      {/* Main Content Container with standard 1200px container and vertical rhythm */}
+      <main className={`flex-1 kw-container py-6 sm:py-8 space-y-6 md:space-y-10 ${currentProfile && activeTab !== 'onboard' ? 'pb-20 md:pb-8' : ''}`}>
         
         {/* Onboarding & Landing View (when visitor has no profile on home/onboard/me, or member explicitly opened onboard) */}
         {(!currentProfile && (activeTab === 'home' || activeTab === 'onboard' || activeTab === 'me')) || (currentProfile && activeTab === 'onboard') ? (

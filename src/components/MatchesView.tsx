@@ -198,7 +198,7 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="kw-container space-y-6 md:space-y-10">
       
       {/* Banner if model failed and fallback was used with explicit next step guidance */}
       {(!isAiUsed || errorMessage) && (
@@ -209,7 +209,7 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
               <span className="font-semibold text-[var(--attention)]">Keyword Matching Active:</span>{' '}
               {errorMessage || 'Gemma is currently busy'}. Results are calculated based on complementary skills.
             </p>
-            <p className="text-[11px] text-[var(--fg-muted)]">
+            <p className="text-[13px] text-[var(--fg-muted)]">
               What to do next: Click <button onClick={() => loadMatches(true)} className="underline text-[var(--gold)] font-medium inline">Refresh</button> to re-run AI inference, or explore members in the People tab.
             </p>
           </div>
@@ -224,7 +224,7 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
               Recommended Collaborators
             </h2>
             {isRefining && (
-              <span className="text-[11px] text-[var(--gold)] flex items-center gap-1.5 font-medium bg-[var(--gold-subtle)] px-2.5 py-0.5 rounded-full border border-[var(--gold)]/20 animate-pulse">
+              <span className="text-[13px] text-[var(--gold)] flex items-center gap-1.5 font-medium bg-[var(--gold-subtle)] px-2.5 py-0.5 rounded-full border border-[var(--gold)]/20 animate-pulse">
                 <Sparkles className="w-3 h-3 animate-spin" />
                 <span>Refining with Gemma 4...</span>
               </span>
@@ -407,12 +407,12 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
                         </span>
                         {/* Requirement 3: Labelled Quick match or AI match */}
                         {m.matchType === 'quick' ? (
-                          <span className="kw-badge text-[10px] bg-[var(--bg-subtle)] text-[var(--fg-muted)] border border-[var(--card-border)] flex items-center gap-1 font-medium transition-all">
+                          <span className="kw-badge text-[13px] bg-[var(--bg-subtle)] text-[var(--fg-muted)] border border-[var(--card-border)] flex items-center gap-1 font-medium transition-all">
                             <Zap className="w-2.5 h-2.5 text-[var(--gold)]" />
                             <span>Quick match</span>
                           </span>
                         ) : (
-                          <span className="kw-badge text-[10px] bg-[var(--gold-subtle)] text-[var(--gold)] border border-[var(--gold)]/30 flex items-center gap-1 font-semibold transition-all animate-in fade-in">
+                          <span className="kw-badge text-[13px] bg-[var(--gold-subtle)] text-[var(--gold)] border border-[var(--gold)]/30 flex items-center gap-1 font-semibold transition-all animate-in fade-in">
                             <Sparkles className="w-2.5 h-2.5" />
                             <span>AI match</span>
                           </span>

@@ -533,13 +533,13 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
               <button
                 type="button"
                 onClick={handleResetDraft}
-                className="text-[11px] text-[var(--fg-subtle)] hover:text-[var(--danger)] transition-colors underline cursor-pointer ml-2"
+                className="text-[13px] text-[var(--fg-subtle)] hover:text-[var(--danger)] transition-colors underline cursor-pointer ml-2"
               >
                 Start over
               </button>
             )}
           </div>
-          <div className="flex items-center gap-1.5 text-[var(--gold)] font-medium text-[11px] tabular-nums">
+          <div className="flex items-center gap-1.5 text-[var(--gold)] font-medium text-[13px] tabular-nums">
             <Clock className="w-3.5 h-3.5" />
             <span>~{(6 - screenIndex) * 15}s left</span>
           </div>
@@ -563,7 +563,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                   title={`Step ${idx + 1} of 6: ${name}`}
                 />
                 <span
-                  className={`text-[10px] font-medium hidden sm:block truncate w-full text-center ${
+                  className={`text-[13px] font-medium hidden sm:block truncate w-full text-center ${
                     isCurrent
                       ? 'text-[var(--gold)] font-bold'
                       : isDone
@@ -714,12 +714,12 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                   </div>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {(savedProfile.roles || [savedProfile.role]).filter(Boolean).map(r => (
-                      <span key={r} className="kw-badge kw-badge-teal text-[10px] font-medium">
+                      <span key={r} className="kw-badge kw-badge-teal text-[13px] font-medium">
                         {r}
                       </span>
                     ))}
                     {savedProfile.location && (
-                      <span className="kw-badge text-[10px] bg-[var(--card)] text-[var(--fg-muted)] flex items-center gap-0.5">
+                      <span className="kw-badge text-[13px] bg-[var(--card)] text-[var(--fg-muted)] flex items-center gap-0.5">
                         <MapPin className="w-2.5 h-2.5" />
                         <span>{savedProfile.location}</span>
                       </span>
@@ -732,7 +732,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
               </p>
               <div className="flex flex-wrap gap-1.5 pt-1">
                 {savedProfile.tags?.map((t: string) => (
-                  <span key={t} className="kw-badge kw-badge-gold text-[10px]">
+                  <span key={t} className="kw-badge kw-badge-gold text-[13px]">
                     #{t}
                   </span>
                 ))}
@@ -1061,7 +1061,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                             setFormData(prev => ({ ...prev, offers: current + sug }));
                           }
                         }}
-                        className="text-[11px] font-medium py-1 px-2.5 rounded-lg bg-[var(--bg-subtle)] border border-[var(--card-border)] hover:border-[var(--gold)] text-[var(--fg-muted)] hover:text-[var(--fg)] active:scale-95 transition-all cursor-pointer"
+                        className="text-[13px] font-medium py-1 px-2.5 rounded-lg bg-[var(--bg-subtle)] border border-[var(--card-border)] hover:border-[var(--gold)] text-[var(--fg-muted)] hover:text-[var(--fg)] active:scale-95 transition-all cursor-pointer"
                       >
                         + {sug}
                       </button>
@@ -1092,7 +1092,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                             setFormData(prev => ({ ...prev, needs: current + need }));
                           }
                         }}
-                        className="text-[11px] font-medium py-1 px-2.5 rounded-lg bg-[var(--bg-subtle)] border border-[var(--card-border)] hover:border-[var(--teal)] text-[var(--fg-muted)] hover:text-[var(--fg)] active:scale-95 transition-all cursor-pointer"
+                        className="text-[13px] font-medium py-1 px-2.5 rounded-lg bg-[var(--bg-subtle)] border border-[var(--card-border)] hover:border-[var(--teal)] text-[var(--fg-muted)] hover:text-[var(--fg)] active:scale-95 transition-all cursor-pointer"
                       >
                         + {need}
                       </button>
@@ -1160,7 +1160,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                             setFormData(prev => ({ ...prev, teaches: current + s }));
                           }
                         }}
-                        className="text-[11px] font-medium py-1 px-2 rounded bg-[var(--bg-subtle)] border border-[var(--card-border)] hover:border-[var(--teal)] text-[var(--fg-muted)] cursor-pointer"
+                        className="text-[13px] font-medium py-1 px-2 rounded bg-[var(--bg-subtle)] border border-[var(--card-border)] hover:border-[var(--teal)] text-[var(--fg-muted)] cursor-pointer"
                       >
                         + {s}
                       </button>
@@ -1191,7 +1191,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                             setFormData(prev => ({ ...prev, learns: current + s }));
                           }
                         }}
-                        className="text-[11px] font-medium py-1 px-2 rounded bg-[var(--bg-subtle)] border border-[var(--card-border)] hover:border-[var(--gold)] text-[var(--fg-muted)] cursor-pointer"
+                        className="text-[13px] font-medium py-1 px-2 rounded bg-[var(--bg-subtle)] border border-[var(--card-border)] hover:border-[var(--gold)] text-[var(--fg-muted)] cursor-pointer"
                       >
                         + {s}
                       </button>
@@ -1321,7 +1321,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                             <span>{photoErrorMsg}</span>
                           </div>
                         )}
-                        <p className="text-[11px] text-[var(--fg-muted)] truncate">
+                        <p className="text-[13px] text-[var(--fg-muted)] truncate">
                           Will appear on your match cards and live wall.
                         </p>
                       </div>

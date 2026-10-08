@@ -883,7 +883,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   </div>
                 )}
                 <div className="space-y-1">
-                  <label className="text-[11px] font-semibold text-[var(--fg-muted)] block">Username</label>
+                  <label className="text-[13px] font-semibold text-[var(--fg-muted)] block">Username</label>
                   <input
                     type="text"
                     value={username}
@@ -893,7 +893,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[11px] font-semibold text-[var(--fg-muted)] block">Emergency Password</label>
+                  <label className="text-[13px] font-semibold text-[var(--fg-muted)] block">Emergency Password</label>
                   <input
                     type="password"
                     value={password}
@@ -913,7 +913,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
             )}
           </div>
         ) : (
-          <p className="text-[11px] text-[var(--fg-muted)] text-center pt-2">
+          <p className="text-[13px] text-[var(--fg-muted)] text-center pt-2">
             Emergency passcode fallback is disabled (enable with <code>ADMIN_FALLBACK=true</code>).
           </p>
         )}
@@ -923,7 +923,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   // 3. Authenticated Admin Dashboard
   return (
-    <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in pb-12">
+    <div className="kw-container space-y-6 md:space-y-10 animate-in fade-in pb-12">
       {/* Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4 p-4 kw-card">
         <div className="flex items-center gap-3">
@@ -934,7 +934,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-bold font-display">Kwegatta Organiser Dashboard</h1>
               {adminStatus?.adminName && (
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-[var(--gold)] border border-amber-500/30">
+                <span className="px-2 py-0.5 rounded text-[13px] font-bold bg-amber-500/15 text-[var(--gold)] border border-amber-500/30">
                   {adminStatus.adminName}
                 </span>
               )}
@@ -1044,7 +1044,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       <div className="space-y-1.5 min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                            className={`px-2 py-0.5 rounded text-[13px] font-bold uppercase ${
                               item.kind === 'event'
                                 ? 'bg-amber-500/15 text-[var(--gold)]'
                                 : 'bg-emerald-500/15 text-emerald-400'
@@ -1052,20 +1052,20 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           >
                             {item.kind === 'event' ? 'Event' : item.opportunity_type || 'Opportunity'}
                           </span>
-                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          <span className="px-2 py-0.5 rounded text-[13px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                             Pending Approval
                           </span>
-                          <span className="text-[11px] text-[var(--fg-muted)]">
+                          <span className="text-[13px] text-[var(--fg-muted)]">
                             {item.datetime || `Deadline: ${item.deadline}`}
                           </span>
                         </div>
                         <h4 className="text-sm font-bold text-[var(--fg)]">{item.title}</h4>
                         <p className="text-xs text-[var(--fg-muted)] line-clamp-2">{item.description}</p>
-                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--fg-muted)]">
+                        <div className="flex flex-wrap items-center gap-2 text-[13px] text-[var(--fg-muted)]">
                           <span>
                             Submitted by <strong className="text-[var(--gold)]">{item.author_name || item.author_id}</strong>
                             {item.author_is_organiser && (
-                              <span className="ml-1 px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                              <span className="ml-1 px-1.5 py-0.2 rounded text-[13px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">
                                 Organiser
                               </span>
                             )}
@@ -1314,7 +1314,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     <div className="space-y-1.5 min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                          className={`px-2 py-0.5 rounded text-[13px] font-bold uppercase ${
                             item.kind === 'event'
                               ? 'bg-amber-500/15 text-[var(--gold)]'
                               : 'bg-emerald-500/15 text-emerald-400'
@@ -1323,7 +1323,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           {item.kind === 'event' ? 'Event' : item.opportunity_type || 'Opportunity'}
                         </span>
                         <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                          className={`px-2 py-0.5 rounded text-[13px] font-semibold ${
                             item.published
                               ? 'bg-emerald-500/15 text-emerald-300'
                               : 'bg-gray-500/15 text-[var(--fg-muted)]'
@@ -1331,7 +1331,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         >
                           {item.published ? 'Published' : 'Draft / Unpublished'}
                         </span>
-                        <span className="text-[11px] text-[var(--fg-muted)]">
+                        <span className="text-[13px] text-[var(--fg-muted)]">
                           {item.datetime || `Deadline: ${item.deadline}`}
                         </span>
                       </div>
@@ -1341,7 +1341,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       <p className="text-xs text-[var(--fg-muted)] truncate">
                         {item.location || item.link}
                       </p>
-                      <p className="text-[11px] text-[var(--gold)]">
+                      <p className="text-[13px] text-[var(--gold)]">
                         {item.attendee_ids?.length || 0} {item.kind === 'event' ? 'going' : 'interested'}
                       </p>
                     </div>
@@ -1426,11 +1426,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             <p className="font-bold text-[var(--fg)] truncate">
                               {member?.name || id}
                             </p>
-                            <p className="text-[11px] text-[var(--fg-muted)] truncate">
+                            <p className="text-[13px] text-[var(--fg-muted)] truncate">
                               {member?.role || 'Member'} • {member?.email || 'Email private'}
                             </p>
                           </div>
-                          <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
+                          <span className="text-[13px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">
                             {viewingAttendeesEvent.kind === 'event' ? 'Going' : 'Interested'}
                           </span>
                         </div>
@@ -1667,17 +1667,17 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                 {member.name}
                               </h4>
                               {index === 0 && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--gold-subtle)] text-[var(--gold)] font-medium">
+                                <span className="text-[13px] px-1.5 py-0.5 rounded bg-[var(--gold-subtle)] text-[var(--gold)] font-medium">
                                   Lead / 1st
                                 </span>
                               )}
                               {member.hidden && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-medium">
+                                <span className="text-[13px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-medium">
                                   Hidden
                                 </span>
                               )}
                               {member.linked_profile_id && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--teal-subtle)] text-[var(--teal)] font-medium">
+                                <span className="text-[13px] px-1.5 py-0.5 rounded bg-[var(--teal-subtle)] text-[var(--teal)] font-medium">
                                   Linked Account
                                 </span>
                               )}
@@ -1697,13 +1697,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             )}
                             <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-[var(--fg-muted)]">
                               {member.github && (
-                                <span className="flex items-center gap-1 text-[11px]">
+                                <span className="flex items-center gap-1 text-[13px]">
                                   <Github className="w-3 h-3 text-[var(--fg-subtle)]" />
                                   <span>@{member.github}</span>
                                 </span>
                               )}
                               {member.linkedin && (
-                                <span className="flex items-center gap-1 text-[11px]">
+                                <span className="flex items-center gap-1 text-[13px]">
                                   <Linkedin className="w-3 h-3 text-[var(--fg-subtle)]" />
                                   <span>LinkedIn</span>
                                 </span>
@@ -1890,7 +1890,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         </option>
                       ))}
                     </select>
-                    <p className="text-[11px] text-[var(--fg-subtle)] mt-1">
+                    <p className="text-[13px] text-[var(--fg-subtle)] mt-1">
                       If linked, the card uses their Kwegatta account photo and links directly to their public profile.
                     </p>
                   </div>
@@ -1971,11 +1971,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         <UserCheck className="w-4 h-4 text-[var(--gold)] flex-shrink-0" />
                         <span className="font-mono font-medium truncate">{email}</span>
                         {isEnv ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-[var(--gold)] border border-amber-500/20">
+                          <span className="px-2 py-0.5 rounded text-[13px] font-bold bg-amber-500/10 text-[var(--gold)] border border-amber-500/20">
                             ADMIN_EMAILS
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                          <span className="px-2 py-0.5 rounded text-[13px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20">
                             Dashboard Admin
                           </span>
                         )}
@@ -2006,7 +2006,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
             <div className="p-4 kw-card space-y-1">
               <span className="text-xs text-[var(--fg-muted)]">Total Members</span>
               <div className="text-2xl font-bold font-display text-[var(--fg)]">{overview.members_count}</div>
-              <span className="text-[10px] text-[var(--success)] flex items-center gap-1">
+              <span className="text-[13px] text-[var(--success)] flex items-center gap-1">
                 <TrendingUp className="w-3 h-3" />
                 <span>+{overview.joined_last_hour} in last hour</span>
               </span>
@@ -2015,31 +2015,31 @@ export const AdminView: React.FC<AdminViewProps> = ({
             <div className="p-4 kw-card space-y-1">
               <span className="text-xs text-[var(--fg-muted)]">Complementary Matches</span>
               <div className="text-2xl font-bold font-display text-[var(--gold)]">{overview.matches_count}</div>
-              <span className="text-[10px] text-[var(--fg-muted)]">AI & heuristic pairs</span>
+              <span className="text-[13px] text-[var(--fg-muted)]">AI & heuristic pairs</span>
             </div>
 
             <div className="p-4 kw-card space-y-1">
               <span className="text-xs text-[var(--fg-muted)]">Connect Requests</span>
               <div className="text-2xl font-bold font-display text-[var(--teal)]">{overview.connect_requests_count}</div>
-              <span className="text-[10px] text-[var(--fg-muted)]">WhatsApp connections</span>
+              <span className="text-[13px] text-[var(--fg-muted)]">WhatsApp connections</span>
             </div>
 
             <div className="p-4 kw-card space-y-1">
               <span className="text-xs text-[var(--fg-muted)]">Community Posts</span>
               <div className="text-2xl font-bold font-display text-[var(--fg)]">{overview.posts_count}</div>
-              <span className="text-[10px] text-[var(--fg-muted)]">Needs & offers</span>
+              <span className="text-[13px] text-[var(--fg-muted)]">Needs & offers</span>
             </div>
 
             <div className="p-4 kw-card space-y-1">
               <span className="text-xs text-[var(--fg-muted)]">Follow Connections</span>
               <div className="text-2xl font-bold font-display text-[var(--fg)]">{overview.follows_count}</div>
-              <span className="text-[10px] text-[var(--fg-muted)]">Attendee network</span>
+              <span className="text-[13px] text-[var(--fg-muted)]">Attendee network</span>
             </div>
 
             <div className="p-4 kw-card space-y-1">
               <span className="text-xs text-[var(--fg-muted)]">Moderated Members</span>
               <div className="text-2xl font-bold font-display text-[var(--fg)]">{overview.hidden_members_count}</div>
-              <span className="text-[10px] text-[var(--fg-muted)]">Hidden or suspended</span>
+              <span className="text-[13px] text-[var(--fg-muted)]">Hidden or suspended</span>
             </div>
           </div>
         </div>
@@ -2088,7 +2088,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
-              <thead className="bg-[var(--bg-subtle)] text-[var(--fg-muted)] border-b border-[var(--card-border)] uppercase tracking-wider text-[10px]">
+              <thead className="bg-[var(--bg-subtle)] text-[var(--fg-muted)] border-b border-[var(--card-border)] uppercase tracking-wider text-[13px]">
                 <tr>
                   <th className="p-3">Member</th>
                   <th className="p-3">Role</th>
@@ -2116,26 +2116,26 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           <div className="font-semibold text-[var(--fg)] flex items-center gap-2">
                             <span>{member.name}</span>
                             {member.is_organiser && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 inline-flex items-center gap-0.5">
+                              <span className="px-1.5 py-0.5 rounded text-[13px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 inline-flex items-center gap-0.5">
                                 <Award className="w-2.5 h-2.5" />
                                 Organiser
                               </span>
                             )}
                             {member.suspended && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                              <span className="px-1.5 py-0.5 rounded text-[13px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                                 Suspended
                               </span>
                             )}
                             {member.hidden && !member.suspended && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-gray-500/20 text-[var(--fg-muted)]">
+                              <span className="px-1.5 py-0.5 rounded text-[13px] font-bold bg-gray-500/20 text-[var(--fg-muted)]">
                                 Hidden
                               </span>
                             )}
                           </div>
-                          <div className="text-[10px] text-[var(--fg-muted)] font-mono">{member.id}</div>
+                          <div className="text-[13px] text-[var(--fg-muted)] font-mono">{member.id}</div>
                         </td>
                         <td className="p-3 whitespace-nowrap">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[var(--bg-subtle)] text-[var(--fg)]">
+                          <span className="px-2 py-0.5 rounded-full text-[13px] font-semibold bg-[var(--bg-subtle)] text-[var(--fg)]">
                             {member.role}
                           </span>
                         </td>
@@ -2151,7 +2151,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           ) : (
                             <button
                               onClick={() => handleTogglePhoneReveal(member.id)}
-                              className="kw-btn text-[10px] py-1 px-2"
+                              className="kw-btn text-[13px] py-1 px-2"
                             >
                               <Eye className="w-3 h-3" />
                               <span>Show Phone</span>
@@ -2162,7 +2162,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           <div className="flex items-center gap-1.5">
                             <button
                               onClick={() => handleAdminAction('toggle_hide_member', { id: member.id, hidden: !member.hidden })}
-                              className="kw-btn text-[10px] py-1 px-2"
+                              className="kw-btn text-[13px] py-1 px-2"
                             >
                               {member.hidden ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                               <span>{member.hidden ? 'Unhide' : 'Hide'}</span>
@@ -2171,7 +2171,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             {/* Trusted Organiser Toggle */}
                             <button
                               onClick={() => handleToggleOrganiser(member.id, member.is_organiser)}
-                              className={`kw-btn text-[10px] py-1 px-2 ${
+                              className={`kw-btn text-[13px] py-1 px-2 ${
                                 member.is_organiser
                                   ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
                                   : 'text-purple-400 hover:bg-purple-500/10'
@@ -2193,7 +2193,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                   }
                                 }
                               }}
-                              className={`kw-btn text-[10px] py-1 px-2 ${
+                              className={`kw-btn text-[13px] py-1 px-2 ${
                                 member.suspended
                                   ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                                   : 'text-amber-400 hover:bg-amber-500/10'
@@ -2210,7 +2210,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                   handleAdminAction('delete_member', { id: member.id });
                                 }
                               }}
-                              className="kw-btn kw-btn-danger text-[10px] py-1 px-2"
+                              className="kw-btn kw-btn-danger text-[13px] py-1 px-2"
                               title="Delete member"
                             >
                               <Trash2 className="w-3 h-3" />
@@ -2251,7 +2251,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-[var(--fg)]">{report.reported_name}</span>
-                        <span className="px-2 py-0.5 rounded text-[10px] uppercase font-bold bg-red-500/10 text-red-400">
+                        <span className="px-2 py-0.5 rounded text-[13px] uppercase font-bold bg-red-500/10 text-red-400">
                           {report.status}
                         </span>
                       </div>
@@ -2311,8 +2311,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-xs text-[var(--fg)]">{post.author_name}</span>
-                    <span className="text-[10px] text-[var(--fg-muted)]">{new Date(post.created_at).toLocaleTimeString()}</span>
-                    <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-[var(--bg-subtle)] text-[var(--fg)]">
+                    <span className="text-[13px] text-[var(--fg-muted)]">{new Date(post.created_at).toLocaleTimeString()}</span>
+                    <span className="px-1.5 py-0.5 rounded text-[13px] font-mono bg-[var(--bg-subtle)] text-[var(--fg)]">
                       {post.kind}
                     </span>
                   </div>
@@ -2454,7 +2454,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
-              <thead className="bg-[var(--bg-subtle)] text-[var(--fg-muted)] border-b border-[var(--card-border)] uppercase tracking-wider text-[10px]">
+              <thead className="bg-[var(--bg-subtle)] text-[var(--fg-muted)] border-b border-[var(--card-border)] uppercase tracking-wider text-[13px]">
                 <tr>
                   <th className="p-3">Timestamp</th>
                   <th className="p-3">Action</th>
@@ -2462,7 +2462,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   <th className="p-3">Details</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[var(--card-border)] font-mono text-[11px]">
+              <tbody className="divide-y divide-[var(--card-border)] font-mono text-[13px]">
                 {auditLog.map(item => (
                   <tr key={item.id}>
                     <td className="p-3 text-[var(--fg-muted)] whitespace-nowrap">

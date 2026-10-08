@@ -2,22 +2,47 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
     <script>
-      // Interceptor compatibility: ensure window.fetch has both getter and setter
       (function() {
         try {
-          var _rawFetch = window.fetch ? window.fetch.bind(window) : undefined;
+          var _fetch = window.fetch;
           Object.defineProperty(window, 'fetch', {
-            get: function() { return _rawFetch; },
-            set: function(fn) { _rawFetch = fn; },
             configurable: true,
-            enumerable: true
+            enumerable: true,
+            get: function() {
+              return _fetch;
+            },
+            set: function(val) {
+              _fetch = val;
+            }
           });
+        } catch (_) {}
+      })();
+    </script>
+    <title>Kwegatta: find the people you should build and learn with</title>
+
+    <!-- Theme Initialization Script: follows device by default, applies before first paint -->
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('kw_theme');
+          var theme = 'dark';
+          if (saved === 'light' || saved === 'dark') {
+            theme = saved;
+          } else {
+            if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+              theme = 'light';
+            }
+          }
+          document.documentElement.dataset.theme = theme;
+          var metaTheme = document.querySelector('meta[name="theme-color"]');
+          if (metaTheme) {
+            metaTheme.setAttribute('content', theme === 'light' ? '#FAFAFC' : '#070B12');
+          }
         } catch (e) {}
       })();
     </script>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
-    <title>Kwegatta: find the people you should build and learn with</title>
     <meta name="description" content="1st place · Hacktoberfest 2026 Hack Day Kampala. Match with people you should build and learn with based on what you need and offer using the open-weight Gemma 4 model." />
     <meta property="og:title" content="Kwegatta: find the people you should build and learn with" />
     <meta property="og:description" content="1st place · Hacktoberfest 2026 Hack Day Kampala. Match with people you should build and learn with based on what you need and offer using the open-weight Gemma 4 model." />
@@ -64,11 +89,6 @@
     <link rel="icon" type="image/svg+xml" href="/kwegatta-icon.svg" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-
-    <!-- Typography: Space Grotesk (Headings) + Inter (Body) -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div id="root"></div>

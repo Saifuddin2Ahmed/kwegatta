@@ -7,7 +7,7 @@ interface PrivacyViewProps {
 
 export const PrivacyView: React.FC<PrivacyViewProps> = ({ onBack }) => {
   return (
-    <div className="max-w-4xl mx-auto py-4 sm:py-8 space-y-8 animate-in fade-in">
+    <div className="kw-container py-4 sm:py-8 space-y-6 md:space-y-10 animate-in fade-in">
       {/* Top back navigation */}
       <div className="flex items-center justify-between">
         <button
@@ -78,20 +78,20 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({ onBack }) => {
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="p-4 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] space-y-1.5">
-              <h3 className="font-semibold text-xs text-[var(--fg)] uppercase tracking-wider">Identity &amp; Role</h3>
-              <p className="text-xs">Full name, chosen roles (Founder, Business, Developer, Designer, Domain expert, Mentor, Student), location or Remote, and hours per week available.</p>
+              <h3 className="font-semibold text-[14px] text-[var(--fg)]">Identity and role</h3>
+              <p className="text-[13px]">Full name, chosen roles (Founder, Business, Developer, Designer, Domain expert, Mentor, Student), location or Remote, and hours per week available.</p>
             </div>
             <div className="p-4 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] space-y-1.5">
-              <h3 className="font-semibold text-xs text-[var(--fg)] uppercase tracking-wider">Collaboration Needs</h3>
-              <p className="text-xs">What you Offer (skills, tools, market insight), What you Need (partners or technical help), What you Teach (mentoring), and What you Learn.</p>
+              <h3 className="font-semibold text-[14px] text-[var(--fg)]">Collaboration needs</h3>
+              <p className="text-[13px]">What you offer (skills, tools, market insight), what you need (partners or technical help), what you teach (mentoring), and what you learn.</p>
             </div>
             <div className="p-4 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] space-y-1.5">
-              <h3 className="font-semibold text-xs text-[var(--fg)] uppercase tracking-wider">Links &amp; Profiles</h3>
-              <p className="text-xs">Optional GitHub username (for coders), or LinkedIn / personal website (for business, founders, designers, and domain experts). Both strictly voluntary.</p>
+              <h3 className="font-semibold text-[14px] text-[var(--fg)]">Links and profiles</h3>
+              <p className="text-[13px]">Optional GitHub username (for coders), or LinkedIn / personal website (for business, founders, designers, and domain experts). Both strictly voluntary.</p>
             </div>
             <div className="p-4 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] space-y-1.5">
-              <h3 className="font-semibold text-xs text-[var(--fg)] uppercase tracking-wider">Direct WhatsApp</h3>
-              <p className="text-xs">WhatsApp phone number provided voluntarily so peers can connect in one tap, with member visibility toggle.</p>
+              <h3 className="font-semibold text-[14px] text-[var(--fg)]">Direct WhatsApp</h3>
+              <p className="text-[13px]">WhatsApp phone number provided voluntarily so peers can connect in one tap, with member visibility toggle.</p>
             </div>
           </div>
         </div>

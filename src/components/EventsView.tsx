@@ -449,7 +449,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
     const attendees = detailedItem.attendees || [];
 
     return (
-      <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-200">
+      <div className="kw-container space-y-6 md:space-y-10 animate-in fade-in duration-200">
         {/* Top Back Nav & Share */}
         <div className="flex items-center justify-between">
           <button
@@ -486,7 +486,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
               <span
-                className={`px-2.5 py-1 rounded-full text-[11px] font-bold tracking-wide uppercase ${
+                className={`px-2.5 py-1 rounded-full text-[13px] font-bold tracking-wide uppercase ${
                   isEvent
                     ? 'bg-amber-500/15 text-[var(--gold)] border border-amber-500/30'
                     : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
@@ -513,12 +513,12 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 </span>
               )}
               {detailedItem.status === 'pending' && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                <span className="px-2 py-0.5 rounded-full text-[13px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                   Pending approval
                 </span>
               )}
               {detailedItem.status === 'rejected' && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                <span className="px-2 py-0.5 rounded-full text-[13px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
                   Rejected: {detailedItem.rejection_reason || 'Guidelines'}
                 </span>
               )}
@@ -539,7 +539,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 >
                   {detailedItem.author_name}
                   {detailedItem.author_is_organiser && (
-                    <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 inline-flex items-center gap-0.5">
+                    <span className="px-1.5 py-0.2 rounded text-[13px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 inline-flex items-center gap-0.5">
                       <Award className="w-3 h-3" />
                       Organiser
                     </span>
@@ -683,16 +683,16 @@ export const EventsView: React.FC<EventsViewProps> = ({
                           <h4 className="text-xs font-bold text-[var(--fg)] truncate">
                             {m.profile.name}
                           </h4>
-                          <span className="text-[10px] font-bold text-[var(--gold)] bg-amber-500/10 px-1.5 py-0.5 rounded">
+                          <span className="text-[13px] font-bold text-[var(--gold)] bg-amber-500/10 px-1.5 py-0.5 rounded">
                             {m.score}% Match
                           </span>
                         </div>
-                        <p className="text-[11px] text-[var(--fg-muted)] truncate">
+                        <p className="text-[13px] text-[var(--fg-muted)] truncate">
                           {m.profile.role} {m.profile.headline ? `• ${m.profile.headline}` : ''}
                         </p>
                       </div>
                     </div>
-                    <p className="text-[11px] text-[var(--gold)] bg-amber-500/5 p-2 rounded border border-amber-500/20 italic">
+                    <p className="text-[13px] text-[var(--gold)] bg-amber-500/5 p-2 rounded border border-amber-500/20 italic">
                       "{m.reason}"
                     </p>
                   </div>
@@ -730,7 +730,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     <p className="text-xs font-semibold text-[var(--fg)] truncate">
                       {attendee.name}
                     </p>
-                    <p className="text-[10px] text-[var(--fg-muted)] truncate">
+                    <p className="text-[13px] text-[var(--fg-muted)] truncate">
                       {attendee.role || 'Member'}
                     </p>
                   </div>
@@ -745,7 +745,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
   // Render Overview List
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="kw-container space-y-6 md:space-y-10">
       {/* Top Banner / Heading */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -814,12 +814,20 @@ export const EventsView: React.FC<EventsViewProps> = ({
           ))}
         </div>
       ) : upcomingItems.length === 0 && pastItems.length === 0 ? (
-        <div className="kw-card p-12 text-center space-y-3">
+        <div className="kw-card p-12 text-center space-y-4">
           <Calendar className="w-8 h-8 text-[var(--gold)] mx-auto opacity-70" />
-          <h3 className="text-sm font-bold text-[var(--fg)]">No items listed yet</h3>
-          <p className="text-xs text-[var(--fg-muted)] max-w-sm mx-auto">
+          <h3 className="text-base font-bold text-[var(--fg)]">No events scheduled</h3>
+          <p className="text-[13px] text-[var(--fg-muted)] max-w-sm mx-auto">
             Check back soon for upcoming Kampala developer events, training sessions, and grants.
           </p>
+          <div>
+            <button
+              onClick={openSuggestModal}
+              className="kw-btn kw-btn-primary text-[13px] py-2 px-4 font-semibold cursor-pointer"
+            >
+              Suggest an event
+            </button>
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
@@ -842,7 +850,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     <div className="space-y-2 min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                          className={`px-2 py-0.5 rounded text-[13px] font-bold uppercase tracking-wider ${
                             isEvent
                               ? 'bg-amber-500/15 text-[var(--gold)] border border-amber-500/30'
                               : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
@@ -851,24 +859,24 @@ export const EventsView: React.FC<EventsViewProps> = ({
                           {isEvent ? 'Event' : item.opportunity_type || 'Opportunity'}
                         </span>
                         {item.datetime && (
-                          <span className="flex items-center gap-1 text-[11px] text-[var(--fg-muted)]">
+                          <span className="flex items-center gap-1 text-[13px] text-[var(--fg-muted)]">
                             <Calendar className="w-3 h-3 text-[var(--gold)]" />
                             {item.datetime}
                           </span>
                         )}
                         {item.deadline && (
-                          <span className="flex items-center gap-1 text-[11px] text-rose-400 font-medium">
+                          <span className="flex items-center gap-1 text-[13px] text-rose-400 font-medium">
                             <Clock className="w-3 h-3" />
                             Deadline: {item.deadline}
                           </span>
                         )}
                         {item.status === 'pending' && (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          <span className="px-2 py-0.5 rounded text-[13px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                             Pending approval
                           </span>
                         )}
                         {item.status === 'rejected' && (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                          <span className="px-2 py-0.5 rounded text-[13px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
                             Rejected
                           </span>
                         )}
@@ -879,7 +887,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       </h3>
 
                       {item.author_name && (
-                        <div className="flex items-center gap-1.5 text-[11px] text-[var(--fg-muted)]">
+                        <div className="flex items-center gap-1.5 text-[13px] text-[var(--fg-muted)]">
                           <span>Suggested by</span>
                           <span
                             onClick={e => {
@@ -890,7 +898,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                           >
                             {item.author_name}
                             {item.author_is_organiser && (
-                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 inline-flex items-center gap-0.5">
+                              <span className="px-1.5 py-0.2 rounded text-[13px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 inline-flex items-center gap-0.5">
                                 <Award className="w-2.5 h-2.5" />
                                 Organiser
                               </span>
@@ -923,7 +931,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   </div>
 
                   <div className="pt-3 border-t border-[var(--card-border)] flex items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center gap-2 text-[var(--fg-muted)] text-[11px]">
+                    <div className="flex items-center gap-2 text-[var(--fg-muted)] text-[13px]">
                       <Users className="w-3.5 h-3.5 text-[var(--gold)]" />
                       <span>{item.attendee_ids.length} {isEvent ? 'going' : 'interested'}</span>
                     </div>
@@ -1029,17 +1037,17 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       className="kw-card p-4 hover:border-[var(--gold)] transition-colors cursor-pointer space-y-2"
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold text-[var(--fg-muted)] uppercase">
+                        <span className="text-[13px] font-bold text-[var(--fg-muted)] uppercase">
                           {item.kind === 'event' ? 'Past Event' : 'Past Opportunity'}
                         </span>
-                        <span className="text-[11px] text-[var(--fg-muted)]">
+                        <span className="text-[13px] text-[var(--fg-muted)]">
                           {item.datetime || item.deadline}
                         </span>
                       </div>
                       <h4 className="text-sm font-semibold text-[var(--fg)]">
                         {item.title}
                       </h4>
-                      <div className="flex items-center justify-between text-[11px] text-[var(--fg-muted)]">
+                      <div className="flex items-center justify-between text-[13px] text-[var(--fg-muted)]">
                         <span>{item.attendee_ids.length} attended</span>
                         <span className="text-[var(--gold)] hover:underline">View details →</span>
                       </div>
@@ -1247,7 +1255,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
               <div>
                 <h3 className="font-bold text-sm text-[var(--fg)]">Edit Your Submission</h3>
                 {!currentProfile?.is_organiser && editingItem.status === 'published' && (
-                  <p className="text-[11px] text-amber-400 flex items-center gap-1 mt-0.5">
+                  <p className="text-[13px] text-amber-400 flex items-center gap-1 mt-0.5">
                     <AlertCircle className="w-3 h-3 flex-shrink-0" />
                     Editing date, place, or link will send this item back to pending approval.
                   </p>

@@ -7,29 +7,29 @@ interface LicenseViewProps {
 
 export const LicenseView: React.FC<LicenseViewProps> = ({ onBack }) => {
   return (
-    <div className="max-w-3xl mx-auto py-4 sm:py-8 space-y-6 animate-in fade-in">
+    <div className="kw-container py-4 sm:py-8 space-y-6 md:space-y-10 animate-in fade-in">
       {/* Top back navigation */}
       <div className="flex items-center justify-between">
         <button
           onClick={onBack}
-          className="kw-btn kw-btn-ghost text-xs py-2 px-3 flex items-center gap-1.5 cursor-pointer"
+          className="kw-btn kw-btn-ghost text-[13px] py-2 px-3 flex items-center gap-1.5 cursor-pointer"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           <span>Back</span>
         </button>
-        <span className="text-xs text-[var(--fg-muted)]">Open Source License</span>
+        <span className="text-[13px] text-[var(--fg-muted)]">Open source license</span>
       </div>
 
       {/* Header */}
       <div className="space-y-3 border-b border-[var(--card-border)] pb-6">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[var(--gold-subtle)] text-[var(--gold)] text-xs font-semibold">
-          <Scale className="w-3.5 h-3.5" />
-          <span>OSI-Approved Open Source</span>
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[var(--gold-subtle)] text-[var(--fg)] text-[13px] font-semibold">
+          <Scale className="w-3.5 h-3.5 text-[var(--gold)]" />
+          <span>OSI-approved open source</span>
         </div>
         <h1 className="text-2xl sm:text-3xl font-display font-bold text-[var(--fg)] tracking-tight">
           MIT License
         </h1>
-        <p className="text-xs sm:text-sm text-[var(--fg-muted)] leading-relaxed">
+        <p className="text-[14px] text-[var(--fg-muted)] leading-relaxed">
           Kwegatta is fully open-source software licensed under the permissive MIT License. You are free to use, modify, study, distribute, and contribute.
         </p>
       </div>
@@ -51,7 +51,7 @@ export const LicenseView: React.FC<LicenseViewProps> = ({ onBack }) => {
           The above copyright notice and this permission notice shall be included in all
           copies or substantial portions of the Software.
         </p>
-        <p className="text-[var(--fg-muted)] uppercase text-[11px] tracking-wide">
+        <p className="text-[var(--fg-muted)] uppercase text-[13px] tracking-wide">
           THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
           IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
           FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE

@@ -212,7 +212,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
   ];
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="kw-container space-y-6 md:space-y-10">
       {/* Ask Kwegatta AI Search Panel */}
       <div className="kw-card bg-[var(--card)] border border-[var(--gold)]/30 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
         <div className="flex items-center justify-between gap-3">
@@ -281,13 +281,13 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
             {/* Example prompt pills */}
             {!activeAskQuery && (
               <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                <span className="text-[11px] text-[var(--fg-subtle)] font-medium mr-1">Try:</span>
+                <span className="text-[13px] text-[var(--fg-subtle)] font-medium mr-1">Try:</span>
                 {EXAMPLE_QUERIES.map(ex => (
                   <button
                     key={ex}
                     type="button"
                     onClick={() => handleAskSubmit(ex)}
-                    className="text-[11px] py-1 px-2.5 rounded-lg bg-[var(--bg-subtle)] border border-[var(--card-border)] hover:border-[var(--gold)] text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer transition-colors active:scale-95"
+                    className="text-[13px] py-1 px-2.5 rounded-lg bg-[var(--bg-subtle)] border border-[var(--card-border)] hover:border-[var(--gold)] text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer transition-colors active:scale-95"
                   >
                     "{ex}"
                   </button>
@@ -302,7 +302,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
               <Lock className="w-4 h-4 text-[var(--gold)] flex-shrink-0" />
               <div>
                 <span className="font-semibold text-[var(--fg)]">Sign in to ask Kwegatta</span>
-                <p className="text-[11px] text-[var(--fg-muted)]">
+                <p className="text-[13px] text-[var(--fg-muted)]">
                   Ask in plain sentences to match with collaborators across Kampala and beyond.
                 </p>
               </div>
@@ -325,7 +325,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
                 <span className="font-bold text-[var(--fg)]">Results for:</span>
                 <span className="text-[var(--gold)] italic font-medium">"{activeAskQuery}"</span>
               </div>
-              <div className="text-[11px] text-[var(--fg-muted)] flex items-center gap-1.5">
+              <div className="text-[13px] text-[var(--fg-muted)] flex items-center gap-1.5">
                 {isAsking ? (
                   <>
                     <RefreshCw className="w-3 h-3 animate-spin text-[var(--gold)]" />
@@ -399,17 +399,17 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
                         {reason && (
                           <div className="p-2.5 rounded-lg bg-[var(--card)] border border-[var(--gold)]/20 text-xs text-[var(--fg)] leading-relaxed flex items-start gap-2">
                             <Sparkles className="w-3.5 h-3.5 text-[var(--gold)] flex-shrink-0 mt-0.5" />
-                            <span className="text-[11px] sm:text-xs">{reason}</span>
+                            <span className="text-[13px] sm:text-xs">{reason}</span>
                           </div>
                         )}
 
-                        <p className="text-[11px] text-[var(--fg-muted)] line-clamp-2">
+                        <p className="text-[13px] text-[var(--fg-muted)] line-clamp-2">
                           {person.offers || person.headline}
                         </p>
                       </div>
 
                       <div className="flex items-center justify-between gap-2 pt-2 border-t border-[var(--card-border)]/50 text-xs">
-                        <div className="flex flex-wrap gap-1.5 text-[10px] text-[var(--fg-subtle)]">
+                        <div className="flex flex-wrap gap-1.5 text-[13px] text-[var(--fg-subtle)]">
                           {person.tags?.slice(0, 2).map(t => (
                             <button
                               key={t}
@@ -633,7 +633,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
 
                 {/* Footer tags and profile link */}
                 <div className="flex items-center justify-between gap-2 pt-2 border-t border-[var(--card-border)]/50 text-xs">
-                  <div className="flex flex-wrap gap-2 text-[11px] text-[var(--fg-subtle)]">
+                  <div className="flex flex-wrap gap-2 text-[13px] text-[var(--fg-subtle)]">
                     {person.tags?.slice(0, 3).map(t => (
                       <button
                         key={t}

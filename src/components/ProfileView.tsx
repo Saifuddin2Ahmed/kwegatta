@@ -467,7 +467,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in">
+    <div className="kw-container space-y-6 md:space-y-10 animate-in fade-in">
       {/* Modal for 1200 x 630 Share Card */}
       {showShareCardModal && (
         <React.Suspense fallback={null}>
@@ -502,7 +502,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <p className="text-xs text-[var(--muted)]">
               {profile.name} · {profile.role}
             </p>
-            <p className="text-[11px] text-[var(--fg)]">
+            <p className="text-[13px] text-[var(--fg)]">
               Point a camera here to connect and check match compatibility instantly.
             </p>
           </div>
@@ -638,40 +638,49 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
             <div className="mt-3">
               <h1 className="text-xl font-bold text-[var(--fg)] leading-snug">{profile.name}</h1>
+              {profile.headline && (
+                <p className="text-[14px] text-[var(--fg-muted)] font-medium mt-1 leading-snug">
+                  {profile.headline}
+                </p>
+              )}
               {profile.github && (
-                <div className="text-sm text-[var(--muted)] font-normal">@{profile.github}</div>
+                <div className="text-[13px] text-[var(--muted)] font-normal mt-0.5">@{profile.github}</div>
               )}
               <div className="flex flex-wrap gap-1.5 mt-2 justify-center md:justify-start">
-                <span className="primer-label primer-label-blue text-xs">{profile.role}</span>
+                <span className="primer-label primer-label-blue text-[13px]">{profile.role}</span>
                 {profile.status && (
-                  <span className="primer-label primer-label-green text-xs">{profile.status}</span>
+                  <span className="primer-label primer-label-green text-[13px]">{profile.status}</span>
                 )}
               </div>
             </div>
           </div>
 
-          <p className="text-xs text-[var(--fg)] leading-relaxed">
-            {profile.bio || profile.headline}
-          </p>
+          {profile.bio && (
+            <p className="text-[14px] text-[var(--fg)] leading-relaxed">
+              {profile.bio}
+            </p>
+          )}
 
           {/* Social Links Row (LinkedIn, GitHub, Website, TikTok, X, Instagram, YouTube, Scholar, ORCID) */}
           <div className="pt-1">
             <SocialLinksRow profile={profile} />
           </div>
 
-          {/* Social counts */}
-          <div className="flex items-center gap-3 text-xs text-[var(--muted)]">
-            <div className="flex items-center gap-1">
-              <Users className="w-3.5 h-3.5 text-[var(--muted)]" />
-              <strong className="text-[var(--fg)] font-semibold">{followersCount}</strong>
-              <span>followers</span>
+          {/* Social counts: hide if both are 0 */}
+          {(followersCount > 0 || followingCount > 0) && (
+            <div className="flex items-center gap-3 text-[13px] text-[var(--muted)]">
+              <div className="flex items-center gap-1">
+                <Users className="w-3.5 h-3.5 text-[var(--muted)]" />
+                <strong className="text-[var(--fg)] font-semibold">{followersCount}</strong>
+                <span>followers</span>
+              </div>
+              <span>·</span>
+              <div>
+                <strong className="text-[var(--fg)] font-semibold">{followingCount}</strong>{' '}
+                <span>following</span>
+              </div>
             </div>
-            <span>·</span>
-            <div>
-              <strong className="text-[var(--fg)] font-semibold">{followingCount}</strong>{' '}
-              <span>following</span>
-            </div>
-          </div>
+          )}
 
           {/* Connect / Edit Actions & Share Card Button */}
           <div className="space-y-2">
@@ -702,7 +711,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       aria-label="Profile menu"
                     >
                       <span>More</span>
-                      <span className="text-[10px]">▾</span>
+                      <span className="text-[13px]">▾</span>
                     </button>
 
                     {showMyMoreMenu && (
@@ -822,7 +831,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       aria-label="More actions"
                     >
                       <span>More</span>
-                      <span className="text-[10px]">▾</span>
+                      <span className="text-[13px]">▾</span>
                     </button>
 
                     {showMoreMenu && (
@@ -866,7 +875,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 pt-1 text-[11px] text-[var(--fg-muted)]">
+                <div className="flex items-center gap-3 pt-1 text-[13px] text-[var(--fg-muted)]">
                   <button
                     type="button"
                     onClick={() => setShowReportModal(true)}
@@ -892,7 +901,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           {/* Account & Sign-in Section (Only for own profile) */}
           {isMine && (
             <div className="primer-box p-3.5 bg-[var(--subtle)] space-y-3 text-xs rounded-xl border border-[var(--card-border)]">
-              <div className="font-semibold text-[11px] text-[var(--muted)] uppercase tracking-wider flex items-center gap-1.5">
+              <div className="font-semibold text-[13px] text-[var(--muted)] uppercase tracking-wider flex items-center gap-1.5">
                 <Shield className="w-3.5 h-3.5 text-[var(--gold)]" />
                 <span>Account &amp; Security</span>
               </div>
@@ -905,7 +914,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </p>
                 {(hasPasswordProvider || passwordLinkedSuccess) ? (
                   <div className="flex items-center justify-between pt-1">
-                    <div className="flex items-center gap-1.5 text-emerald-500 text-[11px] font-semibold">
+                    <div className="flex items-center gap-1.5 text-emerald-500 text-[13px] font-semibold">
                       <CheckCircle2 className="w-3.5 h-3.5" />
                       <span>Password credential linked</span>
                     </div>
@@ -916,7 +925,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                           setShowAddPassword(true);
                           setPasswordLinkError(null);
                         }}
-                        className="text-[11px] font-medium text-[var(--gold)] hover:underline flex items-center gap-1 cursor-pointer"
+                        className="text-[13px] font-medium text-[var(--gold)] hover:underline flex items-center gap-1 cursor-pointer"
                       >
                         <KeyRound className="w-3 h-3" />
                         <span>Change password</span>
@@ -959,7 +968,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                           <X className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                      <p className="text-[11px] text-[var(--fg-muted)] leading-relaxed">
+                      <p className="text-[13px] text-[var(--fg-muted)] leading-relaxed">
                         {(hasPasswordProvider || passwordLinkedSuccess)
                           ? 'Set a new password for your email sign-in (min 8 characters).'
                           : 'Add a password so you can sign in with your email and password on any device.'}
@@ -975,7 +984,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         className="w-full p-2 text-xs bg-[var(--bg-subtle)] border border-[var(--card-border)] rounded-md focus:outline-none focus:border-[var(--gold)] text-[var(--fg)]"
                       />
                       {passwordLinkError && (
-                        <p className="text-[11px] text-red-500 font-medium leading-tight">{passwordLinkError}</p>
+                        <p className="text-[13px] text-red-500 font-medium leading-tight">{passwordLinkError}</p>
                       )}
                       <div className="flex gap-2 justify-end pt-1">
                         <button
@@ -1006,11 +1015,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           {/* Digital Public Goods: Data & Privacy Controls */}
           {isMine && (
             <div className="primer-box p-3 bg-[var(--subtle)] space-y-2.5 text-xs">
-              <div className="font-semibold text-[11px] text-[var(--muted)] uppercase tracking-wider flex items-center justify-between">
+              <div className="font-semibold text-[13px] text-[var(--muted)] uppercase tracking-wider flex items-center justify-between">
                 <span>Data &amp; Privacy</span>
-                <span className="primer-label primer-label-green text-[10px]">DPG Aligned</span>
+                <span className="primer-label primer-label-green text-[13px]">DPG Aligned</span>
               </div>
-              <p className="text-[11px] text-[var(--muted)] leading-relaxed">
+              <p className="text-[13px] text-[var(--muted)] leading-relaxed">
                 You own your profile. Export your activity data or permanently erase your presence.
               </p>
               <div className="flex flex-col gap-2 pt-1">
@@ -1035,7 +1044,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
           {/* Achievements & Badges */}
           <div className="primer-box p-3 bg-[var(--subtle)] space-y-2 text-xs">
-            <div className="font-semibold text-[11px] text-[var(--muted)] uppercase tracking-wider">
+            <div className="font-semibold text-[13px] text-[var(--muted)] uppercase tracking-wider">
               Achievements &amp; Badges
             </div>
             <div className="space-y-1.5">
@@ -1043,9 +1052,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 <Award className="w-4 h-4 text-[var(--attention)] flex-shrink-0" />
                 <span>Hack Day Kampala x MUBS 2026</span>
               </div>
-              <div className="flex items-center gap-2 text-xs text-[var(--fg)]">
+              <div className="flex items-center gap-2 text-[13px] text-[var(--fg)]">
                 <Sparkles className="w-4 h-4 text-[var(--done)] flex-shrink-0" />
-                <span>Gemma 4 Verified Profile</span>
+                <span>Profile written with Gemma 4</span>
               </div>
             </div>
           </div>
@@ -1059,7 +1068,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </span>
               <button
                 onClick={() => setShowQrModal(true)}
-                className="primer-btn text-[10px] py-0.5 px-1.5"
+                className="primer-btn text-[13px] py-0.5 px-1.5"
                 title="Expand QR code"
               >
                 <Maximize2 className="w-3 h-3" />
@@ -1076,7 +1085,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             ) : (
               <div className="w-36 h-36 mx-auto bg-gray-200 animate-pulse rounded" />
             )}
-            <p className="text-[11px] text-[var(--muted)]">
+            <p className="text-[13px] text-[var(--muted)]">
               {isMine
                 ? 'Show this to the person next to you to exchange profiles instantly.'
                 : 'Scan to open this member on your mobile device.'}
@@ -1250,7 +1259,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     <span className="text-xs font-bold text-[var(--fg)] block">
                       Profile Links (Optional)
                     </span>
-                    <p className="text-[11px] text-[var(--fg-muted)]">
+                    <p className="text-[13px] text-[var(--fg-muted)]">
                       Connect your profiles across professional, social, and academic networks.
                     </p>
                   </div>
@@ -1262,7 +1271,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       <div>
-                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">LinkedIn</label>
+                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">LinkedIn</label>
                         <input
                           type="text"
                           placeholder="https://linkedin.com/in/username"
@@ -1272,7 +1281,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">GitHub</label>
+                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">GitHub</label>
                         <input
                           type="text"
                           placeholder="username or github.com/username"
@@ -1282,7 +1291,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">GitLab (gitlab.com)</label>
+                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">GitLab (gitlab.com)</label>
                         <input
                           type="text"
                           placeholder="https://gitlab.com/username"
@@ -1292,7 +1301,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Google Play Developer (play.google.com)</label>
+                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Google Play Developer (play.google.com)</label>
                         <input
                           type="text"
                           placeholder="https://play.google.com/store/apps/dev?id=..."
@@ -1302,7 +1311,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Google Developer Profile (g.dev)</label>
+                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Google Developer Profile (g.dev)</label>
                         <input
                           type="text"
                           placeholder="https://g.dev/username"
@@ -1312,7 +1321,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Personal Website</label>
+                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Personal Website</label>
                         <input
                           type="text"
                           placeholder="https://yoursite.com"
@@ -1331,7 +1340,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       <div>
-                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">X (Twitter)</label>
+                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">X (Twitter)</label>
                         <input
                           type="text"
                           placeholder="https://x.com/username"
@@ -1341,7 +1350,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Facebook</label>
+                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Facebook</label>
                         <input
                           type="text"
                           placeholder="https://facebook.com/username"
@@ -1351,7 +1360,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Instagram</label>
+                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Instagram</label>
                         <input
                           type="text"
                           placeholder="https://instagram.com/username"
@@ -1361,7 +1370,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">TikTok</label>
+                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">TikTok</label>
                         <input
                           type="text"
                           placeholder="https://tiktok.com/@username"
@@ -1371,7 +1380,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">YouTube</label>
+                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">YouTube</label>
                         <input
                           type="text"
                           placeholder="https://youtube.com/@channel"
@@ -1390,7 +1399,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       <div>
-                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Google Scholar</label>
+                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Google Scholar</label>
                         <input
                           type="text"
                           placeholder="https://scholar.google.com/citations?user=..."
@@ -1400,7 +1409,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">ORCID</label>
+                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">ORCID</label>
                         <input
                           type="text"
                           placeholder="https://orcid.org/0000-0000-0000-0000"
@@ -1410,7 +1419,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">IEEE Collabratec (ieee-collabratec.ieee.org)</label>
+                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">IEEE Collabratec (ieee-collabratec.ieee.org)</label>
                         <input
                           type="text"
                           placeholder="https://ieee-collabratec.ieee.org/app/p/..."
@@ -1420,7 +1429,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Hugging Face (huggingface.co)</label>
+                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Hugging Face (huggingface.co)</label>
                         <input
                           type="text"
                           placeholder="https://huggingface.co/username"
@@ -1430,7 +1439,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[11px] text-[var(--fg-muted)] block mb-0.5">Kaggle (kaggle.com)</label>
+                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Kaggle (kaggle.com)</label>
                         <input
                           type="text"
                           placeholder="https://kaggle.com/username"
@@ -1447,7 +1456,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     <div className="flex items-center justify-between">
                       <div>
                         <span className="text-xs font-semibold text-[var(--fg)] block">Custom Links</span>
-                        <span className="text-[11px] text-[var(--fg-muted)]">Up to 3 custom links with a short label and https URL</span>
+                        <span className="text-[13px] text-[var(--fg-muted)]">Up to 3 custom links with a short label and https URL</span>
                       </div>
                       {editCustomLinks.length < 3 && (
                         <button
@@ -1462,7 +1471,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     </div>
 
                     {editCustomLinks.length === 0 ? (
-                      <p className="text-[11px] text-[var(--fg-subtle)] italic">No custom links added yet.</p>
+                      <p className="text-[13px] text-[var(--fg-subtle)] italic">No custom links added yet.</p>
                     ) : (
                       <div className="space-y-2 pt-1">
                         {editCustomLinks.map((custom, index) => (
@@ -1570,13 +1579,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <div className="primer-box p-3.5 space-y-2">
               <div className="primer-box-header -mx-3.5 -mt-3.5 mb-2.5 py-2 px-3 text-xs font-semibold flex items-center justify-between">
                 <span>Offers</span>
-                <span className="primer-label primer-label-green text-[10px]">What I bring</span>
+                <span className="primer-label primer-label-green text-[13px]">What I bring</span>
               </div>
               <p className="text-xs text-[var(--fg)] leading-relaxed">
                 {profile.offers || 'No offers described yet.'}
               </p>
               {profile.teaches && (
-                <div className="text-[11px] text-[var(--muted)] pt-2 border-t border-[var(--border-muted)]">
+                <div className="text-[13px] text-[var(--muted)] pt-2 border-t border-[var(--border-muted)]">
                   <strong className="text-[var(--fg)]">Can teach: </strong>
                   <span>{profile.teaches}</span>
                 </div>
@@ -1586,13 +1595,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             <div className="primer-box p-3.5 space-y-2">
               <div className="primer-box-header -mx-3.5 -mt-3.5 mb-2.5 py-2 px-3 text-xs font-semibold flex items-center justify-between">
                 <span>Needs</span>
-                <span className="primer-label primer-label-amber text-[10px]">What I seek</span>
+                <span className="primer-label primer-label-amber text-[13px]">What I seek</span>
               </div>
               <p className="text-xs text-[var(--fg)] leading-relaxed">
                 {profile.needs || 'No specific needs listed yet.'}
               </p>
               {profile.learns && (
-                <div className="text-[11px] text-[var(--muted)] pt-2 border-t border-[var(--border-muted)]">
+                <div className="text-[13px] text-[var(--muted)] pt-2 border-t border-[var(--border-muted)]">
                   <strong className="text-[var(--fg)]">Wants to learn: </strong>
                   <span>{profile.learns}</span>
                 </div>
@@ -1624,7 +1633,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           <div className="primer-box p-3.5 space-y-2">
             <div className="flex items-center justify-between text-xs">
               <span className="font-semibold">Hack Day Activity &amp; Commit Stream</span>
-              <span className="text-[11px] text-[var(--muted)]">October 2026</span>
+              <span className="text-[13px] text-[var(--muted)]">October 2026</span>
             </div>
             <div className="grid grid-cols-12 sm:grid-cols-24 gap-1 pt-1">
               {Array.from({ length: 48 }).map((_, i) => {
@@ -1645,7 +1654,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 );
               })}
             </div>
-            <div className="flex items-center justify-between text-[10px] text-[var(--muted)] pt-1">
+            <div className="flex items-center justify-between text-[13px] text-[var(--muted)] pt-1">
               <span>Less</span>
               <div className="flex items-center gap-1">
                 <span className="w-2.5 h-2.5 rounded-xs bg-[var(--border-muted)]" />
@@ -1666,7 +1675,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   <Github className="w-3.5 h-3.5" />
                   <span>Pinned GitHub Repositories</span>
                 </h3>
-                <span className="text-[11px] text-[var(--muted)]">
+                <span className="text-[13px] text-[var(--muted)]">
                   {profile.gh.repos} total public repos
                 </span>
               </div>
@@ -1686,12 +1695,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       >
                         {repo.name}
                       </a>
-                      <p className="text-[11px] text-[var(--muted)] line-clamp-2 mt-1">
+                      <p className="text-[13px] text-[var(--muted)] line-clamp-2 mt-1">
                         {repo.desc || 'No repository description provided.'}
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-3 text-[11px] text-[var(--muted)] pt-1">
+                    <div className="flex items-center gap-3 text-[13px] text-[var(--muted)] pt-1">
                       {repo.lang && (
                         <div className="flex items-center gap-1">
                           <span className="w-2.5 h-2.5 rounded-full bg-[var(--accent)]" />

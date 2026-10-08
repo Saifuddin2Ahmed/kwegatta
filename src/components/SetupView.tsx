@@ -176,7 +176,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
       <div className="primer-box p-4 bg-[var(--subtle)] flex items-center justify-between">
         <div>
           <div className="font-semibold text-xs text-[var(--fg)]">Device Session</div>
-          <div className="text-[11px] text-[var(--muted)]">
+          <div className="text-[13px] text-[var(--muted)]">
             Sign out of your local profile on this browser to onboard a new member.
           </div>
         </div>

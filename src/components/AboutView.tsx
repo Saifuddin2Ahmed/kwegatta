@@ -104,7 +104,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
   const photos = useEventPhotos();
   const { team } = useTeam();
   return (
-    <div className="max-w-4xl mx-auto py-6 sm:py-12 space-y-20 sm:space-y-28 animate-in fade-in">
+    <div className="kw-container py-6 sm:py-12 space-y-6 md:space-y-10 animate-in fade-in">
       
       {/* 01. Hero Story Header */}
       <section id="about-top" className="space-y-6">
@@ -210,7 +210,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
               <div className="w-10 h-10 rounded-full bg-[var(--teal-subtle)] border border-[var(--teal)]/40 text-[var(--teal)] grid place-items-center shadow-xs">
                 <Zap className="w-4 h-4" />
               </div>
-              <span className="text-[10px] font-mono font-semibold text-[var(--teal)] mt-1.5">91% Match</span>
+              <span className="text-[13px] font-mono font-semibold text-[var(--teal)] mt-1.5">91% Match</span>
             </div>
 
             {/* Person B */}
@@ -438,7 +438,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
                 </div>
 
                 {line2 && (
-                  <div className="pt-2 border-t border-[var(--card-border)]/50 text-[11px] text-[var(--fg-subtle)] truncate">
+                  <div className="pt-2 border-t border-[var(--card-border)]/50 text-[13px] text-[var(--fg-subtle)] truncate">
                     {line2}
                   </div>
                 )}
@@ -542,7 +542,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
           </div>
 
           <div className="md:col-span-8 space-y-4 text-xs text-[var(--fg-muted)] leading-relaxed">
-            <div className="p-4 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] font-mono text-[11px] text-[var(--fg)] space-y-2">
+            <div className="p-4 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] font-mono text-[13px] text-[var(--fg)] space-y-2">
               <p className="font-bold">Copyright (c) 2026 Kwegatta Contributors</p>
               <p>
                 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software...

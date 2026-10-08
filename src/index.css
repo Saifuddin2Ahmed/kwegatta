@@ -1,15 +1,31 @@
 @import "tailwindcss";
 
+/* Self-hosted fonts: Space Grotesk (Headings) and Inter (Body) with font-display: swap */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('/fonts/space-grotesk.woff2') format('woff2');
+}
+
 :root {
-  --font-display: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
 }
 
 /* =========================================================================
    KWEGATTA FINTECH-GRADE GLOBAL PRODUCT DESIGN SYSTEM
-   Aesthetic: High-Converting, Deep Obsidian, Crisp Hairline Borders, Radiant Accents
-   Palette: Deep Obsidian (#070B12), Radiant Gold (#F5B700), Crisp Emerald/Teal (#10B981 / #14B8A6)
+   Palette: Deep Obsidian (#070B12), Radiant Gold (#F5B700), Teal (#12B5A6)
    ========================================================================= */
 :root,
 [data-theme="dark"] {
@@ -18,7 +34,8 @@
   --bg-subtle: #0D1526;            /* Secondary Container */
   --card: #0F182E;                 /* Primary High-Contrast Surface */
   --card-hover: #14203D;           /* Interactive Hover Surface */
-  --card-border: rgba(255, 255, 255, 0.08); /* Hairline Razor Border */
+  --card-radius: 14px;             /* Unified Card Radius */
+  --card-border: rgba(255, 255, 255, 0.08); /* Unified Hairline Razor Border */
   --border-muted: rgba(255, 255, 255, 0.04);
   --border: rgba(255, 255, 255, 0.08);
   --subtle: #0D1526;
@@ -37,9 +54,9 @@
   --gold-subtle: rgba(245, 183, 0, 0.12);
   --gold-glow: 0 0 24px -2px rgba(245, 183, 0, 0.35);
 
-  --teal: #10B981;                 /* High-Converting Emerald/Teal */
-  --teal-hover: #059669;
-  --teal-subtle: rgba(16, 185, 129, 0.12);
+  --teal: #12B5A6;                 /* Teal Accent */
+  --teal-hover: #0D9488;
+  --teal-subtle: rgba(18, 181, 166, 0.14);
 
   --accent: #F5B700;
   --accent-subtle: rgba(245, 183, 0, 0.12);
@@ -63,36 +80,42 @@
 }
 
 /* =========================================================================
-   LIGHT THEME (Clean High-Contrast Daylight)
+   LIGHT THEME (Clean High-Contrast Daylight with WCAG AA compliance)
+   - Dark text on near-white background (#FAFAFC)
+   - Brand gold #F5B700 and teal #12B5A6 kept as accents
+   - Gold never used as text colour on light bg; used for fills/borders with dark text on top
    ========================================================================= */
 [data-theme="light"] {
   --bg: #FAFAFC;
   --bg-subtle: #F1F4F9;
   --card: #FFFFFF;
   --card-hover: #F8FAFC;
-  --card-border: rgba(0, 0, 0, 0.08);
-  --border-muted: rgba(0, 0, 0, 0.04);
-  --border: rgba(0, 0, 0, 0.08);
+  --card-radius: 14px;
+  --card-border: rgba(0, 0, 0, 0.1);
+  --border-muted: rgba(0, 0, 0, 0.05);
+  --border: rgba(0, 0, 0, 0.1);
   --subtle: #F1F4F9;
   --header: #FFFFFF;
-  --underline: #D97706;
+  --underline: #12B5A6;
 
-  --fg: #0B132B;
-  --fg-muted: #475569;
-  --fg-subtle: #64748B;
-  --muted: #475569;
+  /* High contrast foregrounds exceeding 4.5:1 WCAG AA */
+  --fg: #0B132B;                   /* Contrast > 16:1 against #FAFAFC */
+  --fg-muted: #334155;             /* Slate-700: Contrast 8.7:1 against #FFFFFF */
+  --fg-subtle: #475569;            /* Slate-600: Contrast 6.2:1 against #FFFFFF */
+  --muted: #334155;
 
-  --gold: #D97706;
-  --gold-hover: #B45309;
-  --gold-subtle: rgba(217, 119, 6, 0.1);
-  --gold-glow: 0 0 20px -2px rgba(217, 119, 6, 0.25);
+  /* Brand Accents */
+  --gold: #F5B700;
+  --gold-hover: #E0A600;
+  --gold-subtle: rgba(245, 183, 0, 0.18);
+  --gold-glow: 0 0 20px -2px rgba(245, 183, 0, 0.25);
 
-  --teal: #059669;
-  --teal-hover: #047857;
-  --teal-subtle: rgba(5, 150, 105, 0.1);
+  --teal: #12B5A6;
+  --teal-hover: #0D9488;
+  --teal-subtle: rgba(18, 181, 166, 0.14);
 
-  --accent: #D97706;
-  --accent-subtle: rgba(217, 119, 6, 0.1);
+  --accent: #12B5A6;
+  --accent-subtle: rgba(18, 181, 166, 0.14);
 
   --success: #059669;
   --success-subtle: #ECFDF5;
@@ -103,11 +126,25 @@
 
   --btn: #F1F4F9;
   --btn-hover: #E2E8F0;
-  --btn-border: rgba(0, 0, 0, 0.1);
-  --header-bg: rgba(250, 250, 252, 0.9);
-  --shadow-card: 0 4px 20px -2px rgba(11, 19, 43, 0.05), 0 1px 3px rgba(11, 19, 43, 0.03);
-  --shadow-dropdown: 0 20px 48px -8px rgba(11, 19, 43, 0.12);
+  --btn-border: rgba(0, 0, 0, 0.12);
+  --header-bg: rgba(250, 250, 252, 0.95);
+  --shadow-card: 0 4px 20px -2px rgba(11, 19, 43, 0.06), 0 1px 3px rgba(11, 19, 43, 0.04);
+  --shadow-dropdown: 0 20px 48px -8px rgba(11, 19, 43, 0.14);
   color-scheme: light;
+}
+
+/* Light mode specific: ensure gold text is never used on light backgrounds */
+[data-theme="light"] .text-amber-400,
+[data-theme="light"] .text-yellow-400,
+[data-theme="light"] .text-amber-300 {
+  color: #78350F !important; /* WCAG AAA high contrast dark amber */
+}
+
+[data-theme="light"] .kw-badge-gold {
+  background-color: #F5B700 !important;
+  color: #070B12 !important;
+  border-color: #E0A600 !important;
+  font-weight: 700 !important;
 }
 
 * {
@@ -129,13 +166,35 @@ body {
   background-color: var(--bg);
   color: var(--fg);
   font-family: var(--font-body);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.6;
   padding-bottom: env(safe-area-inset-bottom, 0);
   transition: background-color 0.2s ease, color 0.2s ease;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Paragraph readable typography */
+p {
+  line-height: 1.55;
+}
+
+/* Shared page container: max-width 1200px, centered, side padding 16px mobile, 24px desktop */
+.kw-container {
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 16px;
+  padding-right: 16px;
+  width: 100%;
+}
+
+@media (min-width: 768px) {
+  .kw-container {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
 }
 
 h1, h2, h3, h4, h5, h6, .font-display {

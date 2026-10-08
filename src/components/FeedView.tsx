@@ -121,7 +121,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
     .filter(p => !selectedTag || (p.tags || []).includes(selectedTag));
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="kw-container space-y-6 md:space-y-10">
       
       {/* Create post box */}
       {currentProfile && (
@@ -141,7 +141,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1 pl-11">
-              <span className="text-[11px] text-[var(--fg-subtle)] flex items-center gap-1.5">
+              <span className="text-[13px] text-[var(--fg-subtle)] flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-[var(--gold)]" />
                 <span>Title &amp; categories synthesized by Gemma 4</span>
               </span>
@@ -190,12 +190,24 @@ export const FeedView: React.FC<FeedViewProps> = ({
       {/* Posts List */}
       <div className="divide-y divide-[var(--card-border)]">
         {filteredPosts.length === 0 ? (
-          <div className="py-16 text-center space-y-2">
-            <MessageSquare className="w-8 h-8 text-[var(--fg-subtle)] mx-auto opacity-40" />
-            <h3 className="font-semibold text-sm text-[var(--fg)]">No posts found</h3>
-            <p className="text-xs text-[var(--fg-muted)]">
-              Be the first to share an ask, offer, or project concept with the room.
+          <div className="py-16 text-center space-y-4">
+            <MessageSquare className="w-8 h-8 text-[var(--gold)] mx-auto opacity-70" />
+            <h3 className="font-semibold text-base text-[var(--fg)]">No posts on the wall yet</h3>
+            <p className="text-[13px] text-[var(--fg-muted)] max-w-sm mx-auto">
+              Share what you are building or ask the community for skills and collaboration.
             </p>
+            <div>
+              <button
+                type="button"
+                onClick={() => {
+                  const composer = document.querySelector('textarea');
+                  composer?.focus();
+                }}
+                className="kw-btn kw-btn-primary text-[13px] py-1.5 px-4 font-semibold cursor-pointer"
+              >
+                Create a post
+              </button>
+            </div>
           </div>
         ) : (
           filteredPosts.map(post => {
@@ -233,13 +245,13 @@ export const FeedView: React.FC<FeedViewProps> = ({
                       >
                         {author.name}
                       </button>
-                      <span className="text-[11px] text-[var(--fg-subtle)] ml-2">
+                      <span className="text-[13px] text-[var(--fg-subtle)] ml-2">
                         {formatTimeAgo(post.created_at)}
                       </span>
                     </div>
                   </div>
 
-                  <span className="text-[11px] font-medium text-[var(--gold)] capitalize">
+                  <span className="text-[13px] font-medium text-[var(--gold)] capitalize">
                     {post.kind}
                   </span>
                 </div>
@@ -292,7 +304,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                             )}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-emerald-400 hover:underline text-[11px]"
+                            className="text-emerald-400 hover:underline text-[13px]"
                             title="Message on WhatsApp"
                           >
                             <MessageCircle className="w-3 h-3 inline-block" />
@@ -317,7 +329,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                           title={`React with ${emoji}`}
                         >
                           <span>{emoji}</span>
-                          {count > 0 && <span className="ml-1 font-semibold text-[10px]">{count}</span>}
+                          {count > 0 && <span className="ml-1 font-semibold text-[13px]">{count}</span>}
                         </button>
                       );
                     })}
@@ -345,7 +357,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                       <div className="space-y-2 mb-3">
                         {post.comments.map(c => (
                           <div key={c.id} className="text-xs bg-[var(--card)] p-3 rounded-lg border border-[var(--card-border)]">
-                            <div className="flex items-center justify-between text-[11px] text-[var(--fg-subtle)] mb-1">
+                            <div className="flex items-center justify-between text-[13px] text-[var(--fg-subtle)] mb-1">
                               <span className="font-semibold text-[var(--fg)]">{c.author_name}</span>
                               <span>{formatTimeAgo(c.created_at)}</span>
                             </div>

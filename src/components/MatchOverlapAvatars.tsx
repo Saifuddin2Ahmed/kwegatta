@@ -73,7 +73,7 @@ export const MatchOverlapAvatars: React.FC<MatchOverlapAvatarsProps> = ({
           title={`${score}% compatibility score`}
         >
           <span>{score}</span>
-          <span className="text-[9px] opacity-80">%</span>
+          <span className="text-[13px] opacity-80">%</span>
         </div>
       </div>
     </div>

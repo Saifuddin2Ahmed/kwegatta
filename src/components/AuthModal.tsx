@@ -247,7 +247,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <button
                 type="button"
                 onClick={handleResendVerification}
-                className="underline text-[11px] font-medium cursor-pointer"
+                className="underline text-[13px] font-medium cursor-pointer"
               >
                 Resend verification email
               </button>
@@ -264,7 +264,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div className="space-y-1 flex-1">
               <p className="leading-relaxed font-medium">{errorMsg}</p>
               {errorMsg.includes('unauthorized-domain') && (
-                <p className="text-[11px] text-[var(--fg-muted)]">
+                <p className="text-[13px] text-[var(--fg-muted)]">
                   Authorised domains for this app: <code className="text-[var(--gold)]">kwegatta.ai.studio</code> and the Cloud Run deployment domain.
                 </p>
               )}
@@ -318,7 +318,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       {/* DIVIDER */}
       <div className="relative flex py-1 items-center">
         <div className="flex-grow border-t border-[var(--card-border)]"></div>
-        <span className="flex-shrink mx-3 text-[11px] uppercase tracking-wider text-[var(--fg-subtle)] font-mono">
+        <span className="flex-shrink mx-3 text-[13px] uppercase tracking-wider text-[var(--fg-subtle)] font-mono">
           or email with password
         </span>
         <div className="flex-grow border-t border-[var(--card-border)]"></div>
@@ -416,7 +416,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setMode('forgot')}
-                  className="text-[11px] text-[var(--gold)] hover:underline cursor-pointer"
+                  className="text-[13px] text-[var(--gold)] hover:underline cursor-pointer"
                 >
                   Forgot password?
                 </button>
@@ -449,7 +449,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       )}
 
       {/* Security & Ownership footnote */}
-      <p className="text-[11px] text-[var(--fg-subtle)] text-center leading-relaxed pt-1">
+      <p className="text-[13px] text-[var(--fg-subtle)] text-center leading-relaxed pt-1">
         Your email is strictly used for authentication and account ownership. Zero trackers or passwords stored on our servers.
       </p>
     </div>

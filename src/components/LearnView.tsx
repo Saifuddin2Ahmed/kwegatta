@@ -80,7 +80,7 @@ export const LearnView: React.FC<LearnViewProps> = ({
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="kw-container space-y-6 md:space-y-10">
       {/* Header */}
       <div className="flex items-baseline justify-between gap-4 border-b border-[var(--card-border)] pb-4">
         <div>
@@ -153,11 +153,11 @@ export const LearnView: React.FC<LearnViewProps> = ({
                     <Avatar profile={profile} className="w-9 h-9" />
                     <div className="min-w-0">
                       <p className="font-semibold text-xs text-[var(--fg)] truncate">{profile.name}</p>
-                      <p className="text-[11px] text-[var(--fg-muted)] truncate">{profile.role || 'Member'}</p>
+                      <p className="text-[13px] text-[var(--fg-muted)] truncate">{profile.role || 'Member'}</p>
                     </div>
                   </div>
                   <div className="text-xs bg-[var(--teal-subtle)] text-[var(--teal)] p-2 rounded-lg font-medium border border-[var(--teal)]/20">
-                    <span className="block text-[10px] uppercase font-bold text-[var(--teal)] opacity-80">Teaches:</span>
+                    <span className="block text-[13px] uppercase font-bold text-[var(--teal)] opacity-80">Teaches:</span>
                     <span className="line-clamp-2">{profile.teaches}</span>
                   </div>
                 </div>
@@ -189,7 +189,7 @@ export const LearnView: React.FC<LearnViewProps> = ({
             <div className="p-6 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col justify-between space-y-4">
               <div className="space-y-4">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-[var(--gold)] font-semibold uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                  <span className="text-[var(--gold)] font-semibold uppercase tracking-wider text-[13px] flex items-center gap-1.5">
                     <GraduationCap className="w-4 h-4" />
                     <span>Recommended Peer Mentor</span>
                   </span>
@@ -263,7 +263,7 @@ export const LearnView: React.FC<LearnViewProps> = ({
             <div className="p-6 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col justify-between space-y-4">
               <div className="space-y-4">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-[var(--teal)] font-semibold uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                  <span className="text-[var(--teal)] font-semibold uppercase tracking-wider text-[13px] flex items-center gap-1.5">
                     <Users2 className="w-4 h-4" />
                     <span>Study Partner</span>
                   </span>

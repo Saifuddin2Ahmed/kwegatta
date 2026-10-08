@@ -111,3 +111,57 @@ export function safeExternalUrl(url: string | null | undefined): string | null {
   return null;
 }
 
+export const MIN_MEMBERS_FOR_STATS = 25;
+
+export type ThemePreference = 'system' | 'light' | 'dark';
+export type ResolvedTheme = 'light' | 'dark';
+
+export function getStoredThemePreference(): ThemePreference {
+  try {
+    if (typeof localStorage === 'undefined') return 'system';
+    const val = localStorage.getItem('kw_theme');
+    if (val === 'light' || val === 'dark' || val === 'system') return val;
+  } catch (_) {}
+  return 'system';
+}
+
+export function saveThemePreference(pref: ThemePreference): boolean {
+  try {
+    if (typeof localStorage === 'undefined') return false;
+    localStorage.setItem('kw_theme', pref);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+export function resolveTheme(pref: ThemePreference): ResolvedTheme {
+  if (pref === 'light') return 'light';
+  if (pref === 'dark') return 'dark';
+  if (
+    typeof window !== 'undefined' &&
+    window.matchMedia &&
+    window.matchMedia('(prefers-color-scheme: light)').matches
+  ) {
+    return 'light';
+  }
+  return 'dark';
+}
+
+export function getNextThemePreference(current: ThemePreference): ThemePreference {
+  if (current === 'system') return 'light';
+  if (current === 'light') return 'dark';
+  return 'system';
+}
+
+export function applyThemeToDocument(resolved: ResolvedTheme): void {
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.theme = resolved;
+    const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+    if (metaThemeColor) {
+      metaThemeColor.setAttribute('content', resolved === 'light' ? '#FAFAFC' : '#070B12');
+    }
+  }
+}
+
+

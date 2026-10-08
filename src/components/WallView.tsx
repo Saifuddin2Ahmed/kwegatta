@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { Profile, Post } from '../types';
 import { db, PUBLIC_APP_URL } from '../services/api';
-import { generateQrCodeDataUrl } from '../utils';
+import { generateQrCodeDataUrl, MIN_MEMBERS_FOR_STATS } from '../utils';
 import { Avatar } from './Avatar';
 import { BrandLogo } from './BrandLogo';
 
@@ -48,7 +48,7 @@ export const WallView: React.FC<WallViewProps> = ({ onBack }) => {
   const hasMembers = profiles.length > 0;
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)] p-4 sm:p-8 lg:p-10 flex flex-col justify-between transition-colors">
+    <div data-theme="dark" className="min-h-screen bg-[#070B12] text-[#F8FAFC] p-4 sm:p-8 lg:p-10 flex flex-col justify-between transition-colors">
       
       {/* Top Projector Header Bar */}
       <div className="max-w-7xl w-full mx-auto flex items-center justify-between gap-4 pb-6 border-b border-[var(--card-border)]">
@@ -109,35 +109,37 @@ export const WallView: React.FC<WallViewProps> = ({ onBack }) => {
         /* Populated state: Counters + Full-Height Match List + Large Text (>= 20px) */
         <div className="max-w-7xl w-full mx-auto flex-1 flex flex-col py-6 sm:py-8 space-y-8">
           
-          {/* Three Counters */}
-          <div className="grid grid-cols-3 gap-4 sm:gap-8 pb-6 border-b border-[var(--card-border)]">
-            <div className="space-y-1">
-              <div className="text-4xl sm:text-6xl font-bold text-[var(--fg)] tabular-nums tracking-tight">
-                {profiles.length}
+          {/* Three Counters (hidden when network has fewer than 25 members) */}
+          {profiles.length >= MIN_MEMBERS_FOR_STATS && (
+            <div className="grid grid-cols-3 gap-4 sm:gap-8 pb-6 border-b border-[var(--card-border)]">
+              <div className="space-y-1">
+                <div className="text-4xl sm:text-6xl font-bold text-[var(--fg)] tabular-nums tracking-tight">
+                  {profiles.length}
+                </div>
+                <div className="text-sm sm:text-base text-[var(--fg-muted)] font-medium">
+                  People here
+                </div>
               </div>
-              <div className="text-sm sm:text-base text-[var(--fg-muted)] font-medium">
-                People here
-              </div>
-            </div>
 
-            <div className="space-y-1 border-l border-[var(--card-border)] pl-4 sm:pl-8">
-              <div className="text-4xl sm:text-6xl font-bold text-[var(--gold)] tabular-nums tracking-tight">
-                {matches.length}
+              <div className="space-y-1 border-l border-[var(--card-border)] pl-4 sm:pl-8">
+                <div className="text-4xl sm:text-6xl font-bold text-[var(--gold)] tabular-nums tracking-tight">
+                  {matches.length}
+                </div>
+                <div className="text-sm sm:text-base text-[var(--fg-muted)] font-medium">
+                  Matches made
+                </div>
               </div>
-              <div className="text-sm sm:text-base text-[var(--fg-muted)] font-medium">
-                Matches made
-              </div>
-            </div>
 
-            <div className="space-y-1 border-l border-[var(--card-border)] pl-4 sm:pl-8">
-              <div className="text-4xl sm:text-6xl font-bold text-[var(--teal)] tabular-nums tracking-tight">
-                {posts.length}
-              </div>
-              <div className="text-sm sm:text-base text-[var(--fg-muted)] font-medium">
-                Asks and offers
+              <div className="space-y-1 border-l border-[var(--card-border)] pl-4 sm:pl-8">
+                <div className="text-4xl sm:text-6xl font-bold text-[var(--teal)] tabular-nums tracking-tight">
+                  {posts.length}
+                </div>
+                <div className="text-sm sm:text-base text-[var(--fg-muted)] font-medium">
+                  Asks and offers
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Main Display Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start flex-1">
@@ -154,43 +156,52 @@ export const WallView: React.FC<WallViewProps> = ({ onBack }) => {
                 </div>
               ) : (
                 <div className="divide-y divide-[var(--card-border)]">
-                  {matches.slice(0, 7).map(m => {
-                    const a = profiles.find(p => p.id === m.a_id);
-                    const b = profiles.find(p => p.id === m.b_id);
-                    if (!a || !b) return null;
+                  {(() => {
+                    const seenPairs = new Set<string>();
+                    const uniqueMatches = matches.filter(m => {
+                      const pairKey = [m.a_id, m.b_id].sort().join(':');
+                      if (seenPairs.has(pairKey)) return false;
+                      seenPairs.add(pairKey);
+                      return true;
+                    });
+                    return uniqueMatches.slice(0, 7).map(m => {
+                      const a = profiles.find(p => p.id === m.a_id);
+                      const b = profiles.find(p => p.id === m.b_id);
+                      if (!a || !b) return null;
 
-                    const firstNameA = a.name.trim().split(' ')[0];
-                    const firstNameB = b.name.trim().split(' ')[0];
+                      const firstNameA = a.name.trim().split(' ')[0];
+                      const firstNameB = b.name.trim().split(' ')[0];
 
-                    return (
-                      <div
-                        key={m.id}
-                        className="py-4 sm:py-5 flex items-center justify-between gap-4"
-                      >
-                        {/* Member A + Member B (First names and avatars only) */}
-                        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-                          <Avatar profile={a} className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0" />
-                          <span className="text-xl sm:text-2xl font-bold text-[var(--fg)] truncate">
-                            {firstNameA}
-                          </span>
-                          <span className="text-lg sm:text-xl text-[var(--fg-subtle)] font-mono px-1">
-                            &amp;
-                          </span>
-                          <Avatar profile={b} className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0" />
-                          <span className="text-xl sm:text-2xl font-bold text-[var(--fg)] truncate">
-                            {firstNameB}
-                          </span>
+                      return (
+                        <div
+                          key={m.id}
+                          className="py-4 sm:py-5 flex items-center justify-between gap-4"
+                        >
+                          {/* Member A + Member B (First names and avatars only) */}
+                          <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                            <Avatar profile={a} className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0" />
+                            <span className="text-xl sm:text-2xl font-bold text-[var(--fg)] truncate">
+                              {firstNameA}
+                            </span>
+                            <span className="text-lg sm:text-xl text-[var(--fg-subtle)] font-mono px-1">
+                              &amp;
+                            </span>
+                            <Avatar profile={b} className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0" />
+                            <span className="text-xl sm:text-2xl font-bold text-[var(--fg)] truncate">
+                              {firstNameB}
+                            </span>
+                          </div>
+
+                          {/* Match Score */}
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <span className="text-xl sm:text-2xl font-extrabold text-[var(--gold)] font-mono tabular-nums">
+                              {m.score}%
+                            </span>
+                          </div>
                         </div>
-
-                        {/* Match Score */}
-                        <div className="flex items-center gap-2 flex-shrink-0">
-                          <span className="text-xl sm:text-2xl font-extrabold text-[var(--gold)] font-mono tabular-nums">
-                            {m.score}%
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    });
+                  })()}
                 </div>
               )}
             </div>

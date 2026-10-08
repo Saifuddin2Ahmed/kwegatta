@@ -233,14 +233,14 @@ describe('Member-Submitted Events & Approval Permissions', () => {
   });
 });
 
-describe('Service Worker & Cache-Control Configuration (PWA v1.2.1)', () => {
-  it('public/sw.js specifies CACHE_NAME as kwegatta-1.2.1 and handles cache strategies correctly', async () => {
+describe('Service Worker & Cache-Control Configuration (PWA v1.3.0)', () => {
+  it('public/sw.js specifies CACHE_NAME as kwegatta-1.3.0 and handles cache strategies correctly', async () => {
     const fs = await import('fs');
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.2.1
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.2.1'");
+    // 1. Cache name includes version kwegatta-1.3.0
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.3.0'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');

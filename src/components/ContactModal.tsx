@@ -56,12 +56,12 @@ export const ContactModal: React.FC<ContactModalProps> = ({ isOpen, onClose }) =
         <div className="p-3.5 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] space-y-2 text-xs">
           <div className="flex items-center justify-between font-semibold text-[var(--fg)]">
             <span>Saifuddin Ahmed</span>
-            <span className="text-[var(--gold)] font-mono text-[10px]">Team Lead</span>
+            <span className="text-[var(--gold)] font-mono text-[13px]">Team Lead</span>
           </div>
           <p className="text-[var(--fg-muted)] leading-relaxed">
             Future Stars Center for Development &amp; Capacity Building · Hack Day Kampala × MUBS
           </p>
-          <div className="flex items-center gap-1.5 text-[var(--fg-subtle)] text-[11px] pt-1 border-t border-[var(--card-border)]/50">
+          <div className="flex items-center gap-1.5 text-[var(--fg-subtle)] text-[13px] pt-1 border-t border-[var(--card-border)]/50">
             <MapPin className="w-3 h-3 text-[var(--teal)] flex-shrink-0" />
             <span>Makerere University Business School (MUBS), Kampala, Uganda</span>
           </div>

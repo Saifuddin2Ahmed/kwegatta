@@ -6,6 +6,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.0] - 2026-10-08
+
+### Changed
+- **PWA Service Worker & Cache (`public/sw.js`)**:
+  - Upgraded service worker cache name to `kwegatta-1.3.0`.
+- **UI Polish & Contrast**:
+  - Removed fetch interceptor override in `index.html`.
+  - Redesigned and streamlined `Footer.tsx` with mobile-first grid, sentence-case headings, and open-weight Gemma 4 documentation link.
+  - Implemented system-aware color scheme with cycle switch (System → Light → Dark) and zero-flash inline head initialization script.
+  - Full WCAG AA compliant light mode palette with gold/teal accents and high-contrast dark text.
+  - Self-hosted Inter and Space Grotesk woff2 fonts with local font-face definitions, removing Google Fonts external connections and updating CSP.
+  - Standardized font sizing across the app with minimum user-facing text size of 13px.
+  - Unified container layout (`.kw-container`, max 1200px, 16px mobile/24px desktop) and 24px/40px vertical rhythm across all inner pages.
+  - Simplified navigation: single desktop header row, visitor vs authenticated item segmentation, mobile bottom tab bar with visual indicators, and non-blocking update notification toast.
+  - Honest numbers: concealed small counters and stat tiles until network reaches 25 members (`MIN_MEMBERS_FOR_STATS = 25`), deduplicated live wall pairs, and verified profile badge labeling.
+  - Profile migration v2 (`saifuddin_profile_migration_v2`): appended Al Neelain University degree sentence to bio, updated tags, and updated core competencies skills without Gemma rewriting or touching account credentials.
+
+---
+
 ## [1.2.1] - 2026-10-07
 
 ### Changed

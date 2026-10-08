@@ -40,7 +40,7 @@ export const InboxView: React.FC<InboxViewProps> = ({
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-4">
+    <div className="kw-container space-y-6 md:space-y-10">
       {/* Browser alert prompt if supported & not yet requested */}
       {'Notification' in window && Notification.permission === 'default' && (
         <div className="primer-box p-3 bg-[var(--accent-subtle)] border-[var(--accent)] flex items-center justify-between text-xs">
@@ -81,12 +81,24 @@ export const InboxView: React.FC<InboxViewProps> = ({
         </div>
 
         {notifications.length === 0 ? (
-          <div className="p-10 text-center space-y-2">
-            <Bell className="w-8 h-8 text-[var(--muted)] mx-auto opacity-40" />
-            <h3 className="font-semibold text-sm">No notifications yet</h3>
-            <p className="text-xs text-[var(--muted)]">
-              You will get an alert here when another member matches your needs, follows you, or reaches out to collaborate.
+          <div className="p-10 text-center space-y-4">
+            <Bell className="w-8 h-8 text-[var(--gold)] mx-auto opacity-70" />
+            <h3 className="font-semibold text-base text-[var(--fg)]">Your inbox is clear</h3>
+            <p className="text-[13px] text-[var(--fg-muted)] max-w-sm mx-auto">
+              Start a conversation with a match or collaborator in the network.
             </p>
+            <div>
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.hash = '#/matches';
+                  window.dispatchEvent(new HashChangeEvent('hashchange'));
+                }}
+                className="kw-btn kw-btn-primary text-[13px] py-1.5 px-4 font-semibold cursor-pointer"
+              >
+                Explore matches
+              </button>
+            </div>
           </div>
         ) : (
           <div className="divide-y divide-[var(--border-muted)]">
@@ -115,7 +127,7 @@ export const InboxView: React.FC<InboxViewProps> = ({
                     <p className="text-xs text-[var(--fg)] leading-relaxed">
                       {n.body}
                     </p>
-                    <div className="text-[11px] text-[var(--muted)] mt-1">
+                    <div className="text-[13px] text-[var(--muted)] mt-1">
                       {formatTimeAgo(n.created_at)}
                     </div>
                   </div>

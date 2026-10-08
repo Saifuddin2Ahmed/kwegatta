@@ -10,8 +10,8 @@ interface AvatarProps {
 }
 
 const SIZE_MAP: Record<string, { px: number; textClass: string; roundedClass: string }> = {
-  xs: { px: 18, textClass: 'text-[9px]', roundedClass: 'rounded-full' },
-  sm: { px: 24, textClass: 'text-[10px]', roundedClass: 'rounded-full' },
+  xs: { px: 18, textClass: 'text-[13px]', roundedClass: 'rounded-full' },
+  sm: { px: 24, textClass: 'text-[13px]', roundedClass: 'rounded-full' },
   md: { px: 32, textClass: 'text-xs', roundedClass: 'rounded-full' },
   lg: { px: 40, textClass: 'text-sm font-semibold', roundedClass: 'rounded-full' },
   xl: { px: 56, textClass: 'text-lg font-bold', roundedClass: 'rounded-full' },

@@ -27,7 +27,7 @@ app.use((_req, res, next) => {
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://accounts.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://apis.google.com https://accounts.google.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://*.firebaseio.com https://*.googleapis.com; frame-src 'self' https://accounts.google.com https://*.firebaseapp.com; object-src 'none'; base-uri 'self';"
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://accounts.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; connect-src 'self' https://apis.google.com https://accounts.google.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://*.firebaseio.com https://*.googleapis.com; frame-src 'self' https://accounts.google.com https://*.firebaseapp.com; object-src 'none'; base-uri 'self';"
   );
   next();
 });
@@ -1280,9 +1280,10 @@ async function initStorage(): Promise<void> {
     }
   }
 
-  // Run one-time Saifuddin profile migration if target exists and flag has not yet been set
+  // Run one-time Saifuddin profile migrations (v1 and v2) if target exists and flags have not yet been set
   try {
     await runSaifuddinProfileMigration();
+    await runSaifuddinProfileMigrationV2();
   } catch (mErr: any) {
     console.warn('[Migration] Notice during Saifuddin profile migration:', mErr?.message || mErr);
   }
@@ -1431,6 +1432,153 @@ export async function runSaifuddinProfileMigration(): Promise<boolean> {
   }
 
   console.log(`[Migration] Profile migration ${SAIFUDDIN_PROFILE_MIGRATION_FLAG} successfully executed for member ${target.name} (${target.id})`);
+  return true;
+}
+
+export const SAIFUDDIN_PROFILE_MIGRATION_V2_FLAG = 'saifuddin_profile_migration_v2';
+
+export async function runSaifuddinProfileMigrationV2(): Promise<boolean> {
+  // Flag check: stops it running twice or overwriting later edits
+  if (store.migrations && store.migrations[SAIFUDDIN_PROFILE_MIGRATION_V2_FLAG]?.completed) {
+    return false;
+  }
+  if (storageMode === 'firestore' && firestoreDb) {
+    try {
+      const docSnap = await firestoreDb.collection('migrations').doc(SAIFUDDIN_PROFILE_MIGRATION_V2_FLAG).get();
+      if (docSnap.exists && docSnap.data()?.completed) {
+        if (!store.migrations) store.migrations = {};
+        store.migrations[SAIFUDDIN_PROFILE_MIGRATION_V2_FLAG] = { completed: true };
+        return false;
+      }
+    } catch (_) {}
+  }
+
+  const adminEmails = getAdminEmailsList().map(e => e.toLowerCase());
+
+  // Find target member profile in memory store
+  let target: any = (store.profiles || []).find((p: any) => {
+    const isGh = p.github && String(p.github).trim().toLowerCase() === 'saifuddin2ahmed';
+    const isEmail = p.email && adminEmails.includes(String(p.email).trim().toLowerCase());
+    return isGh && isEmail;
+  });
+
+  // If not found by direct email, check account_uid via adminAuth if available
+  if (!target && adminAuth) {
+    for (const p of (store.profiles || [])) {
+      if (p.github && String(p.github).trim().toLowerCase() === 'saifuddin2ahmed' && p.account_uid) {
+        try {
+          const u = await adminAuth.getUser(p.account_uid);
+          if (u.email && adminEmails.includes(u.email.toLowerCase())) {
+            target = p;
+            break;
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  // If not found in memory store and in firestore mode, query Firestore
+  if (!target && storageMode === 'firestore' && firestoreDb) {
+    try {
+      const snap = await firestoreDb.collection('profiles').where('github', '==', 'Saifuddin2Ahmed').get();
+      for (const doc of snap.docs) {
+        const d = doc.data();
+        let email = d.email;
+        if (!email && d.account_uid && adminAuth) {
+          try {
+            const u = await adminAuth.getUser(d.account_uid);
+            email = u.email;
+          } catch (_) {}
+        }
+        if (email && adminEmails.includes(email.toLowerCase())) {
+          target = { ...d, id: doc.id };
+          break;
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (!target) {
+    return false;
+  }
+
+  // Append one sentence to the end of the bio, only if it is not already there:
+  const degreeSentence = 'B.Sc. (Honours) in Electronic Control Engineering, Al Neelain University.';
+  const currentBio = target.bio || '';
+  if (!currentBio.includes(degreeSentence)) {
+    target.bio = currentBio.trim() ? `${currentBio.trim()} ${degreeSentence}` : degreeSentence;
+  }
+
+  // Replace the tags with exactly: software-engineering, ai, open-models, offline-first, cloud, erp, community-tech, kampala
+  target.tags = [
+    'software-engineering',
+    'ai',
+    'open-models',
+    'offline-first',
+    'cloud',
+    'erp',
+    'community-tech',
+    'kampala'
+  ];
+
+  // Replace the "Core competencies" / skills text with:
+  // "Software architecture, Offline-first systems, Cloud & ERP, Open-weight AI, Community engineering"
+  target.skills = [
+    'Software architecture',
+    'Offline-first systems',
+    'Cloud & ERP',
+    'Open-weight AI',
+    'Community engineering'
+  ];
+
+  target.updated_at = new Date().toISOString();
+
+  // Save to memory store
+  const idx = store.profiles.findIndex((p: any) => p.id === target.id);
+  if (idx >= 0) {
+    store.profiles[idx] = target;
+  } else {
+    store.profiles.push(target);
+  }
+
+  // Persist updated profile
+  await persistDoc('profiles', target.id, target);
+
+  // Clear cached matches for this member so they are recalculated from the new profile
+  const memberId = target.id;
+  store.matches = store.matches.filter((m: any) => m.a_id !== memberId && m.b_id !== memberId);
+  if (storageMode === 'firestore' && firestoreDb) {
+    try {
+      const snapA = await firestoreDb.collection('matches').where('a_id', '==', memberId).get();
+      const snapB = await firestoreDb.collection('matches').where('b_id', '==', memberId).get();
+      const batch = firestoreDb.batch();
+      snapA.forEach(doc => batch.delete(doc.ref));
+      snapB.forEach(doc => batch.delete(doc.ref));
+      await batch.commit();
+    } catch (_) {}
+  }
+
+  // Record in Firestore and local store that migration has run, preventing it from running twice
+  const record = {
+    completed: true,
+    target_id: memberId,
+    migrated_at: new Date().toISOString()
+  };
+  if (!store.migrations) store.migrations = {};
+  store.migrations[SAIFUDDIN_PROFILE_MIGRATION_V2_FLAG] = record;
+
+  if (storageMode === 'disk') {
+    saveStore(store);
+  }
+  if (storageMode === 'firestore' && firestoreDb) {
+    try {
+      await firestoreDb.collection('migrations').doc(SAIFUDDIN_PROFILE_MIGRATION_V2_FLAG).set(record);
+    } catch (e) {
+      console.warn('[Migration] Warning persisting migration flag v2 in Firestore:', e);
+    }
+  }
+
+  console.log(`[Migration] Profile migration ${SAIFUDDIN_PROFILE_MIGRATION_V2_FLAG} successfully executed for member ${target.name} (${target.id})`);
   return true;
 }
 

@@ -10,7 +10,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { Profile } from '../types';
-import { getInitials } from '../utils';
+import { getInitials, MIN_MEMBERS_FOR_STATS } from '../utils';
 import { useEventPhotos } from '../hooks/useEventPhotos';
 import { useTeam } from '../hooks/useTeam';
 
@@ -247,8 +247,8 @@ export const HeroSection: React.FC<HeroProps> = ({
         </div>
       </div>
 
-      {/* Requirement 4: STATS. Hide the three counters while they are zero. Show them as one compact row once the first member joins. */}
-      {profiles.length > 0 && (
+      {/* STATS: Hide counters until network has at least 25 members (MIN_MEMBERS_FOR_STATS) */}
+      {profiles.length >= MIN_MEMBERS_FOR_STATS && (
         <div className="relative z-10 flex flex-wrap items-center gap-6 pt-5 mt-4 text-xs text-[var(--fg-muted)] border-t border-[var(--card-border)]/60">
           <div className="flex items-center gap-2">
             <Users className="w-3.5 h-3.5 text-[var(--fg-muted)]" />
@@ -320,7 +320,7 @@ export const KampalaStorySection: React.FC<KampalaStoryProps> = () => {
                 height={500}
               />
             </div>
-            <figcaption className="text-[11px] text-[var(--fg-muted)]">
+            <figcaption className="text-[13px] text-[var(--fg-muted)]">
               EIIC Innovation Centre, Makerere University Business School.
             </figcaption>
           </figure>
@@ -338,7 +338,7 @@ export const KampalaStorySection: React.FC<KampalaStoryProps> = () => {
                 height={500}
               />
             </div>
-            <figcaption className="text-[11px] text-[var(--fg-muted)]">
+            <figcaption className="text-[13px] text-[var(--fg-muted)]">
               Collaborating on Kwegatta architecture and UI.
             </figcaption>
           </figure>
