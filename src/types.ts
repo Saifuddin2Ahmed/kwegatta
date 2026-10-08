@@ -195,3 +195,21 @@ export interface EventAttendeeMatch {
   reason: string;
   score: number;
 }
+
+export interface TeamMember {
+  id: string;
+  name: string;
+  title: string;
+  line1: string;
+  line2: string;
+  github?: string | null;
+  linkedin?: string | null;
+  linked_profile_id?: string | null;
+  photo?: string | null;
+  order: number;
+  hidden: boolean;
+  linked_avatar?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+

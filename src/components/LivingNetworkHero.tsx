@@ -12,6 +12,7 @@ import {
 import { Profile } from '../types';
 import { getInitials } from '../utils';
 import { useEventPhotos } from '../hooks/useEventPhotos';
+import { useTeam } from '../hooks/useTeam';
 
 export interface HeroProps {
   profiles: Profile[];
@@ -26,53 +27,74 @@ export interface KampalaStoryProps {
 
 const TEAM_MEMBERS = [
   {
+    name: 'Saifuddin Ahmed',
+    role: 'Team lead and engineering',
+    title: 'Team lead and engineering',
+    background: 'Software and AI Engineer • Systems Architect',
+    line1: 'Software and AI Engineer • Systems Architect',
+    affiliation: 'Future Stars Center for Development and Capacity Building',
+    line2: 'Future Stars Center for Development and Capacity Building',
+    github: 'Saifuddin2Ahmed'
+  },
+  {
     name: 'Abubaker Mohamed Adam',
     affiliation: 'Sub-Saharan College',
+    line2: 'Sub-Saharan College',
     background: 'NGO volunteer',
+    line1: 'NGO volunteer',
     role: 'Community and NGO partnerships',
+    title: 'Community and NGO partnerships',
     github: 'abubakermohammed092077-bit'
   },
   {
     name: 'Adinan Juuko',
     affiliation: 'Victoria University',
+    line2: 'Victoria University',
     background: 'Software Engineering',
+    line1: 'Software Engineering',
     role: 'Testing and quality',
+    title: 'Testing and quality',
     github: 'Aditech-191'
   },
   {
     name: 'Amme Patience Esther',
     affiliation: 'Makerere University Business School',
+    line2: 'Makerere University Business School',
     background: 'Bachelor of Marketing',
+    line1: 'Bachelor of Marketing',
     role: 'Marketing and communications',
+    title: 'Marketing and communications',
     github: null
   },
   {
     name: 'Mupole Uwizeye Alexis',
     affiliation: 'Bugema University',
+    line2: 'Bugema University',
     background: 'Business Computing',
+    line1: 'Business Computing',
     role: 'Product and data',
+    title: 'Product and data',
     github: 'Alexis-Mupole'
   },
   {
     name: 'Nabagulanyi Prossy Sherry',
     affiliation: 'Makerere University Business School',
+    line2: 'Makerere University Business School',
     background: 'Student',
+    line1: 'Student',
     role: 'User research and outreach',
+    title: 'User research and outreach',
     github: null
   },
   {
     name: 'Ojambo Emmanuel',
     affiliation: 'Makerere University Business School',
+    line2: 'Makerere University Business School',
     background: 'Accounting',
+    line1: 'Accounting',
     role: 'Business model and sustainability',
+    title: 'Business model and sustainability',
     github: null
-  },
-  {
-    name: 'Saifuddin Ahmed',
-    affiliation: 'Future Stars Center for Development and Capacity Building (refugee-led NGO)',
-    background: 'Engineer',
-    role: 'Team lead and engineering',
-    github: 'Saifuddin2Ahmed'
   }
 ];
 
@@ -255,6 +277,7 @@ export const HeroSection: React.FC<HeroProps> = ({
 
 export const KampalaStorySection: React.FC<KampalaStoryProps> = () => {
   const photos = useEventPhotos();
+  const { team } = useTeam();
   return (
     <section id="story" className="border-t border-[var(--card-border)] pt-12 sm:pt-16 space-y-12 sm:space-y-16">
       {/* Story Narrative & Two Other Photos */}
@@ -360,51 +383,106 @@ export const KampalaStorySection: React.FC<KampalaStoryProps> = () => {
             The team
           </h3>
           <span className="text-xs text-[var(--fg-subtle)]">
-            Equal credit · Alphabetical order
+            The team
           </span>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-          {TEAM_MEMBERS.map(member => (
-            <div
-              key={member.name}
-              className="p-4 sm:p-5 rounded-xl bg-[var(--card)] border border-[var(--card-border)] space-y-3 flex flex-col justify-between"
-            >
-              <div className="space-y-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-[var(--gold-subtle)] text-[var(--gold)] font-bold text-xs grid place-items-center flex-shrink-0">
-                    {getInitials(member.name)}
+          {team.map(member => {
+            const photoUrl = member.photo || member.linked_avatar || (member.linked_profile_id ? `/api/avatar/${member.linked_profile_id}` : null);
+            const title = member.title || (member as any).role || '';
+            const line1 = member.line1 || (member as any).background || '';
+            const line2 = member.line2 || (member as any).affiliation || '';
+
+            return (
+              <div
+                key={member.id || member.name}
+                className="p-4 sm:p-5 rounded-xl bg-[var(--card)] border border-[var(--card-border)] space-y-3 flex flex-col justify-between"
+              >
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    {photoUrl ? (
+                      <img
+                        src={photoUrl}
+                        alt={member.name}
+                        className="w-10 h-10 rounded-full object-cover flex-shrink-0 border border-[var(--card-border)]"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-[var(--gold-subtle)] text-[var(--gold)] font-bold text-xs grid place-items-center flex-shrink-0">
+                        {getInitials(member.name)}
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      {member.linked_profile_id ? (
+                        <a
+                          href={`/#/u/${member.linked_profile_id}`}
+                          className="text-sm font-bold text-[var(--fg)] hover:text-[var(--gold)] hover:underline truncate block"
+                          title={`View ${member.name}'s profile`}
+                        >
+                          {member.name}
+                        </a>
+                      ) : (
+                        <h4 className="text-sm font-bold text-[var(--fg)] truncate">
+                          {member.name}
+                        </h4>
+                      )}
+                      <p className="text-xs text-[var(--teal)] font-medium truncate">
+                        {title}
+                      </p>
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <h4 className="text-sm font-bold text-[var(--fg)] truncate">
-                      {member.name}
-                    </h4>
-                    <p className="text-xs text-[var(--teal)] font-medium truncate">
-                      {member.role}
+
+                  {line1 && (
+                    <p className="text-xs text-[var(--fg-muted)] leading-relaxed">
+                      {line1}
                     </p>
+                  )}
+
+                  {line2 && (
+                    <p className="text-xs text-[var(--fg-subtle)] line-clamp-2">
+                      {line2}
+                    </p>
+                  )}
+                </div>
+
+                {(member.github || member.linkedin || member.linked_profile_id) && (
+                  <div className="pt-2 border-t border-[var(--card-border)] flex items-center justify-between text-xs">
+                    {member.github ? (
+                      <a
+                        href={`https://github.com/${member.github}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[var(--fg-muted)] hover:text-[var(--gold)] inline-flex items-center gap-1.5 transition-colors"
+                      >
+                        <Github className="w-3.5 h-3.5" />
+                        <span>@{member.github}</span>
+                      </a>
+                    ) : <span />}
+
+                    {member.linkedin ? (
+                      <a
+                        href={member.linkedin.startsWith('http') ? member.linkedin : `https://linkedin.com/in/${member.linkedin}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[var(--fg-muted)] hover:text-[var(--gold)] inline-flex items-center gap-1.5 transition-colors"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>LinkedIn</span>
+                      </a>
+                    ) : member.linked_profile_id ? (
+                      <a
+                        href={`/#/u/${member.linked_profile_id}`}
+                        className="text-[var(--gold)] hover:underline inline-flex items-center gap-1 font-medium text-xs"
+                      >
+                        <span>Profile</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    ) : null}
                   </div>
-                </div>
-
-                <p className="text-xs text-[var(--fg-muted)] line-clamp-2">
-                  {member.affiliation}
-                </p>
+                )}
               </div>
-
-              {member.github && (
-                <div className="pt-2 border-t border-[var(--card-border)] flex items-center justify-between text-xs">
-                  <a
-                    href={`https://github.com/${member.github}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[var(--fg-muted)] hover:text-[var(--gold)] inline-flex items-center gap-1.5 transition-colors"
-                  >
-                    <Github className="w-3.5 h-3.5" />
-                    <span>@{member.github}</span>
-                  </a>
-                </div>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

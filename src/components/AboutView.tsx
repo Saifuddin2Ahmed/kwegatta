@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Avatar } from './Avatar';
 import { useEventPhotos } from '../hooks/useEventPhotos';
+import { useTeam } from '../hooks/useTeam';
 
 interface AboutViewProps {
   onNavigateHome: () => void;
@@ -28,58 +29,80 @@ interface AboutViewProps {
 
 const TEAM_MEMBERS = [
   {
+    name: 'Saifuddin Ahmed',
+    role: 'Team lead and engineering',
+    title: 'Team lead and engineering',
+    background: 'Software and AI Engineer • Systems Architect',
+    line1: 'Software and AI Engineer • Systems Architect',
+    affiliation: 'Future Stars Center for Development and Capacity Building',
+    line2: 'Future Stars Center for Development and Capacity Building',
+    github: 'Saifuddin2Ahmed'
+  },
+  {
     name: 'Abubaker Mohamed Adam',
     affiliation: 'Sub-Saharan College',
+    line2: 'Sub-Saharan College',
     background: 'NGO volunteer',
+    line1: 'NGO volunteer',
     role: 'Community and NGO partnerships',
+    title: 'Community and NGO partnerships',
     github: 'abubakermohammed092077-bit'
   },
   {
     name: 'Adinan Juuko',
     affiliation: 'Victoria University',
+    line2: 'Victoria University',
     background: 'Software Engineering',
+    line1: 'Software Engineering',
     role: 'Testing and quality',
+    title: 'Testing and quality',
     github: 'Aditech-191'
   },
   {
     name: 'Amme Patience Esther',
     affiliation: 'Makerere University Business School',
+    line2: 'Makerere University Business School',
     background: 'Bachelor of Marketing',
+    line1: 'Bachelor of Marketing',
     role: 'Marketing and communications',
+    title: 'Marketing and communications',
     github: null
   },
   {
     name: 'Mupole Uwizeye Alexis',
     affiliation: 'Bugema University',
+    line2: 'Bugema University',
     background: 'Business Computing',
+    line1: 'Business Computing',
     role: 'Product and data',
+    title: 'Product and data',
     github: 'Alexis-Mupole'
   },
   {
     name: 'Nabagulanyi Prossy Sherry',
     affiliation: 'Makerere University Business School',
+    line2: 'Makerere University Business School',
     background: 'Student',
+    line1: 'Student',
     role: 'User research and outreach',
+    title: 'User research and outreach',
     github: null
   },
   {
     name: 'Ojambo Emmanuel',
     affiliation: 'Makerere University Business School',
+    line2: 'Makerere University Business School',
     background: 'Accounting',
+    line1: 'Accounting',
     role: 'Business model and sustainability',
+    title: 'Business model and sustainability',
     github: null
-  },
-  {
-    name: 'Saifuddin Ahmed',
-    affiliation: 'Future Stars Center for Development and Capacity Building (refugee-led NGO)',
-    background: 'Engineer',
-    role: 'Team lead and engineering',
-    github: 'Saifuddin2Ahmed'
   }
 ];
 
 export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
   const photos = useEventPhotos();
+  const { team } = useTeam();
   return (
     <div className="max-w-4xl mx-auto py-6 sm:py-12 space-y-20 sm:space-y-28 animate-in fade-in">
       
@@ -337,49 +360,91 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          {TEAM_MEMBERS.map((member, idx) => (
-            <div
-              key={member.name}
-              className="p-5 rounded-xl bg-[var(--card)] border border-[var(--card-border)] flex flex-col justify-between space-y-3 hover:border-[var(--card-border)]/80 transition-all"
-            >
-              <div className="space-y-2.5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <Avatar
-                      profile={{ name: member.name } as any}
-                      className="w-10 h-10 flex-shrink-0"
-                    />
-                    <div>
-                      <h4 className="font-semibold text-sm sm:text-base text-[var(--fg)]">
-                        {member.name}
-                      </h4>
-                      <p className="text-xs text-[var(--teal)] font-medium">{member.role}</p>
+          {team.map((member) => {
+            const photoUrl = member.photo || member.linked_avatar || (member.linked_profile_id ? `/api/avatar/${member.linked_profile_id}` : null);
+            const title = member.title || (member as any).role || '';
+            const line1 = member.line1 || (member as any).background || '';
+            const line2 = member.line2 || (member as any).affiliation || '';
+
+            return (
+              <div
+                key={member.id || member.name}
+                className="p-5 rounded-xl bg-[var(--card)] border border-[var(--card-border)] flex flex-col justify-between space-y-3 hover:border-[var(--card-border)]/80 transition-all"
+              >
+                <div className="space-y-2.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      {photoUrl ? (
+                        <img
+                          src={photoUrl}
+                          alt={member.name}
+                          className="w-10 h-10 rounded-full object-cover flex-shrink-0 border border-[var(--card-border)]"
+                        />
+                      ) : (
+                        <Avatar
+                          profile={{ name: member.name } as any}
+                          className="w-10 h-10 flex-shrink-0"
+                        />
+                      )}
+                      <div>
+                        {member.linked_profile_id ? (
+                          <a
+                            href={`/#/u/${member.linked_profile_id}`}
+                            className="font-semibold text-sm sm:text-base text-[var(--fg)] hover:text-[var(--gold)] hover:underline block"
+                            title={`View ${member.name}'s profile`}
+                          >
+                            {member.name}
+                          </a>
+                        ) : (
+                          <h4 className="font-semibold text-sm sm:text-base text-[var(--fg)]">
+                            {member.name}
+                          </h4>
+                        )}
+                        <p className="text-xs text-[var(--teal)] font-medium">{title}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      {member.github && (
+                        <a
+                          href={`https://github.com/${member.github}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[var(--fg-subtle)] hover:text-[var(--fg)] p-1 transition-colors"
+                          aria-label={`${member.name} on GitHub`}
+                        >
+                          <Github className="w-4 h-4" />
+                        </a>
+                      )}
+                      {member.linkedin && (
+                        <a
+                          href={member.linkedin.startsWith('http') ? member.linkedin : `https://linkedin.com/in/${member.linkedin}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[var(--fg-subtle)] hover:text-[var(--gold)] p-1 transition-colors"
+                          aria-label={`${member.name} on LinkedIn`}
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </a>
+                      )}
                     </div>
                   </div>
 
-                  {member.github && (
-                    <a
-                      href={`https://github.com/${member.github}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[var(--fg-subtle)] hover:text-[var(--fg)] p-1 transition-colors"
-                      aria-label={`${member.name} on GitHub`}
-                    >
-                      <Github className="w-4 h-4" />
-                    </a>
+                  {line1 && (
+                    <p className="text-xs text-[var(--fg-muted)] leading-relaxed">
+                      {line1}
+                    </p>
                   )}
                 </div>
 
-                <p className="text-xs text-[var(--fg-muted)] leading-relaxed">
-                  {member.background}
-                </p>
+                {line2 && (
+                  <div className="pt-2 border-t border-[var(--card-border)]/50 text-[11px] text-[var(--fg-subtle)] truncate">
+                    {line2}
+                  </div>
+                )}
               </div>
-
-              <div className="pt-2 border-t border-[var(--card-border)]/50 text-[11px] text-[var(--fg-subtle)] truncate">
-                {member.affiliation}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 

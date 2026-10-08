@@ -34,9 +34,14 @@ import {
   Mail,
   Megaphone,
   Clock,
-  X
+  X,
+  ArrowUp,
+  ArrowDown,
+  Edit2,
+  Github,
+  Linkedin
 } from 'lucide-react';
-import { Profile, Post, EventOpportunityItem } from '../types';
+import { Profile, Post, EventOpportunityItem, TeamMember } from '../types';
 import { SetupView } from './SetupView';
 import { EventPhotosModal } from './EventPhotosModal';
 import { useEventPhotos } from '../hooks/useEventPhotos';
@@ -59,7 +64,13 @@ import {
   pinAnnouncement,
   unpinAnnouncement,
   fetchPinnedAnnouncement,
-  getAuthHeaders
+  getAuthHeaders,
+  fetchTeam,
+  createTeamMember,
+  updateTeamMember,
+  uploadTeamMemberPhoto,
+  reorderTeamMembers,
+  deleteTeamMember
 } from '../services/api';
 import { auth } from '../services/firebase';
 
@@ -120,16 +131,33 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   // Tabs state
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'events' | 'admins' | 'members' | 'reports' | 'posts' | 'photos' | 'ai' | 'tools' | 'setup' | 'audit'
+    'overview' | 'team' | 'events' | 'admins' | 'members' | 'reports' | 'posts' | 'photos' | 'ai' | 'tools' | 'setup' | 'audit'
   >('overview');
 
   const photos = useEventPhotos();
   const [overview, setOverview] = useState<AdminOverviewData | null>(null);
+  const [teamList, setTeamList] = useState<TeamMember[]>([]);
   const [members, setMembers] = useState<any[]>([]);
   const [posts, setPosts] = useState<any[]>([]);
   const [reports, setReports] = useState<any[]>([]);
   const [auditLog, setAuditLog] = useState<any[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(false);
+
+  // Team Management State
+  const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
+  const [isAddingMember, setIsAddingMember] = useState(false);
+  const [teamForm, setTeamForm] = useState({
+    name: '',
+    title: '',
+    line1: '',
+    line2: '',
+    github: '',
+    linkedin: '',
+    linked_profile_id: '',
+    hidden: false
+  });
+  const [isSavingTeam, setIsSavingTeam] = useState(false);
+  const [teamPhotoUploadingId, setTeamPhotoUploadingId] = useState<string | null>(null);
 
   // Search & Filter state
   const [memberSearch, setMemberSearch] = useState('');
@@ -241,7 +269,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
     try {
       const headers = getAuthHeaders(adminToken ? { 'x-admin-token': adminToken } : {});
-      const [ovRes, memRes, postRes, logRes, repRes, evRes, admRes, pinRes] = await Promise.all([
+      const [ovRes, memRes, postRes, logRes, repRes, evRes, admRes, pinRes, teamData] = await Promise.all([
         fetch('/api/admin/overview', { headers }),
         fetch('/api/admin/members', { headers }),
         fetch('/api/admin/posts', { headers }),
@@ -249,7 +277,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
         fetch('/api/admin/reports', { headers }),
         fetch('/api/events', { headers }),
         fetch('/api/admin/admins', { headers }).catch(() => null),
-        fetchPinnedAnnouncement()
+        fetchPinnedAnnouncement(),
+        fetchTeam().catch(() => [])
       ]);
 
       if (ovRes.status === 401 || memRes.status === 401) {
@@ -265,6 +294,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       if (evRes.ok) setAdminEvents(await evRes.json());
       if (admRes && admRes.ok) setAdminAccounts(await admRes.json());
       if (pinRes) setPinnedAnnouncement(pinRes);
+      if (Array.isArray(teamData)) setTeamList(teamData);
     } catch (err: any) {
       setErrorMsg(err.message);
     } finally {
@@ -517,6 +547,132 @@ export const AdminView: React.FC<AdminViewProps> = ({
       onRefreshGlobalData();
     } catch (err: any) {
       onToast('Failed to delete: ' + err.message);
+    }
+  };
+
+  // Team Management Handlers
+  const openAddMemberModal = () => {
+    setEditingMember(null);
+    setTeamForm({
+      name: '',
+      title: '',
+      line1: '',
+      line2: '',
+      github: '',
+      linkedin: '',
+      linked_profile_id: '',
+      hidden: false
+    });
+    setIsAddingMember(true);
+  };
+
+  const openEditMemberModal = (member: TeamMember) => {
+    setEditingMember(member);
+    setTeamForm({
+      name: member.name || '',
+      title: member.title || '',
+      line1: member.line1 || '',
+      line2: member.line2 || '',
+      github: member.github || '',
+      linkedin: member.linkedin || '',
+      linked_profile_id: member.linked_profile_id || '',
+      hidden: Boolean(member.hidden)
+    });
+    setIsAddingMember(true);
+  };
+
+  const handleSaveTeamMember = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!teamForm.name.trim()) {
+      onToast('Name is required');
+      return;
+    }
+    setIsSavingTeam(true);
+    try {
+      if (editingMember) {
+        await updateTeamMember(editingMember.id, teamForm);
+        onToast(`Updated team member "${teamForm.name}"`);
+      } else {
+        await createTeamMember(teamForm);
+        onToast(`Added team member "${teamForm.name}"`);
+      }
+      setIsAddingMember(false);
+      setEditingMember(null);
+      await fetchAdminData();
+      onRefreshGlobalData();
+    } catch (err: any) {
+      onToast('Failed to save team member: ' + (err.message || err));
+    } finally {
+      setIsSavingTeam(false);
+    }
+  };
+
+  const handleMoveTeamMember = async (index: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= teamList.length) return;
+    const newTeam = [...teamList];
+    const temp = newTeam[index];
+    newTeam[index] = newTeam[targetIndex];
+    newTeam[targetIndex] = temp;
+    setTeamList(newTeam);
+    try {
+      const ordered_ids = newTeam.map(m => m.id);
+      await reorderTeamMembers(ordered_ids);
+      onToast('Team reordered');
+      await fetchAdminData();
+      onRefreshGlobalData();
+    } catch (err: any) {
+      onToast('Failed to reorder: ' + (err.message || err));
+      await fetchAdminData();
+    }
+  };
+
+  const handleToggleHideTeamMember = async (member: TeamMember) => {
+    try {
+      const nextHidden = !member.hidden;
+      await updateTeamMember(member.id, { hidden: nextHidden });
+      onToast(nextHidden ? `Hid "${member.name}" from public cards` : `Showed "${member.name}" on public cards`);
+      await fetchAdminData();
+      onRefreshGlobalData();
+    } catch (err: any) {
+      onToast('Failed to toggle visibility: ' + (err.message || err));
+    }
+  };
+
+  const handleDeleteTeamMember = async (member: TeamMember) => {
+    if (!confirm(`Are you sure you want to remove "${member.name}" from the team?`)) return;
+    try {
+      await deleteTeamMember(member.id);
+      onToast(`Removed "${member.name}" from team`);
+      await fetchAdminData();
+      onRefreshGlobalData();
+    } catch (err: any) {
+      onToast('Failed to remove team member: ' + (err.message || err));
+    }
+  };
+
+  const handlePhotoUploadForTeam = async (memberId: string, file: File) => {
+    if (!file) return;
+    setTeamPhotoUploadingId(memberId);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64 = reader.result as string;
+          await uploadTeamMemberPhoto(memberId, base64);
+          onToast('Team photo updated and optimized to WebP');
+          await fetchAdminData();
+          onRefreshGlobalData();
+        } catch (err: any) {
+          onToast('Failed to upload photo: ' + (err.message || err));
+        } finally {
+          setTeamPhotoUploadingId(null);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      setTeamPhotoUploadingId(null);
+      onToast('Error reading image: ' + (err.message || err));
     }
   };
 
@@ -827,6 +983,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       <div className="flex flex-wrap gap-1.5 border-b border-[var(--card-border)] pb-2 overflow-x-auto scrollbar-none">
         {[
           { id: 'overview', label: 'Overview', icon: BarChart3 },
+          { id: 'team', label: `Team (${teamList.length})`, icon: UserCheck },
           { id: 'events', label: `Events (${adminEvents.length})`, icon: Calendar },
           { id: 'admins', label: `Admins (${adminAccounts.admin_emails.length || 1})`, icon: Lock },
           { id: 'members', label: `Members (${overview?.members_count || 0})`, icon: Users },
@@ -1428,6 +1585,351 @@ export const AdminView: React.FC<AdminViewProps> = ({
         </div>
         );
       })()}
+
+      {/* TAB: TEAM MANAGEMENT */}
+      {activeTab === 'team' && (
+        <div className="space-y-6">
+          <div className="p-4 sm:p-5 kw-card space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <UserCheck className="w-4 h-4 text-[var(--gold)]" />
+                  <h3 className="font-bold text-sm sm:text-base text-[var(--fg)]">Team Roster & Public Cards</h3>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--gold-subtle)] text-[var(--gold)] font-semibold">
+                    {teamList.length} members
+                  </span>
+                </div>
+                <p className="text-xs text-[var(--fg-muted)] mt-1">
+                  Public landing and About pages read directly from this roster. Reorder with up/down buttons, edit details, link Kwegatta accounts, and upload WebP photos.
+                </p>
+              </div>
+              <button
+                onClick={openAddMemberModal}
+                className="kw-btn kw-btn-gold text-xs py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Member</span>
+              </button>
+            </div>
+
+            {teamList.length === 0 ? (
+              <div className="text-center py-12 text-xs text-[var(--fg-muted)]">
+                No team members found. Click "Add Member" to seed or add team members.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {teamList.map((member, index) => {
+                  const photoUrl = member.photo || member.linked_avatar || (member.linked_profile_id ? `/api/avatar/${member.linked_profile_id}` : null);
+                  return (
+                    <div
+                      key={member.id}
+                      className={`p-3.5 sm:p-4 rounded-xl border bg-[var(--card)] transition-all ${
+                        member.hidden ? 'border-dashed border-zinc-700 opacity-60' : 'border-[var(--card-border)]'
+                      }`}
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-start gap-3 min-w-0">
+                          {/* Photo or Initials */}
+                          <div className="relative shrink-0">
+                            {photoUrl ? (
+                              <img
+                                src={photoUrl}
+                                alt={member.name}
+                                className="w-12 h-12 rounded-full object-cover border border-[var(--card-border)]"
+                              />
+                            ) : (
+                              <div className="w-12 h-12 rounded-full bg-[var(--gold-subtle)] text-[var(--gold)] font-bold text-sm grid place-items-center border border-[var(--card-border)]">
+                                {member.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                              </div>
+                            )}
+                            <label
+                              title="Upload / Replace Photo (resized to WebP)"
+                              className="absolute -bottom-1 -right-1 p-1 rounded-full bg-[var(--bg-elevated)] border border-[var(--card-border)] text-[var(--fg)] hover:text-[var(--gold)] cursor-pointer shadow-sm"
+                            >
+                              <Camera className="w-3 h-3" />
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                disabled={teamPhotoUploadingId === member.id}
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) handlePhotoUploadForTeam(member.id, file);
+                                }}
+                              />
+                            </label>
+                          </div>
+
+                          {/* Member Details */}
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h4 className="font-bold text-sm text-[var(--fg)] truncate">
+                                {member.name}
+                              </h4>
+                              {index === 0 && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--gold-subtle)] text-[var(--gold)] font-medium">
+                                  Lead / 1st
+                                </span>
+                              )}
+                              {member.hidden && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-medium">
+                                  Hidden
+                                </span>
+                              )}
+                              {member.linked_profile_id && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--teal-subtle)] text-[var(--teal)] font-medium">
+                                  Linked Account
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs font-medium text-[var(--teal)] truncate">
+                              {member.title}
+                            </p>
+                            {member.line1 && (
+                              <p className="text-xs text-[var(--fg-muted)] line-clamp-1">
+                                {member.line1}
+                              </p>
+                            )}
+                            {member.line2 && (
+                              <p className="text-xs text-[var(--fg-subtle)] line-clamp-1">
+                                {member.line2}
+                              </p>
+                            )}
+                            <div className="flex flex-wrap items-center gap-3 pt-1 text-xs text-[var(--fg-muted)]">
+                              {member.github && (
+                                <span className="flex items-center gap-1 text-[11px]">
+                                  <Github className="w-3 h-3 text-[var(--fg-subtle)]" />
+                                  <span>@{member.github}</span>
+                                </span>
+                              )}
+                              {member.linkedin && (
+                                <span className="flex items-center gap-1 text-[11px]">
+                                  <Linkedin className="w-3 h-3 text-[var(--fg-subtle)]" />
+                                  <span>LinkedIn</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Action buttons (Order, Hide, Edit, Delete) */}
+                        <div className="flex items-center gap-1 self-end sm:self-center shrink-0">
+                          {/* Reorder Up */}
+                          <button
+                            type="button"
+                            disabled={index === 0}
+                            onClick={() => handleMoveTeamMember(index, 'up')}
+                            className="p-1.5 rounded-lg border border-[var(--card-border)] text-[var(--fg-muted)] hover:text-[var(--fg)] hover:bg-[var(--card-hover)] disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+                            title="Move up"
+                          >
+                            <ArrowUp className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Reorder Down */}
+                          <button
+                            type="button"
+                            disabled={index === teamList.length - 1}
+                            onClick={() => handleMoveTeamMember(index, 'down')}
+                            className="p-1.5 rounded-lg border border-[var(--card-border)] text-[var(--fg-muted)] hover:text-[var(--fg)] hover:bg-[var(--card-hover)] disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+                            title="Move down"
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Hide / Show */}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleHideTeamMember(member)}
+                            className={`p-1.5 rounded-lg border border-[var(--card-border)] cursor-pointer ${
+                              member.hidden ? 'text-amber-400 bg-amber-500/10' : 'text-[var(--fg-muted)] hover:text-[var(--fg)]'
+                            }`}
+                            title={member.hidden ? 'Show on public cards' : 'Hide from public cards'}
+                          >
+                            {member.hidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+
+                          {/* Edit */}
+                          <button
+                            type="button"
+                            onClick={() => openEditMemberModal(member)}
+                            className="p-1.5 rounded-lg border border-[var(--card-border)] text-[var(--fg-muted)] hover:text-[var(--gold)] hover:bg-[var(--card-hover)] cursor-pointer"
+                            title="Edit member"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Delete */}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteTeamMember(member)}
+                            className="p-1.5 rounded-lg border border-[var(--card-border)] text-red-400 hover:bg-red-500/10 cursor-pointer"
+                            title="Delete member"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* ADD / EDIT MEMBER MODAL */}
+          {isAddingMember && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-sm overflow-y-auto">
+              <div className="kw-card w-full max-w-lg p-5 sm:p-6 space-y-4 my-8 border-[var(--gold)]/30">
+                <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+                  <h3 className="font-bold text-base text-[var(--fg)]">
+                    {editingMember ? `Edit Team Member: ${editingMember.name}` : 'Add New Team Member'}
+                  </h3>
+                  <button
+                    onClick={() => { setIsAddingMember(false); setEditingMember(null); }}
+                    className="p-1 rounded-lg text-[var(--fg-muted)] hover:text-[var(--fg)]"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveTeamMember} className="space-y-3.5 text-xs sm:text-sm">
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--fg)] mb-1">
+                      Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={teamForm.name}
+                      onChange={(e) => setTeamForm({ ...teamForm, name: e.target.value })}
+                      placeholder="e.g. Saifuddin Ahmed"
+                      className="kw-input w-full py-2 px-3 rounded-lg text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--fg)] mb-1">
+                      Title / Role in Project *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={teamForm.title}
+                      onChange={(e) => setTeamForm({ ...teamForm, title: e.target.value })}
+                      placeholder="e.g. Team lead and engineering"
+                      className="kw-input w-full py-2 px-3 rounded-lg text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--fg)] mb-1">
+                      Line 1 (Background / Skills)
+                    </label>
+                    <input
+                      type="text"
+                      value={teamForm.line1}
+                      onChange={(e) => setTeamForm({ ...teamForm, line1: e.target.value })}
+                      placeholder="e.g. Software and AI Engineer • Systems Architect"
+                      className="kw-input w-full py-2 px-3 rounded-lg text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--fg)] mb-1">
+                      Line 2 (Affiliation / Organisation)
+                    </label>
+                    <input
+                      type="text"
+                      value={teamForm.line2}
+                      onChange={(e) => setTeamForm({ ...teamForm, line2: e.target.value })}
+                      placeholder="e.g. Future Stars Center for Development and Capacity Building"
+                      className="kw-input w-full py-2 px-3 rounded-lg text-xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-[var(--fg)] mb-1">
+                        GitHub Username
+                      </label>
+                      <input
+                        type="text"
+                        value={teamForm.github}
+                        onChange={(e) => setTeamForm({ ...teamForm, github: e.target.value })}
+                        placeholder="e.g. Saifuddin2Ahmed"
+                        className="kw-input w-full py-2 px-3 rounded-lg text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[var(--fg)] mb-1">
+                        LinkedIn URL
+                      </label>
+                      <input
+                        type="url"
+                        value={teamForm.linkedin}
+                        onChange={(e) => setTeamForm({ ...teamForm, linkedin: e.target.value })}
+                        placeholder="https://linkedin.com/in/..."
+                        className="kw-input w-full py-2 px-3 rounded-lg text-xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--fg)] mb-1">
+                      Linked Kwegatta Member Account
+                    </label>
+                    <select
+                      value={teamForm.linked_profile_id}
+                      onChange={(e) => setTeamForm({ ...teamForm, linked_profile_id: e.target.value })}
+                      className="kw-input w-full py-2 px-3 rounded-lg text-xs bg-[var(--card)]"
+                    >
+                      <option value="">(None - unlinked)</option>
+                      {members.map(m => (
+                        <option key={m.id} value={m.id}>
+                          {m.name} ({m.role || 'member'}) {m.headline ? `• ${m.headline.slice(0, 30)}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-[var(--fg-subtle)] mt-1">
+                      If linked, the card uses their Kwegatta account photo and links directly to their public profile.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      type="checkbox"
+                      id="team-hidden"
+                      checked={teamForm.hidden}
+                      onChange={(e) => setTeamForm({ ...teamForm, hidden: e.target.checked })}
+                      className="rounded border-[var(--card-border)] text-[var(--gold)] focus:ring-0 cursor-pointer"
+                    />
+                    <label htmlFor="team-hidden" className="text-xs text-[var(--fg)] cursor-pointer">
+                      Hide this person from public cards
+                    </label>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-3 border-t border-[var(--card-border)]">
+                    <button
+                      type="button"
+                      onClick={() => { setIsAddingMember(false); setEditingMember(null); }}
+                      className="kw-btn kw-btn-ghost text-xs py-2 px-4 rounded-xl cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSavingTeam}
+                      className="kw-btn kw-btn-gold text-xs py-2 px-5 rounded-xl font-semibold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {isSavingTeam ? 'Saving...' : editingMember ? 'Save Changes' : 'Add Person'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* TAB: ADMIN ACCOUNTS MANAGEMENT */}
       {activeTab === 'admins' && (

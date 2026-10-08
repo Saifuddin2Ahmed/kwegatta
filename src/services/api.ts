@@ -1233,4 +1233,79 @@ export async function sendEventAttendeeUpdate(id: string, message: string): Prom
   return data;
 }
 
+// ============================================================================
+// TEAM MANAGEMENT API CLIENT
+// ============================================================================
+export async function fetchTeam(): Promise<any[]> {
+  try {
+    const headers = getAuthHeaders();
+    const res = await fetch('/api/team', { headers });
+    if (!res.ok) throw new Error('Failed to fetch team');
+    return await res.json();
+  } catch (err) {
+    console.warn('[fetchTeam] Error fetching team, returning empty:', err);
+    return [];
+  }
+}
+
+export async function createTeamMember(data: any): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch('/api/admin/team', {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(data)
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to add team member');
+  return json.member;
+}
+
+export async function updateTeamMember(id: string, patch: any): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/team/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(patch)
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to update team member');
+  return json.member;
+}
+
+export async function uploadTeamMemberPhoto(id: string, photo: string): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/team/${encodeURIComponent(id)}/photo`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ photo })
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to upload photo');
+  return json;
+}
+
+export async function reorderTeamMembers(ordered_ids: string[]): Promise<any[]> {
+  await getFreshAuthToken();
+  const res = await fetch('/api/admin/team/reorder', {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ ordered_ids })
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to reorder team');
+  return json.team;
+}
+
+export async function deleteTeamMember(id: string): Promise<boolean> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/team/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders()
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to delete team member');
+  return true;
+}
+
+
 

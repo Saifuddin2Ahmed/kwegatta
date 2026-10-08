@@ -9,7 +9,8 @@ import {
   buildGemmaPrompt,
   canApproveEvent,
   canEditEvent,
-  filterEventsForCaller
+  filterEventsForCaller,
+  canChangeTeam
 } from '../server';
 import { validatePasswordStrength } from '../src/services/firebase';
 
@@ -259,6 +260,16 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.2.1)', () => {
 
     expect(serverContent).toContain("res.setHeader('Cache-Control', 'no-cache');");
     expect(serverContent).toContain("immutable");
+  });
+});
+
+describe('Team Management Permissions (Admin Only)', () => {
+  it('a member who is not an admin cannot change the team', () => {
+    // Normal member (isAdmin: false) cannot change the team
+    expect(canChangeTeam(false)).toBe(false);
+
+    // Admin (isAdmin: true) can change the team
+    expect(canChangeTeam(true)).toBe(true);
   });
 });
 

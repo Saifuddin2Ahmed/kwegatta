@@ -91,7 +91,7 @@ The team behind Kwegatta:
 
 | Name | Affiliation | Background | Role in Kwegatta | GitHub |
 | ---- | ----------- | ---------- | ---------------- | ------ |
-| **Saifuddin Ahmed** | Future Stars Center for Development and Capacity Building (refugee-led NGO) | Engineer | Team lead and engineering | [@Saifuddin2Ahmed](https://github.com/Saifuddin2Ahmed) |
+| **Saifuddin Ahmed** | Future Stars Center for Development and Capacity Building | Software and AI Engineer • Systems Architect | Team lead and engineering | [@Saifuddin2Ahmed](https://github.com/Saifuddin2Ahmed) |
 | **Abubaker Mohamed Adam** | Sub-Saharan College | NGO volunteer | Community and NGO partnerships | [@abubakermohammed092077-bit](https://github.com/abubakermohammed092077-bit) |
 | **Adinan Juuko** | Victoria University | Software Engineering | Testing and quality | [@Aditech-191](https://github.com/Aditech-191) |
 | **Amme Patience Esther** | Makerere University Business School | Bachelor of Marketing | Marketing and communications | none yet |

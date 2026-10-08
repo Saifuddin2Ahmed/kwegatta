@@ -4,17 +4,15 @@ Kwegatta was developed and built for **Hacktoberfest 2026 Hack Day Kampala x MUB
 
 Sixty-seven people took part and eight projects were built. Kwegatta was awarded 1st place, and the team was forwarded to the MUBS Entrepreneurship, Innovation and Incubation Centre for its incubator.
 
-All team members receive equal credit and are listed alphabetically below:
-
 | Name | Affiliation | Background | Role in Kwegatta | GitHub |
 | ---- | ----------- | ---------- | ---------------- | ------ |
+| **Saifuddin Ahmed** | Future Stars Center for Development and Capacity Building | Software and AI Engineer • Systems Architect | Team lead and engineering | [@Saifuddin2Ahmed](https://github.com/Saifuddin2Ahmed) |
 | **Abubaker Mohamed Adam** | Sub-Saharan College | NGO volunteer | Community and NGO partnerships | [@abubakermohammed092077-bit](https://github.com/abubakermohammed092077-bit) |
 | **Adinan Juuko** | Victoria University | Software Engineering | Testing and quality | [@Aditech-191](https://github.com/Aditech-191) |
 | **Amme Patience Esther** | Makerere University Business School | Bachelor of Marketing | Marketing and communications | none yet |
 | **Mupole Uwizeye Alexis** | Bugema University | Business Computing | Product and data | [@Alexis-Mupole](https://github.com/Alexis-Mupole) |
 | **Nabagulanyi Prossy Sherry** | Makerere University Business School | Student | User research and outreach | none yet |
 | **Ojambo Emmanuel** | Makerere University Business School | Accounting | Business model and sustainability | none yet |
-| **Saifuddin Ahmed** | Future Stars Center for Development and Capacity Building (refugee-led NGO) | Engineer | Team lead and engineering | [@Saifuddin2Ahmed](https://github.com/Saifuddin2Ahmed) |
 
 ---
 

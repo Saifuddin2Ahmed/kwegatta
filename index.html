@@ -2,6 +2,20 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Interceptor compatibility: ensure window.fetch has both getter and setter
+      (function() {
+        try {
+          var _rawFetch = window.fetch ? window.fetch.bind(window) : undefined;
+          Object.defineProperty(window, 'fetch', {
+            get: function() { return _rawFetch; },
+            set: function(fn) { _rawFetch = fn; },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {}
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
     <title>Kwegatta: find the people you should build and learn with</title>
     <meta name="description" content="1st place · Hacktoberfest 2026 Hack Day Kampala. Match with people you should build and learn with based on what you need and offer using the open-weight Gemma 4 model." />

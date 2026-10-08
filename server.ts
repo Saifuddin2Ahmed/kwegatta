@@ -417,6 +417,116 @@ const firestoreUnsubscribers: Array<() => void> = [];
 
 const DATA_FILE = path.join(__dirname, '.kwegatta_store.json');
 
+export interface TeamMember {
+  id: string;
+  name: string;
+  title: string;
+  line1: string;
+  line2: string;
+  github?: string | null;
+  linkedin?: string | null;
+  linked_profile_id?: string | null;
+  photo?: string | null;
+  order: number;
+  hidden: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const INITIAL_TEAM_MEMBERS: TeamMember[] = [
+  {
+    id: 'team-saifuddin',
+    name: 'Saifuddin Ahmed',
+    title: 'Team lead and engineering',
+    line1: 'Software and AI Engineer • Systems Architect',
+    line2: 'Future Stars Center for Development and Capacity Building',
+    github: 'Saifuddin2Ahmed',
+    linkedin: null,
+    linked_profile_id: null,
+    photo: null,
+    order: 0,
+    hidden: false
+  },
+  {
+    id: 'team-abubaker',
+    name: 'Abubaker Mohamed Adam',
+    title: 'Community and NGO partnerships',
+    line1: 'NGO volunteer',
+    line2: 'Sub-Saharan College',
+    github: 'abubakermohammed092077-bit',
+    linkedin: null,
+    linked_profile_id: null,
+    photo: null,
+    order: 1,
+    hidden: false
+  },
+  {
+    id: 'team-adinan',
+    name: 'Adinan Juuko',
+    title: 'Testing and quality',
+    line1: 'Software Engineering',
+    line2: 'Victoria University',
+    github: 'Aditech-191',
+    linkedin: null,
+    linked_profile_id: null,
+    photo: null,
+    order: 2,
+    hidden: false
+  },
+  {
+    id: 'team-amme',
+    name: 'Amme Patience Esther',
+    title: 'Marketing and communications',
+    line1: 'Bachelor of Marketing',
+    line2: 'Makerere University Business School',
+    github: null,
+    linkedin: null,
+    linked_profile_id: null,
+    photo: null,
+    order: 3,
+    hidden: false
+  },
+  {
+    id: 'team-mupole',
+    name: 'Mupole Uwizeye Alexis',
+    title: 'Product and data',
+    line1: 'Business Computing',
+    line2: 'Bugema University',
+    github: 'Alexis-Mupole',
+    linkedin: null,
+    linked_profile_id: null,
+    photo: null,
+    order: 4,
+    hidden: false
+  },
+  {
+    id: 'team-nabagulanyi',
+    name: 'Nabagulanyi Prossy Sherry',
+    title: 'User research and outreach',
+    line1: 'Student',
+    line2: 'Makerere University Business School',
+    github: null,
+    linkedin: null,
+    linked_profile_id: null,
+    photo: null,
+    order: 5,
+    hidden: false
+  },
+  {
+    id: 'team-ojambo',
+    name: 'Ojambo Emmanuel',
+    title: 'Business model and sustainability',
+    line1: 'Accounting',
+    line2: 'Makerere University Business School',
+    github: null,
+    linkedin: null,
+    linked_profile_id: null,
+    photo: null,
+    order: 6,
+    hidden: false
+  }
+];
+
 interface StoreData {
   profiles: any[];
   follows: any[];
@@ -427,6 +537,7 @@ interface StoreData {
   events: any[];
   pinned_announcement: any;
   admin_emails: string[];
+  team: TeamMember[];
   audit_log: Array<{
     id: string;
     timestamp: string;
@@ -654,6 +765,9 @@ function loadStore(): StoreData {
         if (parsed.pinned_announcement === undefined) {
           parsed.pinned_announcement = null;
         }
+        if (!parsed.team || !Array.isArray(parsed.team) || parsed.team.length === 0) {
+          parsed.team = [...INITIAL_TEAM_MEMBERS];
+        }
         if (!parsed.audit_log || !Array.isArray(parsed.audit_log)) {
           parsed.audit_log = [];
         }
@@ -772,6 +886,7 @@ function loadStore(): StoreData {
     ] : [],
     pinned_announcement: null,
     admin_emails: [],
+    team: [...INITIAL_TEAM_MEMBERS],
     audit_log: [
       {
         id: 'audit-init',
@@ -1016,6 +1131,32 @@ async function setupFirestoreListeners(): Promise<void> {
       if (initial) { initial = false; resolve(); }
     }, (err) => {
       console.error('[Firestore] reports listener error:', err?.message || err);
+      if (initial) { initial = false; resolve(); }
+    });
+    firestoreUnsubscribers.push(unsub);
+  }));
+
+  // 9. Team listener (Seeded once in Firestore if collection is empty)
+  initialLoadPromises.push(new Promise((resolve) => {
+    let initial = true;
+    const unsub = firestoreDb!.collection('team').onSnapshot((snap) => {
+      const list: any[] = [];
+      snap.forEach(doc => {
+        const d = doc.data();
+        list.push({ ...d, id: d.id || doc.id });
+      });
+      if (list.length > 0) {
+        store.team = list.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+      } else {
+        store.team = [...INITIAL_TEAM_MEMBERS];
+        INITIAL_TEAM_MEMBERS.forEach(m => {
+          firestoreDb!.collection('team').doc(m.id).set(m).catch(() => {});
+        });
+      }
+      if (initial) { initial = false; resolve(); }
+    }, (err) => {
+      console.error('[Firestore] team listener error:', err?.message || err);
+      if (!store.team || store.team.length === 0) store.team = [...INITIAL_TEAM_MEMBERS];
       if (initial) { initial = false; resolve(); }
     });
     firestoreUnsubscribers.push(unsub);
@@ -3687,6 +3828,282 @@ app.get('/api/events/:id/export', (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename="${item.id}-attendees.csv"`);
   return res.send(csv);
+});
+
+/* =========================================================================
+   TEAM SECTION & ADMIN MANAGEMENT ENDPOINTS
+   ========================================================================= */
+
+export function canChangeTeam(isAdmin: boolean): boolean {
+  return Boolean(isAdmin);
+}
+
+// Public: Get team members
+app.get('/api/team', (req: Request, res: Response) => {
+  const isAdmin = checkAdmin(req);
+  let list = Array.isArray(store.team) ? [...store.team] : [];
+  if (!isAdmin) {
+    list = list.filter((m: any) => !m.hidden);
+  }
+  list = list.sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
+
+  const enriched = list.map((m: any) => {
+    let linkedAvatar = null;
+    let linkedProfile = null;
+    if (m.linked_profile_id) {
+      const lp = store.profiles.find((p: any) => p.id === m.linked_profile_id);
+      if (lp) {
+        linkedProfile = { id: lp.id, name: lp.name, role: lp.role, headline: lp.headline };
+        linkedAvatar = lp.avatar || null;
+      }
+    }
+    return {
+      ...m,
+      linked_avatar: linkedAvatar,
+      linked_profile: linkedProfile
+    };
+  });
+
+  return res.json(enriched);
+});
+
+// Admin: Add new team member
+app.post('/api/admin/team', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const raw = req.body || {};
+  const name = sanitizeText(raw.name, 100);
+  if (!name) {
+    return res.status(400).json({ error: 'Name is required' });
+  }
+
+  if (!Array.isArray(store.team)) store.team = [];
+  const maxOrder = store.team.reduce((max: number, m: any) => Math.max(max, Number(m.order) || 0), -1);
+
+  const member: TeamMember = {
+    id: 'team-' + Date.now() + '-' + crypto.randomBytes(2).toString('hex'),
+    name,
+    title: sanitizeText(raw.title || raw.role, 100) || 'Team Member',
+    line1: sanitizeText(raw.line1 || raw.background, 200),
+    line2: sanitizeText(raw.line2 || raw.affiliation, 200),
+    github: sanitizeText(raw.github, 60).replace(/^@/, '') || null,
+    linkedin: sanitizeText(raw.linkedin, 150) || null,
+    linked_profile_id: sanitizeText(raw.linked_profile_id, 80) || null,
+    photo: sanitizeAvatar(raw.photo) || null,
+    order: maxOrder + 1,
+    hidden: Boolean(raw.hidden),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  store.team.push(member);
+  await persistDoc('team', member.id, member);
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'TEAM_MEMBER_CREATED',
+    details: `Admin added team member "${member.name}" (${member.title})`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  if (storageMode === 'disk') saveStore(store);
+  return res.status(201).json({ success: true, member });
+});
+
+// Admin: Update team member
+app.patch('/api/admin/team/:id', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { id } = req.params;
+  const member = (store.team || []).find((m: any) => m.id === id);
+  if (!member) {
+    return res.status(404).json({ error: 'Team member not found' });
+  }
+
+  const raw = req.body || {};
+  if (raw.name !== undefined) member.name = sanitizeText(raw.name, 100);
+  if (raw.title !== undefined) member.title = sanitizeText(raw.title, 100);
+  if (raw.line1 !== undefined) member.line1 = sanitizeText(raw.line1, 200);
+  if (raw.line2 !== undefined) member.line2 = sanitizeText(raw.line2, 200);
+  if (raw.github !== undefined) member.github = sanitizeText(raw.github, 60).replace(/^@/, '') || null;
+  if (raw.linkedin !== undefined) member.linkedin = sanitizeText(raw.linkedin, 150) || null;
+  if (raw.linked_profile_id !== undefined) member.linked_profile_id = sanitizeText(raw.linked_profile_id, 80) || null;
+  if (raw.photo !== undefined) member.photo = sanitizeAvatar(raw.photo) || null;
+  if (raw.hidden !== undefined) member.hidden = Boolean(raw.hidden);
+  if (raw.order !== undefined) member.order = Number(raw.order) || 0;
+  member.updated_at = new Date().toISOString();
+
+  await persistDoc('team', member.id, member);
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'TEAM_MEMBER_UPDATED',
+    details: `Admin updated team member "${member.name}"`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true, member });
+});
+
+// Admin: Upload or replace photo (resized, WebP)
+app.post('/api/admin/team/:id/photo', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { id } = req.params;
+  const member = (store.team || []).find((m: any) => m.id === id);
+  if (!member) {
+    return res.status(404).json({ error: 'Team member not found' });
+  }
+
+  const { photo } = req.body || {};
+  if (!photo || typeof photo !== 'string') {
+    return res.status(400).json({ error: 'Photo data is required' });
+  }
+
+  let webpDataUrl = photo;
+  try {
+    const match = photo.match(/^data:([^;]+);base64,(.+)$/);
+    if (match) {
+      const sharp = (await import('sharp')).default;
+      const buffer = Buffer.from(match[2], 'base64');
+      const resized = await sharp(buffer)
+        .resize(400, 400, { fit: 'cover', position: 'center' })
+        .webp({ quality: 85 })
+        .toBuffer();
+      webpDataUrl = `data:image/webp;base64,${resized.toString('base64')}`;
+    }
+  } catch (err: any) {
+    console.warn('[Sharp] Team photo conversion warning:', err?.message || err);
+  }
+
+  member.photo = webpDataUrl;
+  member.updated_at = new Date().toISOString();
+  await persistDoc('team', member.id, member);
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'TEAM_PHOTO_UPDATED',
+    details: `Admin updated photo for team member "${member.name}"`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true, photo_url: `/api/team-photo/${member.id}`, member });
+});
+
+// Admin: Reorder team members
+app.post('/api/admin/team/reorder', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { ordered_ids } = req.body || {};
+  if (!Array.isArray(ordered_ids)) {
+    return res.status(400).json({ error: 'ordered_ids array is required' });
+  }
+
+  if (!Array.isArray(store.team)) store.team = [];
+  const idMap = new Map(store.team.map((m: any) => [m.id, m]));
+
+  for (let i = 0; i < ordered_ids.length; i++) {
+    const m = idMap.get(ordered_ids[i]);
+    if (m) {
+      m.order = i;
+      m.updated_at = new Date().toISOString();
+      persistDoc('team', m.id, m).catch(() => {});
+    }
+  }
+
+  store.team.sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'TEAM_REORDERED',
+    details: `Admin reordered team members (${ordered_ids.length} members)`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true, team: store.team });
+});
+
+// Admin: Delete team member
+app.delete('/api/admin/team/:id', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { id } = req.params;
+  const member = (store.team || []).find((m: any) => m.id === id);
+  if (!member) {
+    return res.status(404).json({ error: 'Team member not found' });
+  }
+
+  store.team = (store.team || []).filter((m: any) => m.id !== id);
+  await removeDoc('team', id);
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'TEAM_MEMBER_DELETED',
+    details: `Admin removed team member "${member.name}" (${member.id})`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true });
+});
+
+// Photo serving endpoint: Cached with ETag & 304, served like avatars
+app.get('/api/team-photo/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const member = (store.team || []).find((m: any) => m.id === id);
+  if (!member || !member.photo) {
+    if (member?.linked_profile_id) {
+      const linked = store.profiles.find((p: any) => p.id === member.linked_profile_id);
+      if (linked?.avatar) {
+        return res.redirect(`/api/avatar/${linked.id}`);
+      }
+    }
+    return res.status(404).send('Team photo not found');
+  }
+
+  const photo = String(member.photo);
+  if (photo.startsWith('data:')) {
+    const match = photo.match(/^data:([^;]+);base64,(.+)$/);
+    if (match) {
+      const mimeType = match[1];
+      const buffer = Buffer.from(match[2], 'base64');
+      const hash = crypto.createHash('md5').update(buffer).digest('hex');
+      const etag = `"${hash}"`;
+      if (req.headers['if-none-match'] === etag) {
+        return res.status(304).end();
+      }
+      res.setHeader('Content-Type', mimeType);
+      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+      res.setHeader('ETag', etag);
+      return res.send(buffer);
+    }
+  } else if (photo.startsWith('http') || photo.startsWith('/')) {
+    return res.redirect(photo);
+  }
+  return res.status(404).send('Team photo not found');
 });
 
 /* =========================================================================
