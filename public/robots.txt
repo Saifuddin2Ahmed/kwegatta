@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://kwegatta.ai.studio/sitemap.xml

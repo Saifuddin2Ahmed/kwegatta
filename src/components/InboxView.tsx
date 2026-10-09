@@ -62,7 +62,7 @@ export const InboxView: React.FC<InboxViewProps> = ({
         <div className="primer-box-header flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Bell className="w-4 h-4 text-[var(--muted)]" />
-            <span>Inbox & Notifications</span>
+            <span>Inbox</span>
             <span className="text-xs text-[var(--muted)] font-normal">
               ({notifications.length})
             </span>

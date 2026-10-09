@@ -450,13 +450,13 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
           </div>
 
           <div className="relative w-full sm:w-72">
-            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg-subtle)]" />
+            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg-subtle)] pointer-events-none" />
             <input
               type="search"
               placeholder="Filter by name, skill, need..."
               value={searchQuery}
               onChange={e => onSearchChange(e.target.value)}
-              className="kw-input pl-8 text-xs py-1.5"
+              className="kw-input pl-10 text-xs py-1.5"
               aria-label="Filter directory"
             />
           </div>
@@ -579,21 +579,21 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
               >
                 <div className="space-y-3">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3 min-w-0">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
                       <button
                         onClick={() => onViewProfile(person.id)}
-                        className="flex-shrink-0"
+                        className="flex-shrink-0 cursor-pointer"
                       >
                         <Avatar profile={person} className="w-10 h-10" />
                       </button>
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <button
                           onClick={() => onViewProfile(person.id)}
-                          className="font-semibold text-sm text-[var(--fg)] hover:text-[var(--gold)] transition-colors text-left truncate block"
+                          className="font-semibold text-sm text-[var(--fg)] hover:text-[var(--gold)] transition-colors text-left break-words line-clamp-2 block cursor-pointer"
                         >
                           {person.name}
                         </button>
-                        <span className="text-xs text-[var(--teal)] font-medium">
+                        <span className="text-xs text-[var(--teal-text)] font-medium">
                           {person.role}
                         </span>
                       </div>
@@ -601,7 +601,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
 
                     <button
                       onClick={() => onToggleFollow(person.id)}
-                      className="kw-btn kw-btn-ghost text-xs py-1 px-2.5 flex-shrink-0"
+                      className="kw-btn kw-btn-ghost text-xs py-1 px-2.5 flex-shrink-0 ml-2"
                     >
                       {isFollowing ? (
                         <>
@@ -647,7 +647,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
 
                   <button
                     onClick={() => onViewProfile(person.id)}
-                    className="text-xs font-medium text-[var(--gold)] hover:underline"
+                    className="text-xs font-medium text-[var(--gold-text)] hover:underline"
                   >
                     View profile
                   </button>

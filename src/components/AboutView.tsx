@@ -135,7 +135,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
             onClick={onNavigateHome}
             className="kw-btn kw-btn-gold text-xs py-2 px-4 inline-flex items-center gap-2 font-semibold shadow-sm"
           >
-            <span>Start Matchmaking</span>
+            <span>Start matching</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
           <a
@@ -145,7 +145,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
             className="kw-btn kw-btn-ghost text-xs py-2 px-3.5 inline-flex items-center gap-2 text-[var(--fg-muted)]"
           >
             <Github className="w-4 h-4" />
-            <span>Explore Source Code</span>
+            <span>Explore source code</span>
             <ArrowUpRight className="w-3.5 h-3.5 opacity-60" />
           </a>
         </div>
@@ -155,7 +155,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
       <section id="challenge" className="space-y-8 border-t border-[var(--card-border)] pt-14 sm:pt-20">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-baseline">
           <div className="md:col-span-4 space-y-1">
-            <span className="text-xs font-mono font-medium text-[var(--gold)]">01 / THE CHALLENGE</span>
+            <span className="text-xs font-mono font-medium text-[var(--gold-text)]">01 / The challenge</span>
             <h2 className="text-xl sm:text-2xl font-display font-bold text-[var(--fg)] tracking-tight">
               Complementary people never find each other.
             </h2>
@@ -175,7 +175,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
       {/* 03. The Visual Match Demonstration */}
       <section id="how-it-works" className="space-y-8 border-t border-[var(--card-border)] pt-14 sm:pt-20">
         <div className="space-y-2">
-          <span className="text-xs font-mono font-medium text-[var(--teal)]">02 / HOW IT WORKS</span>
+          <span className="text-xs font-mono font-medium text-[var(--teal-text)]">02 / How it works</span>
           <h2 className="text-xl sm:text-2xl font-display font-bold text-[var(--fg)] tracking-tight">
             Matching needs with offers, not just keywords.
           </h2>
@@ -245,11 +245,11 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
         </div>
       </section>
 
-      {/* 04. The 60-Second Experience */}
+      {/* 03. Experience */}
       <section id="experience" className="space-y-8 border-t border-[var(--card-border)] pt-14 sm:pt-20">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
           <div className="md:col-span-4 space-y-1">
-            <span className="text-xs font-mono font-medium text-[var(--gold)]">03 / EXPERIENCE</span>
+            <span className="text-xs font-mono font-medium text-[var(--gold-text)]">03 / Experience</span>
             <h2 className="text-xl sm:text-2xl font-display font-bold text-[var(--fg)] tracking-tight">
               Designed for speed on small phones.
             </h2>
@@ -257,9 +257,9 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
 
           <div className="md:col-span-8 grid grid-cols-1 sm:grid-cols-2 gap-6 text-xs text-[var(--fg-muted)]">
             <div className="space-y-2">
-              <span className="text-sm font-semibold text-[var(--fg)] block">1. 60-Second Conversational Onboarding</span>
+              <span className="text-sm font-semibold text-[var(--fg)] block">1. A short guided chat, about 2 minutes</span>
               <p className="leading-relaxed">
-                Members share public details via a quick 4-prompt chat on their smartphone. Zero lengthy forms or password barriers.
+                Members share public details via a short guided chat, about 2 minutes on their smartphone. Zero lengthy forms or password barriers.
               </p>
             </div>
 
@@ -291,7 +291,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
       <section id="engine" className="space-y-8 border-t border-[var(--card-border)] pt-14 sm:pt-20">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-baseline">
           <div className="md:col-span-4 space-y-1">
-            <span className="text-xs font-mono font-medium text-[var(--teal)]">04 / THE ENGINE</span>
+            <span className="text-xs font-mono font-medium text-[var(--teal-text)]">04 / The engine</span>
             <h2 className="text-xl sm:text-2xl font-display font-bold text-[var(--fg)] tracking-tight">
               AI as an engine for human connection.
             </h2>
@@ -322,7 +322,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
       <section id="team" className="space-y-10 border-t border-[var(--card-border)] pt-14 sm:pt-20">
         <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-2">
           <div>
-            <span className="text-xs font-mono font-medium text-[var(--gold)]">05 / PEOPLE</span>
+            <span className="text-xs font-mono font-medium text-[var(--gold-text)]">05 / People</span>
             <h2 className="text-2xl sm:text-3xl font-display font-bold text-[var(--fg)] tracking-tight">
               The Team
             </h2>
@@ -454,7 +454,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
         <div id="awards" className="scroll-mt-24"></div>
         <div className="p-8 rounded-2xl bg-[var(--bg-subtle)] border border-[var(--card-border)] space-y-6">
           <div className="space-y-2">
-            <span className="text-xs font-mono font-medium text-[var(--teal)]">06 / OPEN SOURCE &amp; AWARDS</span>
+            <span className="text-xs font-mono font-medium text-[var(--teal-text)]">06 / Open source &amp; awards</span>
             <h2 className="text-xl sm:text-2xl font-display font-bold text-[var(--fg)] tracking-tight">
               Built as a Digital Public Good for global communities.
             </h2>
@@ -488,7 +488,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
       <section id="privacy" className="space-y-8 border-t border-[var(--card-border)] pt-14 sm:pt-20">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-baseline">
           <div className="md:col-span-4 space-y-1">
-            <span className="text-xs font-mono font-medium text-[var(--gold)]">07 / PRIVACY &amp; DATA POLICY</span>
+            <span className="text-xs font-mono font-medium text-[var(--gold-text)]">07 / Privacy &amp; data policy</span>
             <h2 className="text-xl sm:text-2xl font-display font-bold text-[var(--fg)] tracking-tight">
               Zero telemetry. Full member sovereignty.
             </h2>
@@ -534,7 +534,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
       <section id="license" className="space-y-8 border-t border-[var(--card-border)] pt-14 sm:pt-20">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-baseline">
           <div className="md:col-span-4 space-y-1">
-            <span className="text-xs font-mono font-medium text-[var(--teal)]">08 / LEGAL &amp; LICENCE</span>
+            <span className="text-xs font-mono font-medium text-[var(--teal-text)]">08 / Legal &amp; licence</span>
             <h2 className="text-xl sm:text-2xl font-display font-bold text-[var(--fg)] tracking-tight">
               MIT License
             </h2>

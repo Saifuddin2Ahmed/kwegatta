@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://kwegatta.ai.studio/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>
+  <url><loc>https://kwegatta.ai.studio/#/people</loc><changefreq>daily</changefreq><priority>0.9</priority></url>
+  <url><loc>https://kwegatta.ai.studio/#/events</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://kwegatta.ai.studio/#/about</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://kwegatta.ai.studio/#/privacy</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  <url><loc>https://kwegatta.ai.studio/#/license</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+</urlset>

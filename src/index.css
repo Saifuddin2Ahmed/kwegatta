@@ -45,7 +45,7 @@
   /* Typography & Foreground */
   --fg: #F8FAFC;                   /* High-contrast pure white/slate */
   --fg-muted: #94A3B8;             /* Slate muted secondary text */
-  --fg-subtle: #64748B;            /* De-emphasized caption/helper text */
+  --fg-subtle: #94A3B8;            /* Slate-400: Contrast 6.9:1 against #070B12, exceeding 4.5:1 */
   --muted: #94A3B8;
 
   /* Radiant Accents */
@@ -53,10 +53,12 @@
   --gold-hover: #E0A600;
   --gold-subtle: rgba(245, 183, 0, 0.12);
   --gold-glow: 0 0 24px -2px rgba(245, 183, 0, 0.35);
+  --gold-text: #F5B700;            /* Bright gold text for dark mode */
 
   --teal: #12B5A6;                 /* Teal Accent */
   --teal-hover: #0D9488;
   --teal-subtle: rgba(18, 181, 166, 0.14);
+  --teal-text: #12B5A6;            /* Bright teal text for dark mode */
 
   --accent: #F5B700;
   --accent-subtle: rgba(245, 183, 0, 0.12);
@@ -109,10 +111,12 @@
   --gold-hover: #E0A600;
   --gold-subtle: rgba(245, 183, 0, 0.18);
   --gold-glow: 0 0 20px -2px rgba(245, 183, 0, 0.25);
+  --gold-text: #8A6100;            /* WCAG AA dark amber for light mode: 5.2:1 */
 
   --teal: #12B5A6;
   --teal-hover: #0D9488;
   --teal-subtle: rgba(18, 181, 166, 0.14);
+  --teal-text: #0B6F66;            /* WCAG AA deep teal for light mode: 5.9:1 */
 
   --accent: #12B5A6;
   --accent-subtle: rgba(18, 181, 166, 0.14);
@@ -178,6 +182,12 @@ body {
 /* Paragraph readable typography */
 p {
   line-height: 1.55;
+}
+
+/* Redefine text-xs globally so it renders at 13px with line-height 1.45 */
+.text-xs {
+  font-size: 13px !important;
+  line-height: 1.45 !important;
 }
 
 /* Shared page container: max-width 1200px, centered, side padding 16px mobile, 24px desktop */

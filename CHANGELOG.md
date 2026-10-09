@@ -6,6 +6,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.1] - 2026-10-09
+
+### Changed
+- **Privacy & Resource Isolation**:
+  - Protected `GET /api/data/notifications`: requires authenticated member; returns strictly notifications where `to_id` matches caller profile id.
+  - Protected `GET /api/data/matches`: requires authenticated member; returns strictly matches where caller is `a_id` or `b_id`.
+  - Protected `GET /api/data/follows`: requires authenticated member; returns strictly rows where caller is follower or following.
+  - Excluded private collections from unauthorized requests (anonymous callers receive HTTP 401).
+  - Public follower and following counts served with public profiles as numbers without leaking individual relation rows.
+  - Public live projector wall endpoint at `GET /api/wall/feed` returning strictly first names, avatars, scores, and match spark sentences.
+- **Service Worker & Update Notification**:
+  - Fixed "A new version is ready" notification bar to display only when replacing an existing controller, never on first install.
+  - Positioned slim bar above mobile navigation tab bar, dismissible per session via `sessionStorage`.
+  - Upgraded service worker cache name to `kwegatta-1.3.1`.
+- **UI Contrast & Centered Footer**:
+  - Replaced footer with centered design across all screen sizes, featuring top gold-to-teal gradient line, outlined pill buttons, and removal of "Made in Kampala".
+  - Renamed "Inbox & Notifications" to "Inbox" throughout the application.
+  - Introduced `--gold-text` and `--teal-text` high-contrast tokens for WCAG AA compliance in light mode (`#8A6100` and `#0B6F66`), maintaining bright accents in dark mode.
+  - Raised dark mode caption text contrast to exceed 4.5:1.
+  - Redefined `.text-xs` utility to 13px at 1.45 line-height globally.
+  - Fixed mobile card layout for long names to wrap cleanly without overlapping the Follow button.
+  - Fixed people directory search field icon padding.
+  - Standardized About page story and copy ("A short guided chat, about 2 minutes", sentence-case headings).
+- **SEO & Profile Migration**:
+  - Added dedicated `/robots.txt` and `/sitemap.xml` with appropriate MIME types.
+  - Added migration v3 (`saifuddin_profile_migration_v3`) setting skills to empty array for Saifuddin's profile.
+  - Suppressed "Core competencies" display when member skills list is empty.
+
+---
+
 ## [1.3.0] - 2026-10-08
 
 ### Changed

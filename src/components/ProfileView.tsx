@@ -1620,10 +1620,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   </span>
                 ))}
               </div>
-              {profile.skills?.length > 0 && (
+              {Array.isArray(profile.skills) && profile.skills.filter(s => typeof s === 'string' && s.trim().length > 0).length > 0 && (
                 <div className="text-xs text-[var(--muted)] pt-2 border-t border-[var(--border-muted)]">
                   <strong className="text-[var(--fg)]">Core competencies: </strong>
-                  <span>{profile.skills.join(', ')}</span>
+                  <span>{profile.skills.filter(s => typeof s === 'string' && s.trim().length > 0).join(', ')}</span>
                 </div>
               )}
             </div>

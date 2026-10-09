@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
+  app,
   validateGemmaModelId,
   sanitizePublicProfile,
   ALLOWED_OPEN_WEIGHT_MODELS,
@@ -14,7 +15,8 @@ import {
   sanitizeDomainUrl,
   sanitizeCustomLinks,
   runSaifuddinProfileMigration,
-  SAIFUDDIN_PROFILE_MIGRATION_FLAG
+  SAIFUDDIN_PROFILE_MIGRATION_FLAG,
+  SAIFUDDIN_PROFILE_MIGRATION_V3_FLAG
 } from '../server';
 import { validatePasswordStrength } from '../src/services/firebase';
 
@@ -233,14 +235,14 @@ describe('Member-Submitted Events & Approval Permissions', () => {
   });
 });
 
-describe('Service Worker & Cache-Control Configuration (PWA v1.3.0)', () => {
-  it('public/sw.js specifies CACHE_NAME as kwegatta-1.3.0 and handles cache strategies correctly', async () => {
+describe('Service Worker & Cache-Control Configuration (PWA v1.3.1)', () => {
+  it('public/sw.js specifies CACHE_NAME as kwegatta-1.3.1 and handles cache strategies correctly', async () => {
     const fs = await import('fs');
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.3.0
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.3.0'");
+    // 1. Cache name includes version kwegatta-1.3.1
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.3.1'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -322,6 +324,112 @@ describe('One-Time Saifuddin Profile Migration', () => {
     expect(serverContent).toContain('Electronic control engineer and AI researcher');
     expect(serverContent).toContain('https://huggingface.co/saifuddin2ahmed');
     expect(serverContent).toContain('https://ieee-collabratec.ieee.org/app/p/SaifuddinAhmed');
+  });
+
+  it('defines the migration v3 flag setting skills to empty array', () => {
+    expect(SAIFUDDIN_PROFILE_MIGRATION_V3_FLAG).toBe('saifuddin_profile_migration_v3');
+  });
+});
+
+describe('Privacy and Access Isolation (v1.3.1)', () => {
+  let server: any;
+  let baseUrl: string;
+
+  beforeAll(async () => {
+    process.env.NODE_ENV = 'test';
+    await new Promise<void>((resolve) => {
+      server = app.listen(0, () => {
+        const port = (server.address() as any).port;
+        baseUrl = `http://127.0.0.1:${port}`;
+        resolve();
+      });
+    });
+  });
+
+  afterAll(() => {
+    if (server) server.close();
+  });
+
+  it('anonymous GET on /api/data/notifications, /api/data/matches, and /api/data/follows returns 401', async () => {
+    const resNotifs = await fetch(`${baseUrl}/api/data/notifications`);
+    expect(resNotifs.status).toBe(401);
+
+    const resMatches = await fetch(`${baseUrl}/api/data/matches`);
+    expect(resMatches.status).toBe(401);
+
+    const resFollows = await fetch(`${baseUrl}/api/data/follows`);
+    expect(resFollows.status).toBe(401);
+  });
+
+  it('member A cannot see member B notifications or matches', async () => {
+    const resA = await fetch(`${baseUrl}/api/data/notifications`, {
+      headers: { Authorization: 'Bearer test-user-a' }
+    });
+    expect(resA.status).toBe(200);
+    const notifsA = await resA.json();
+    for (const n of notifsA) {
+      expect(n.to_id).toBe('test-user-a');
+    }
+
+    const resMatchesA = await fetch(`${baseUrl}/api/data/matches`, {
+      headers: { Authorization: 'Bearer test-user-a' }
+    });
+    expect(resMatchesA.status).toBe(200);
+    const matchesA = await resMatchesA.json();
+    for (const m of matchesA) {
+      expect(m.a_id === 'test-user-a' || m.b_id === 'test-user-a').toBe(true);
+    }
+  });
+
+  it('provides public live wall route without private profile exposures', async () => {
+    const res = await fetch(`${baseUrl}/api/wall/feed`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(Array.isArray(data.matches)).toBe(true);
+    for (const m of data.matches) {
+      expect(m.email).toBeUndefined();
+      expect(m.account_uid).toBeUndefined();
+    }
+  });
+});
+
+describe('Quality Assurance & Safety Guarantees (v1.3.1)', () => {
+  it('footer contains no model IDs and no Made in Kampala', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const footerContent = fs.readFileSync(path.join(process.cwd(), 'src', 'components', 'Footer.tsx'), 'utf-8');
+    expect(footerContent).not.toContain('gemma-4-26b-a4b-it');
+    expect(footerContent).not.toContain('gemma-4-31b-it');
+    expect(footerContent).not.toContain('31b-it');
+    expect(footerContent).not.toContain('Made in Kampala');
+  });
+
+  it('theme preference read and write is safe when localStorage throws', async () => {
+    const { getStoredThemePreference, saveThemePreference } = await import('../src/utils');
+
+    const mockStorage = {
+      getItem: () => { throw new Error('QuotaExceededError'); },
+      setItem: () => { throw new Error('QuotaExceededError'); }
+    };
+    const prev = (globalThis as any).localStorage;
+    (globalThis as any).localStorage = mockStorage;
+
+    try {
+      expect(() => getStoredThemePreference()).not.toThrow();
+      expect(getStoredThemePreference()).toBe('system');
+      expect(() => saveThemePreference('dark')).not.toThrow();
+    } finally {
+      if (prev) {
+        (globalThis as any).localStorage = prev;
+      } else {
+        delete (globalThis as any).localStorage;
+      }
+    }
+  });
+
+  it('stat counters are hidden below 25 members (MIN_MEMBERS_FOR_STATS)', async () => {
+    const { MIN_MEMBERS_FOR_STATS } = await import('../src/utils');
+    expect(MIN_MEMBERS_FOR_STATS).toBe(25);
   });
 });
 

@@ -156,7 +156,7 @@ export const Header: React.FC<HeaderProps> = ({
                   aria-current={isActive ? 'page' : undefined}
                   className={`px-3 py-1.5 rounded-lg text-[14px] transition-all cursor-pointer ${
                     isActive
-                      ? 'text-[var(--gold)] bg-[var(--gold-subtle)] font-bold border-b-2 border-[var(--gold)]'
+                      ? 'text-[var(--gold-text)] bg-[var(--gold-subtle)] font-bold border-b-2 border-[var(--gold)]'
                       : 'text-[var(--fg-muted)] hover:text-[var(--fg)] hover:bg-[var(--bg-subtle)] font-medium'
                   }`}
                 >

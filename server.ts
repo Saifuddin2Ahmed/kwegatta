@@ -11,7 +11,7 @@ import { getAuth as getAdminAuth, type Auth as AdminAuth } from 'firebase-admin/
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
+export const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 // Security: Disable X-Powered-By header to prevent fingerprinting
@@ -66,6 +66,14 @@ app.use(async (req: Request, _res: Response, next: () => void) => {
     } catch (err: any) {
       // Token expired, malformed, or dev domain
     }
+  } else if (token && (!adminAuth || process.env.NODE_ENV === 'test')) {
+    // In test environment or local mode without adminAuth, support mock test tokens
+    (req as any).authUserId = token;
+    (req as any).authUser = {
+      uid: token,
+      email: `${token}@kwegatta.test`,
+      name: `User ${token}`
+    } as AuthUserData;
   }
 
   next();
@@ -760,7 +768,9 @@ export function sanitizePublicProfile(p: any, callerAuthUid: string | null, isAd
     avatar: p.avatar && p.avatar.startsWith('data:') ? `/api/avatar/${p.id}` : (p.avatar || ''),
     whatsapp: canSeeWhatsApp ? (p.whatsapp || '') : '',
     has_whatsapp: Boolean(p.whatsapp && String(p.whatsapp).trim().length > 0),
-    hide_whatsapp: Boolean(p.hide_whatsapp)
+    hide_whatsapp: Boolean(p.hide_whatsapp),
+    followers_count: typeof p.followers_count === 'number' ? p.followers_count : ((store?.follows || []).filter((f: any) => f.following_id === p.id).length),
+    following_count: typeof p.following_count === 'number' ? p.following_count : ((store?.follows || []).filter((f: any) => f.follower_id === p.id).length)
   };
 }
 
@@ -1280,10 +1290,11 @@ async function initStorage(): Promise<void> {
     }
   }
 
-  // Run one-time Saifuddin profile migrations (v1 and v2) if target exists and flags have not yet been set
+  // Run one-time Saifuddin profile migrations (v1, v2, v3) if target exists and flags have not yet been set
   try {
     await runSaifuddinProfileMigration();
     await runSaifuddinProfileMigrationV2();
+    await runSaifuddinProfileMigrationV3();
   } catch (mErr: any) {
     console.warn('[Migration] Notice during Saifuddin profile migration:', mErr?.message || mErr);
   }
@@ -1579,6 +1590,113 @@ export async function runSaifuddinProfileMigrationV2(): Promise<boolean> {
   }
 
   console.log(`[Migration] Profile migration ${SAIFUDDIN_PROFILE_MIGRATION_V2_FLAG} successfully executed for member ${target.name} (${target.id})`);
+  return true;
+}
+
+export const SAIFUDDIN_PROFILE_MIGRATION_V3_FLAG = 'saifuddin_profile_migration_v3';
+
+export async function runSaifuddinProfileMigrationV3(): Promise<boolean> {
+  // Flag check: stops it running twice or overwriting later edits
+  if (store.migrations && store.migrations[SAIFUDDIN_PROFILE_MIGRATION_V3_FLAG]?.completed) {
+    return false;
+  }
+  if (storageMode === 'firestore' && firestoreDb) {
+    try {
+      const docSnap = await firestoreDb.collection('migrations').doc(SAIFUDDIN_PROFILE_MIGRATION_V3_FLAG).get();
+      if (docSnap.exists && docSnap.data()?.completed) {
+        if (!store.migrations) store.migrations = {};
+        store.migrations[SAIFUDDIN_PROFILE_MIGRATION_V3_FLAG] = { completed: true };
+        return false;
+      }
+    } catch (_) {}
+  }
+
+  const adminEmails = getAdminEmailsList().map(e => e.toLowerCase());
+
+  // Find target member profile in memory store
+  let target: any = (store.profiles || []).find((p: any) => {
+    const isGh = p.github && String(p.github).trim().toLowerCase() === 'saifuddin2ahmed';
+    const isEmail = p.email && adminEmails.includes(String(p.email).trim().toLowerCase());
+    return isGh && isEmail;
+  });
+
+  // If not found by direct email, check account_uid via adminAuth if available
+  if (!target && adminAuth) {
+    for (const p of (store.profiles || [])) {
+      if (p.github && String(p.github).trim().toLowerCase() === 'saifuddin2ahmed' && p.account_uid) {
+        try {
+          const u = await adminAuth.getUser(p.account_uid);
+          if (u.email && adminEmails.includes(u.email.toLowerCase())) {
+            target = p;
+            break;
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  // If not found in memory store and in firestore mode, query Firestore
+  if (!target && storageMode === 'firestore' && firestoreDb) {
+    try {
+      const snap = await firestoreDb.collection('profiles').where('github', '==', 'Saifuddin2Ahmed').get();
+      for (const doc of snap.docs) {
+        const d = doc.data();
+        let email = d.email;
+        if (!email && d.account_uid && adminAuth) {
+          try {
+            const u = await adminAuth.getUser(d.account_uid);
+            email = u.email;
+          } catch (_) {}
+        }
+        if (email && adminEmails.includes(email.toLowerCase())) {
+          target = { ...d, id: doc.id };
+          break;
+        }
+      }
+    } catch (_) {}
+  }
+
+  // Part 9a: Touch nothing else. Do not set the flag if the profile is not found.
+  if (!target) {
+    return false;
+  }
+
+  // Set skills to an empty array. Touch nothing else.
+  target.skills = [];
+  target.updated_at = new Date().toISOString();
+
+  // Save to memory store
+  const idx = store.profiles.findIndex((p: any) => p.id === target.id);
+  if (idx >= 0) {
+    store.profiles[idx] = target;
+  } else {
+    store.profiles.push(target);
+  }
+
+  // Persist updated profile
+  await persistDoc('profiles', target.id, target);
+
+  // Record in Firestore and local store that migration has run, preventing it from running twice
+  const record = {
+    completed: true,
+    target_id: target.id,
+    migrated_at: new Date().toISOString()
+  };
+  if (!store.migrations) store.migrations = {};
+  store.migrations[SAIFUDDIN_PROFILE_MIGRATION_V3_FLAG] = record;
+
+  if (storageMode === 'disk') {
+    saveStore(store);
+  }
+  if (storageMode === 'firestore' && firestoreDb) {
+    try {
+      await firestoreDb.collection('migrations').doc(SAIFUDDIN_PROFILE_MIGRATION_V3_FLAG).set(record);
+    } catch (e) {
+      console.warn('[Migration] Warning persisting migration flag v3 in Firestore:', e);
+    }
+  }
+
+  console.log(`[Migration] Profile migration ${SAIFUDDIN_PROFILE_MIGRATION_V3_FLAG} successfully executed for member ${target.name} (${target.id})`);
   return true;
 }
 
@@ -4444,12 +4562,182 @@ app.get('/api/team-photo/:id', (req: Request, res: Response) => {
 });
 
 /* =========================================================================
+   SEO & STATIC BOT DISCOVERY (robots.txt and sitemap.xml)
+   ========================================================================= */
+app.get('/robots.txt', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  return res.send('User-agent: *\nAllow: /\nSitemap: https://kwegatta.ai.studio/sitemap.xml\n');
+});
+
+app.get('/sitemap.xml', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  return res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://kwegatta.ai.studio/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>
+  <url><loc>https://kwegatta.ai.studio/#/people</loc><changefreq>daily</changefreq><priority>0.9</priority></url>
+  <url><loc>https://kwegatta.ai.studio/#/events</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://kwegatta.ai.studio/#/about</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>https://kwegatta.ai.studio/#/privacy</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  <url><loc>https://kwegatta.ai.studio/#/license</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+</urlset>`);
+});
+
+/* =========================================================================
+   PUBLIC LIVE WALL FEED
+   Returns only what the projector wall displays: first names and match spark sentence.
+   Never exposes full profiles, last names, emails, or personal data.
+   ========================================================================= */
+app.get('/api/wall/feed', (_req: Request, res: Response) => {
+  const matches = store.matches || [];
+  const profiles = store.profiles || [];
+  const seenPairs = new Set<string>();
+
+  const list: any[] = [];
+  for (const m of matches) {
+    const pairKey = [m.a_id, m.b_id].sort().join(':');
+    if (seenPairs.has(pairKey)) continue;
+    seenPairs.add(pairKey);
+
+    const a = profiles.find((p: any) => p.id === m.a_id);
+    const b = profiles.find((p: any) => p.id === m.b_id);
+    if (!a || !b) continue;
+
+    const firstNameA = (a.name || '').trim().split(' ')[0] || 'Member';
+    const firstNameB = (b.name || '').trim().split(' ')[0] || 'Member';
+
+    list.push({
+      id: m.id,
+      a_id: m.a_id,
+      b_id: m.b_id,
+      first_name_a: firstNameA,
+      first_name_b: firstNameB,
+      avatar_a: a.avatar && a.avatar.startsWith('data:') ? `/api/avatar/${a.id}` : (a.avatar || null),
+      avatar_b: b.avatar && b.avatar.startsWith('data:') ? `/api/avatar/${b.id}` : (b.avatar || null),
+      score: m.score || 85,
+      spark: m.spark || ''
+    });
+
+    if (list.length >= 25) break;
+  }
+
+  return res.json({
+    total_matches: matches.length,
+    matches: list
+  });
+});
+
+/* =========================================================================
+   PROTECTED DATA LAYER ROUTES (Privacy & Resource Isolation)
+   - notifications: require a signed-in member. Return ONLY notifications where to_id
+     is the caller's own profile id. Never return other members' notifications.
+   - matches: require a signed-in member. Return ONLY matches where a_id or b_id
+     is the caller's own profile id.
+   - follows: require a signed-in member. Return only rows where follower_id or
+     following_id is the caller.
+   ========================================================================= */
+
+// 1. Notifications: strictly caller's own notifications
+app.get('/api/data/notifications', (req: Request, res: Response) => {
+  const authUserId = resolveAuthUserId(req);
+  if (!authUserId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  const callerProfile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
+  const myId = callerProfile?.id || authUserId;
+
+  let items = (store.notifications || []).filter((n: any) => n.to_id === myId);
+
+  const after = req.query.after as string;
+  if (after) {
+    items = items.filter(item => item.created_at && item.created_at > after);
+  }
+  const limit = Number(req.query.limit) || 300;
+  items.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  return res.json(items.slice(0, limit));
+});
+
+// 2. Matches: strictly caller's own matches
+app.get('/api/data/matches', (req: Request, res: Response) => {
+  const authUserId = resolveAuthUserId(req);
+  if (!authUserId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  const callerProfile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
+  const myId = callerProfile?.id || authUserId;
+  const callerBlockedSet = new Set(callerProfile?.blocked_ids || []);
+
+  let items = (store.matches || []).filter((m: any) => {
+    const isMine = m.a_id === myId || m.b_id === myId;
+    if (!isMine) return false;
+    const otherId = m.a_id === myId ? m.b_id : m.a_id;
+    if (callerBlockedSet.has(otherId)) return false;
+    const otherProfile = store.profiles.find((p: any) => p.id === otherId);
+    if (Array.isArray(otherProfile?.blocked_ids) && (otherProfile.blocked_ids.includes(myId) || otherProfile.blocked_ids.includes(authUserId))) {
+      return false;
+    }
+    return true;
+  });
+
+  const eqQuery = req.query.eq as string;
+  if (eqQuery) {
+    try {
+      const eqObj = JSON.parse(eqQuery);
+      items = items.filter(item => Object.keys(eqObj).every(k => item[k] === eqObj[k]));
+    } catch (_) {}
+  }
+
+  const after = req.query.after as string;
+  if (after) {
+    items = items.filter(item => item.created_at && item.created_at > after);
+  }
+  const limit = Number(req.query.limit) || 300;
+  items.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  return res.json(items.slice(0, limit));
+});
+
+// 3. Follows: strictly caller's own follower/following rows
+app.get('/api/data/follows', (req: Request, res: Response) => {
+  const authUserId = resolveAuthUserId(req);
+  if (!authUserId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  const callerProfile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
+  const myId = callerProfile?.id || authUserId;
+
+  let items = (store.follows || []).filter((f: any) => f.follower_id === myId || f.following_id === myId);
+
+  const eqQuery = req.query.eq as string;
+  if (eqQuery) {
+    try {
+      const eqObj = JSON.parse(eqQuery);
+      items = items.filter(item => Object.keys(eqObj).every(k => item[k] === eqObj[k]));
+    } catch (_) {}
+  }
+
+  const after = req.query.after as string;
+  if (after) {
+    items = items.filter(item => item.created_at && item.created_at > after);
+  }
+  const limit = Number(req.query.limit) || 300;
+  items.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  return res.json(items.slice(0, limit));
+});
+
+/* =========================================================================
    UNIVERSAL DATA LAYER WITH AUTHENTICATION & WHATSAPP VISIBILITY
    ========================================================================= */
 app.get('/api/data/:collection', (req: Request, res: Response) => {
   const col = req.params.collection as keyof StoreData;
   if (!store[col]) {
     return res.status(404).json({ error: `Collection ${col} not found` });
+  }
+
+  // Enforce privacy on collections if called via generic endpoint
+  if (col === 'notifications' || col === 'matches' || col === 'follows') {
+    const authUserId = resolveAuthUserId(req);
+    if (!authUserId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
   }
 
   let items = [...store[col]];

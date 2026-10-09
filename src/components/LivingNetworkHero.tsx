@@ -190,7 +190,7 @@ export const HeroSection: React.FC<HeroProps> = ({
             <a
               href="#story"
               onClick={scrollToStory}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--gold)] hover:underline tracking-wide cursor-pointer"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--gold-text)] hover:underline tracking-wide cursor-pointer"
             >
               <Trophy className="w-3.5 h-3.5 flex-shrink-0" />
               <span>1st place · Hacktoberfest 2026 Hack Day Kampala</span>
@@ -283,7 +283,7 @@ export const KampalaStorySection: React.FC<KampalaStoryProps> = () => {
       {/* Story Narrative & Two Other Photos */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
         <div className="lg:col-span-7 space-y-6">
-          <div className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--gold)] tracking-wide">
+          <div className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--gold-text)] tracking-wide">
             <Trophy className="w-3.5 h-3.5" />
             <span>1st place · Hacktoberfest 2026 Hack Day Kampala</span>
           </div>
@@ -426,7 +426,7 @@ export const KampalaStorySection: React.FC<KampalaStoryProps> = () => {
                           {member.name}
                         </h4>
                       )}
-                      <p className="text-xs text-[var(--teal)] font-medium truncate">
+                      <p className="text-xs text-[var(--teal-text)] font-medium truncate">
                         {title}
                       </p>
                     </div>

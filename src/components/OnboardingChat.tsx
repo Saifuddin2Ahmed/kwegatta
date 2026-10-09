@@ -526,7 +526,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
             <span className="font-bold text-xs sm:text-sm text-[var(--fg)]">
               Step {screenIndex + 1} of 6
             </span>
-            <span className="text-[var(--gold)] font-medium text-xs sm:text-sm">
+            <span className="text-[var(--gold-text)] font-medium text-xs sm:text-sm">
               · {SCREEN_NAMES[screenIndex]}
             </span>
             {screenIndex > 0 && !savedProfile && (
@@ -539,7 +539,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
               </button>
             )}
           </div>
-          <div className="flex items-center gap-1.5 text-[var(--gold)] font-medium text-[13px] tabular-nums">
+          <div className="flex items-center gap-1.5 text-[var(--gold-text)] font-medium text-[13px] tabular-nums">
             <Clock className="w-3.5 h-3.5" />
             <span>~{(6 - screenIndex) * 15}s left</span>
           </div>
@@ -800,7 +800,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                         {selectionNotice}
                       </span>
                     )}
-                    <span className="text-[var(--gold)] font-bold tabular-nums">
+                    <span className="text-[var(--gold-text)] font-bold tabular-nums">
                       {selectedIntents.length} / 3 selected
                     </span>
                   </div>
@@ -867,7 +867,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                           {selectionNotice}
                         </span>
                       )}
-                      <span className="text-[var(--gold)] font-bold tabular-nums">
+                      <span className="text-[var(--gold-text)] font-bold tabular-nums">
                         {selectedRoles.length} / 2 selected
                       </span>
                     </div>

@@ -60,18 +60,35 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showUpdateBar, setShowUpdateBar] = useState(false);
 
-  // Listen for new service worker taking control
+  // Listen for new service worker replacing an existing installed controller
   useEffect(() => {
-    if (!('serviceWorker' in navigator)) return;
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
 
-    let hadPreviousController = !!navigator.serviceWorker.controller;
+    // Check if dismissed for this browser session
+    try {
+      if (sessionStorage.getItem('kw_update_dismissed') === 'true') {
+        return;
+      }
+    } catch (_) {}
+
+    // MUST ONLY appear when a previously installed service worker was already controlling the page.
+    // Never on first install.
+    const hadPreviousController = Boolean(navigator.serviceWorker.controller);
 
     const onControllerChange = () => {
-      setShowUpdateBar(true);
+      if (hadPreviousController) {
+        try {
+          if (sessionStorage.getItem('kw_update_dismissed') === 'true') return;
+        } catch (_) {}
+        setShowUpdateBar(true);
+      }
     };
 
     const onMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'NEW_VERSION_AVAILABLE') {
+      if (hadPreviousController && event.data?.type === 'NEW_VERSION_AVAILABLE') {
+        try {
+          if (sessionStorage.getItem('kw_update_dismissed') === 'true') return;
+        } catch (_) {}
         setShowUpdateBar(true);
       }
     };
@@ -85,7 +102,10 @@ export default function App() {
         const newWorker = reg.installing;
         if (!newWorker) return;
         newWorker.addEventListener('statechange', () => {
-          if (newWorker.state === 'activated' && (hadPreviousController || navigator.serviceWorker.controller)) {
+          if (newWorker.state === 'activated' && hadPreviousController) {
+            try {
+              if (sessionStorage.getItem('kw_update_dismissed') === 'true') return;
+            } catch (_) {}
             setShowUpdateBar(true);
           }
         });
@@ -97,6 +117,13 @@ export default function App() {
       navigator.serviceWorker.removeEventListener('message', onMessage);
     };
   }, []);
+
+  const handleDismissUpdateBar = () => {
+    setShowUpdateBar(false);
+    try {
+      sessionStorage.setItem('kw_update_dismissed', 'true');
+    } catch (_) {}
+  };
 
   // Initialize theme: follows device preference by default, syncs with media query
   useEffect(() => {
@@ -500,12 +527,12 @@ export default function App() {
         </div>
       )}
 
-      {/* New Version Ready Notification Bar - small dismissible bar that never covers nav or page title */}
+      {/* New Version Ready Notification Bar - small dismissible bar fixed at bottom above mobile tab bar */}
       {showUpdateBar && (
         <aside
           role="status"
           aria-live="polite"
-          className="fixed bottom-20 md:bottom-6 right-4 sm:right-6 z-50 flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl bg-[var(--card)] border border-[var(--gold)] shadow-2xl text-[13px] font-medium text-[var(--fg)] max-w-sm w-[calc(100%-2rem)] sm:w-auto animate-in fade-in slide-in-from-bottom-3"
+          className="fixed bottom-16 md:bottom-4 left-4 right-4 sm:left-auto sm:right-6 z-50 flex items-center justify-between gap-3 px-3.5 py-2 rounded-xl bg-[var(--card)] border border-[var(--gold)] shadow-2xl text-[13px] font-medium text-[var(--fg)] max-w-sm w-[calc(100%-2rem)] sm:w-auto animate-in fade-in slide-in-from-bottom-3"
         >
           <div className="flex items-center gap-2">
             <span className="inline-block w-2 h-2 rounded-full bg-[var(--gold)] animate-pulse" />
@@ -519,7 +546,7 @@ export default function App() {
               Refresh
             </button>
             <button
-              onClick={() => setShowUpdateBar(false)}
+              onClick={handleDismissUpdateBar}
               className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] rounded cursor-pointer transition-colors"
               aria-label="Dismiss update notification"
             >

@@ -13,6 +13,7 @@ interface WallViewProps {
 export const WallView: React.FC<WallViewProps> = ({ onBack }) => {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [matches, setMatches] = useState<any[]>([]);
+  const [totalMatchesCount, setTotalMatchesCount] = useState<number>(0);
   const [posts, setPosts] = useState<Post[]>([]);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -20,13 +21,16 @@ export const WallView: React.FC<WallViewProps> = ({ onBack }) => {
   const fetchWallData = async () => {
     setIsRefreshing(true);
     try {
-      const [ps, ms, pos] = await Promise.all([
+      const [ps, wallFeedRes, pos] = await Promise.all([
         db.list<Profile>('profiles', { limit: 500 }),
-        db.list<any>('matches', { limit: 50 }),
+        fetch('/api/wall/feed')
+          .then(r => r.ok ? r.json() : { matches: [], total_matches: 0 })
+          .catch(() => ({ matches: [], total_matches: 0 })),
         db.list<Post>('posts', { limit: 200 })
       ]);
       setProfiles(ps || []);
-      setMatches(ms || []);
+      setMatches(wallFeedRes.matches || []);
+      setTotalMatchesCount(wallFeedRes.total_matches ?? (wallFeedRes.matches?.length || 0));
       setPosts(pos || []);
     } catch (e) {
       console.error('Error fetching wall data:', e);
@@ -123,7 +127,7 @@ export const WallView: React.FC<WallViewProps> = ({ onBack }) => {
 
               <div className="space-y-1 border-l border-[var(--card-border)] pl-4 sm:pl-8">
                 <div className="text-4xl sm:text-6xl font-bold text-[var(--gold)] tabular-nums tracking-tight">
-                  {matches.length}
+                  {totalMatchesCount || matches.length}
                 </div>
                 <div className="text-sm sm:text-base text-[var(--fg-muted)] font-medium">
                   Matches made
@@ -167,10 +171,10 @@ export const WallView: React.FC<WallViewProps> = ({ onBack }) => {
                     return uniqueMatches.slice(0, 7).map(m => {
                       const a = profiles.find(p => p.id === m.a_id);
                       const b = profiles.find(p => p.id === m.b_id);
-                      if (!a || !b) return null;
-
-                      const firstNameA = a.name.trim().split(' ')[0];
-                      const firstNameB = b.name.trim().split(' ')[0];
+                      const firstNameA = m.first_name_a || a?.name?.trim().split(' ')[0] || 'Member';
+                      const firstNameB = m.first_name_b || b?.name?.trim().split(' ')[0] || 'Member';
+                      const avatarA = m.avatar_a ? { id: m.a_id, name: firstNameA, avatar: m.avatar_a } : a;
+                      const avatarB = m.avatar_b ? { id: m.b_id, name: firstNameB, avatar: m.avatar_b } : b;
 
                       return (
                         <div
@@ -178,18 +182,25 @@ export const WallView: React.FC<WallViewProps> = ({ onBack }) => {
                           className="py-4 sm:py-5 flex items-center justify-between gap-4"
                         >
                           {/* Member A + Member B (First names and avatars only) */}
-                          <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-                            <Avatar profile={a} className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0" />
-                            <span className="text-xl sm:text-2xl font-bold text-[var(--fg)] truncate">
-                              {firstNameA}
-                            </span>
-                            <span className="text-lg sm:text-xl text-[var(--fg-subtle)] font-mono px-1">
-                              &amp;
-                            </span>
-                            <Avatar profile={b} className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0" />
-                            <span className="text-xl sm:text-2xl font-bold text-[var(--fg)] truncate">
-                              {firstNameB}
-                            </span>
+                          <div className="space-y-1 min-w-0 flex-1">
+                            <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                              <Avatar profile={avatarA as any} className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0" />
+                              <span className="text-xl sm:text-2xl font-bold text-[var(--fg)] truncate">
+                                {firstNameA}
+                              </span>
+                              <span className="text-lg sm:text-xl text-[var(--fg-subtle)] font-mono px-1">
+                                &amp;
+                              </span>
+                              <Avatar profile={avatarB as any} className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0" />
+                              <span className="text-xl sm:text-2xl font-bold text-[var(--fg)] truncate">
+                                {firstNameB}
+                              </span>
+                            </div>
+                            {m.spark && (
+                              <p className="text-sm sm:text-base text-[var(--fg-muted)] truncate max-w-xl">
+                                {m.spark}
+                              </p>
+                            )}
                           </div>
 
                           {/* Match Score */}
