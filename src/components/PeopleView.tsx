@@ -217,7 +217,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
       <div className="kw-card bg-[var(--card)] border border-[var(--gold)]/30 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-[var(--gold-subtle)] text-[var(--gold)] grid place-items-center flex-shrink-0">
+            <div className="w-8 h-8 rounded-full bg-[var(--gold-subtle)] text-[var(--gold-text)] grid place-items-center flex-shrink-0">
               <Sparkles className="w-4 h-4" />
             </div>
             <div>
@@ -299,7 +299,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
           /* Signed-out visitors see: Sign in to ask Kwegatta */
           <div className="p-4 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
             <div className="flex items-center gap-2.5 text-xs text-[var(--fg)]">
-              <Lock className="w-4 h-4 text-[var(--gold)] flex-shrink-0" />
+              <Lock className="w-4 h-4 text-[var(--gold-text)] flex-shrink-0" />
               <div>
                 <span className="font-semibold text-[var(--fg)]">Sign in to ask Kwegatta</span>
                 <p className="text-[13px] text-[var(--fg-muted)]">
@@ -323,16 +323,16 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
             <div className="flex items-center justify-between text-xs">
               <div className="flex items-center gap-2">
                 <span className="font-bold text-[var(--fg)]">Results for:</span>
-                <span className="text-[var(--gold)] italic font-medium">"{activeAskQuery}"</span>
+                <span className="text-[var(--gold-text)] italic font-medium">"{activeAskQuery}"</span>
               </div>
               <div className="text-[13px] text-[var(--fg-muted)] flex items-center gap-1.5">
                 {isAsking ? (
                   <>
-                    <RefreshCw className="w-3 h-3 animate-spin text-[var(--gold)]" />
+                    <RefreshCw className="w-3 h-3 animate-spin text-[var(--gold-text)]" />
                     <span>Gemma 4 is analyzing profiles...</span>
                   </>
                 ) : askSource === 'gemma' ? (
-                  <span className="text-[var(--teal)] font-semibold flex items-center gap-1">
+                  <span className="text-[var(--teal-text)] font-semibold flex items-center gap-1">
                     <Sparkles className="w-3 h-3" />
                     Gemma semantic match
                   </span>
@@ -364,11 +364,11 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
                             <div className="min-w-0">
                               <button
                                 onClick={() => onViewProfile(person.id)}
-                                className="font-bold text-xs sm:text-sm text-[var(--fg)] hover:text-[var(--gold)] transition-colors text-left truncate block"
+                                className="font-bold text-xs sm:text-sm text-[var(--fg)] hover:text-[var(--gold-text)] transition-colors text-left truncate block"
                               >
                                 {person.name}
                               </button>
-                              <div className="flex items-center gap-1.5 text-xs text-[var(--teal)] font-medium">
+                              <div className="flex items-center gap-1.5 text-xs text-[var(--teal-text)] font-medium">
                                 <span>{person.role}</span>
                                 {person.location && (
                                   <>
@@ -398,7 +398,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
                         {/* One-sentence reason why they fit */}
                         {reason && (
                           <div className="p-2.5 rounded-lg bg-[var(--card)] border border-[var(--gold)]/20 text-xs text-[var(--fg)] leading-relaxed flex items-start gap-2">
-                            <Sparkles className="w-3.5 h-3.5 text-[var(--gold)] flex-shrink-0 mt-0.5" />
+                            <Sparkles className="w-3.5 h-3.5 text-[var(--gold-text)] flex-shrink-0 mt-0.5" />
                             <span className="text-[13px] sm:text-xs">{reason}</span>
                           </div>
                         )}
@@ -414,7 +414,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
                             <button
                               key={t}
                               onClick={() => onSelectTag(t)}
-                              className="hover:text-[var(--gold)] transition-colors"
+                              className="hover:text-[var(--gold-text)] transition-colors"
                             >
                               #{t}
                             </button>
@@ -422,7 +422,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
                         </div>
                         <button
                           onClick={() => onViewProfile(person.id)}
-                          className="text-xs font-semibold text-[var(--gold)] hover:underline flex items-center gap-1"
+                          className="text-xs font-semibold text-[var(--gold-text)] hover:underline flex items-center gap-1"
                         >
                           <span>Profile</span>
                           <ArrowRight className="w-3 h-3" />
@@ -479,7 +479,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
           ))}
 
           {selectedTag && (
-            <span className="inline-flex items-center gap-1.5 text-xs text-[var(--gold)] ml-2">
+            <span className="inline-flex items-center gap-1.5 text-xs text-[var(--gold-text)] ml-2">
               <span>#{selectedTag}</span>
               <button
                 onClick={() => onSelectTag(null)}
@@ -496,7 +496,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
       {/* Standard Directory Grid */}
       {filtered.length === 0 ? (
         <div className="py-12 px-6 text-center space-y-6 border border-dashed border-[var(--card-border)] rounded-2xl bg-[var(--card)]/40">
-          <div className="w-12 h-12 rounded-full bg-[var(--gold-subtle)] text-[var(--gold)] grid place-items-center mx-auto">
+          <div className="w-12 h-12 rounded-full bg-[var(--gold-subtle)] text-[var(--gold-text)] grid place-items-center mx-auto">
             <Users className="w-6 h-6" />
           </div>
 
@@ -511,7 +511,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
 
           {/* What happens next guide */}
           <div className="max-w-lg mx-auto p-4 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] text-left space-y-2.5">
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--gold)]">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--gold-text)]">
               <Compass className="w-4 h-4" />
               <span>What happens next:</span>
             </div>
@@ -589,7 +589,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
                       <div className="min-w-0 flex-1">
                         <button
                           onClick={() => onViewProfile(person.id)}
-                          className="font-semibold text-sm text-[var(--fg)] hover:text-[var(--gold)] transition-colors text-left break-words line-clamp-2 block cursor-pointer"
+                          className="font-semibold text-sm text-[var(--fg)] hover:text-[var(--gold-text)] transition-colors text-left break-words line-clamp-2 block cursor-pointer"
                         >
                           {person.name}
                         </button>

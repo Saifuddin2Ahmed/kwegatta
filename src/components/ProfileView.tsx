@@ -596,7 +596,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             {isMine && (
               <div className="mt-2.5">
                 <label className="primer-btn text-xs py-1.5 px-3.5 flex items-center gap-1.5 cursor-pointer font-medium hover:border-[var(--gold)] active:scale-95 transition-all">
-                  <Camera className="w-3.5 h-3.5 text-[var(--gold)]" />
+                  <Camera className="w-3.5 h-3.5 text-[var(--gold-text)]" />
                   <span>Change photo</span>
                   <input
                     type="file"
@@ -696,7 +696,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   </button>
                   <button
                     onClick={() => setShowShareCardModal(true)}
-                    className="primer-btn text-xs py-1.5 px-3 flex items-center gap-1.5 text-[var(--gold)] font-medium"
+                    className="primer-btn text-xs py-1.5 px-3 flex items-center gap-1.5 text-[var(--gold-text)] font-medium"
                     title="Share my profile card"
                   >
                     <Share2 className="w-3.5 h-3.5" />
@@ -724,7 +724,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                           }}
                           className="w-full text-left px-3.5 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-[var(--fg)] cursor-pointer"
                         >
-                          <Share2 className="w-3.5 h-3.5 text-[var(--gold)]" />
+                          <Share2 className="w-3.5 h-3.5 text-[var(--gold-text)]" />
                           <span>Share my profile card</span>
                         </button>
                         <button
@@ -902,7 +902,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           {isMine && (
             <div className="primer-box p-3.5 bg-[var(--subtle)] space-y-3 text-xs rounded-xl border border-[var(--card-border)]">
               <div className="font-semibold text-[13px] text-[var(--muted)] uppercase tracking-wider flex items-center gap-1.5">
-                <Shield className="w-3.5 h-3.5 text-[var(--gold)]" />
+                <Shield className="w-3.5 h-3.5 text-[var(--gold-text)]" />
                 <span>Account &amp; Security</span>
               </div>
 
@@ -925,7 +925,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                           setShowAddPassword(true);
                           setPasswordLinkError(null);
                         }}
-                        className="text-[13px] font-medium text-[var(--gold)] hover:underline flex items-center gap-1 cursor-pointer"
+                        className="text-[13px] font-medium text-[var(--gold-text)] hover:underline flex items-center gap-1 cursor-pointer"
                       >
                         <KeyRound className="w-3 h-3" />
                         <span>Change password</span>
@@ -945,7 +945,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         setShowAddPassword(true);
                         setPasswordLinkError(null);
                       }}
-                      className="primer-btn text-xs py-1.5 px-3 flex items-center gap-1.5 font-semibold text-[var(--gold)] border-[var(--gold)]/40 hover:bg-[var(--gold-subtle)] cursor-pointer"
+                      className="primer-btn text-xs py-1.5 px-3 flex items-center gap-1.5 font-semibold text-[var(--gold-text)] border-[var(--gold)]/40 hover:bg-[var(--gold-subtle)] cursor-pointer"
                     >
                       <KeyRound className="w-3.5 h-3.5" />
                       <span>Add a password</span>
@@ -954,7 +954,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     <form onSubmit={handleAddPassword} className="space-y-2.5 bg-[var(--card)] p-3 rounded-lg border border-[var(--card-border)] animate-in fade-in">
                       <div className="flex items-center justify-between">
                         <label className="text-xs font-semibold text-[var(--fg)] flex items-center gap-1.5">
-                          <Lock className="w-3.5 h-3.5 text-[var(--gold)]" />
+                          <Lock className="w-3.5 h-3.5 text-[var(--gold-text)]" />
                           <span>{(hasPasswordProvider || passwordLinkedSuccess) ? 'Change account password' : 'Set account password'}</span>
                         </label>
                         <button
@@ -1142,7 +1142,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           {isEditing && isMine && (
             <div className="primer-box p-4 bg-[var(--subtle)] space-y-4 border-2 border-[var(--gold)] rounded-2xl shadow-xl">
               <h3 className="font-semibold text-sm flex items-center gap-2 text-[var(--fg)]">
-                <Edit3 className="w-4 h-4 text-[var(--gold)]" />
+                <Edit3 className="w-4 h-4 text-[var(--gold-text)]" />
                 <span>Edit Profile</span>
               </h3>
 
@@ -1176,7 +1176,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 {/* Rewrite with Gemma helper */}
                 <div className="p-3 bg-[var(--bg)] rounded-xl border border-[var(--card-border)] space-y-2">
                   <div className="text-xs font-medium text-[var(--fg)] flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-[var(--gold)]" />
+                    <Sparkles className="w-3.5 h-3.5 text-[var(--gold-text)]" />
                     <span>Rewrite bio with Gemma 4</span>
                   </div>
                   <div className="flex gap-2">
@@ -1201,7 +1201,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-[var(--gold)] mb-1">
+                    <label className="block text-xs font-semibold text-[var(--gold-text)] mb-1">
                       What you OFFER
                     </label>
                     <textarea
@@ -1213,7 +1213,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-[var(--teal)] mb-1">
+                    <label className="block text-xs font-semibold text-[var(--teal-text)] mb-1">
                       What you NEED
                     </label>
                     <textarea
@@ -1462,7 +1462,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         <button
                           type="button"
                           onClick={() => setEditCustomLinks([...editCustomLinks, { label: '', url: '' }])}
-                          className="text-xs px-2.5 py-1 rounded-lg border border-[var(--gold)]/40 text-[var(--gold)] hover:bg-[var(--gold)]/10 font-medium flex items-center gap-1 cursor-pointer transition-colors"
+                          className="text-xs px-2.5 py-1 rounded-lg border border-[var(--gold)]/40 text-[var(--gold-text)] hover:bg-[var(--gold)]/10 font-medium flex items-center gap-1 cursor-pointer transition-colors"
                         >
                           <Plus className="w-3 h-3" />
                           <span>Add another link</span>
@@ -1546,7 +1546,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         type="checkbox"
                         checked={!editHideWhatsApp}
                         onChange={e => setEditHideWhatsApp(!e.target.checked)}
-                        className="rounded border-[var(--card-border)] text-[var(--gold)] focus:ring-[var(--gold)]"
+                        className="rounded border-[var(--card-border)] text-[var(--gold-text)] focus:ring-[var(--gold)]"
                       />
                       <span>Visible to other signed-in members</span>
                     </label>

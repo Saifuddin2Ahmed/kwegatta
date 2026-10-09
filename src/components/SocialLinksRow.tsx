@@ -296,7 +296,7 @@ export const SocialLinksRow: React.FC<SocialLinksRowProps> = ({
           rel="noopener noreferrer"
           title={c.label.trim()}
           aria-label={c.label.trim()}
-          className="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] text-xs text-[var(--fg)] hover:text-[var(--gold)] hover:border-[var(--gold)]/40 transition-all active:scale-95 shadow-xs"
+          className="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] text-xs text-[var(--fg)] hover:text-[var(--gold-text)] hover:border-[var(--gold)]/40 transition-all active:scale-95 shadow-xs"
         >
           <ExternalLink className="w-3.5 h-3.5 text-[var(--fg-muted)]" />
           <span className="font-medium truncate max-w-[140px]">{c.label.trim().slice(0, 24)}</span>

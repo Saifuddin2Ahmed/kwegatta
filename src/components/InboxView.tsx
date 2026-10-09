@@ -1,22 +1,32 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { Bell, Zap, UserPlus, MessageCircle, Sparkles, CheckCheck } from 'lucide-react';
 import { NotificationItem, Profile } from '../types';
 import { formatTimeAgo } from '../utils';
 import { Avatar } from './Avatar';
+import { NotificationModal } from './NotificationModal';
 
 interface InboxViewProps {
   notifications: NotificationItem[];
   allProfiles: Profile[];
+  follows?: any[];
   onMarkAllRead: () => void;
   onViewProfile: (id: string) => void;
+  onToggleFollow?: (profileId: string) => void;
+  onMarkRead?: (id: string) => void;
 }
 
 export const InboxView: React.FC<InboxViewProps> = ({
   notifications,
   allProfiles,
+  follows = [],
   onMarkAllRead,
-  onViewProfile
+  onViewProfile,
+  onToggleFollow,
+  onMarkRead
 }) => {
+  const [selectedNotif, setSelectedNotif] = useState<NotificationItem | null>(null);
+  const triggerElementRef = useRef<HTMLElement | null>(null);
+
   const getIcon = (type: NotificationItem['type']) => {
     switch (type) {
       case 'match':
@@ -36,6 +46,14 @@ export const InboxView: React.FC<InboxViewProps> = ({
   const handleRequestPush = async () => {
     if ('Notification' in window) {
       await Notification.requestPermission();
+    }
+  };
+
+  const handleOpenNotification = (n: NotificationItem, e: React.MouseEvent<HTMLElement> | React.KeyboardEvent<HTMLElement>) => {
+    triggerElementRef.current = e.currentTarget;
+    setSelectedNotif(n);
+    if (!n.read && onMarkRead) {
+      onMarkRead(n.id);
     }
   };
 
@@ -82,7 +100,7 @@ export const InboxView: React.FC<InboxViewProps> = ({
 
         {notifications.length === 0 ? (
           <div className="p-10 text-center space-y-4">
-            <Bell className="w-8 h-8 text-[var(--gold)] mx-auto opacity-70" />
+            <Bell className="w-8 h-8 text-[var(--gold-text)] mx-auto opacity-70" />
             <h3 className="font-semibold text-base text-[var(--fg)]">Your inbox is clear</h3>
             <p className="text-[13px] text-[var(--fg-muted)] max-w-sm mx-auto">
               Start a conversation with a match or collaborator in the network.
@@ -108,16 +126,31 @@ export const InboxView: React.FC<InboxViewProps> = ({
               return (
                 <div
                   key={n.id}
-                  className={`p-3.5 flex items-start gap-3 transition-colors ${
-                    !n.read ? 'bg-[var(--accent-subtle)]/30' : 'hover:bg-[var(--subtle)]'
+                  role="button"
+                  tabIndex={0}
+                  onClick={e => handleOpenNotification(n, e)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleOpenNotification(n, e);
+                    }
+                  }}
+                  className={`p-3.5 flex items-start gap-3 transition-colors cursor-pointer select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--gold)] ${
+                    !n.read ? 'bg-[var(--accent-subtle)]/30 font-medium' : 'hover:bg-[var(--subtle)]'
                   }`}
+                  aria-label={`Notification from ${sender?.name || 'Kwegatta'}`}
                 >
                   <div className="mt-0.5 flex-shrink-0">{getIcon(n.type)}</div>
 
                   {sender && (
                     <button
-                      onClick={() => onViewProfile(sender.id)}
-                      className="flex-shrink-0"
+                      type="button"
+                      onClick={e => {
+                        e.stopPropagation();
+                        onViewProfile(sender.id);
+                      }}
+                      className="flex-shrink-0 cursor-pointer"
+                      title={`View ${sender.name}'s profile`}
                     >
                       <Avatar profile={sender} className="w-7 h-7" />
                     </button>
@@ -127,13 +160,13 @@ export const InboxView: React.FC<InboxViewProps> = ({
                     <p className="text-xs text-[var(--fg)] leading-relaxed">
                       {n.body}
                     </p>
-                    <div className="text-[13px] text-[var(--muted)] mt-1">
+                    <div className="text-[13px] text-[var(--muted)] mt-1 font-normal">
                       {formatTimeAgo(n.created_at)}
                     </div>
                   </div>
 
                   {!n.read && (
-                    <span className="w-2 h-2 rounded-full bg-[var(--accent)] flex-shrink-0 mt-2" />
+                    <span className="w-2 h-2 rounded-full bg-[var(--accent)] flex-shrink-0 mt-2" title="Unread" />
                   )}
                 </div>
               );
@@ -141,6 +174,26 @@ export const InboxView: React.FC<InboxViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Selected Notification Detail Modal Popup */}
+      {selectedNotif && (
+        <NotificationModal
+          notification={selectedNotif}
+          sender={selectedNotif.from_id ? allProfiles.find(p => p.id === selectedNotif.from_id) || null : null}
+          isFollowingSender={Boolean(
+            selectedNotif.from_id && follows.some(f => f.following_id === selectedNotif.from_id)
+          )}
+          onClose={() => setSelectedNotif(null)}
+          onViewProfile={onViewProfile}
+          onFollowBack={onToggleFollow}
+          onOpenRelated={n => {
+            if (n.from_id) {
+              onViewProfile(n.from_id);
+            }
+          }}
+          triggerElement={triggerElementRef.current}
+        />
+      )}
     </div>
   );
 };

@@ -6,6 +6,26 @@ import { generateQrCodeDataUrl, MIN_MEMBERS_FOR_STATS } from '../utils';
 import { Avatar } from './Avatar';
 import { BrandLogo } from './BrandLogo';
 
+const INITIAL_COLORS = [
+  'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+  'bg-amber-500/20 text-amber-300 border-amber-500/30',
+  'bg-teal-500/20 text-teal-300 border-teal-500/30',
+  'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+  'bg-rose-500/20 text-rose-300 border-rose-500/30',
+  'bg-sky-500/20 text-sky-300 border-sky-500/30',
+];
+
+function renderInitialBadge(name: string, seed: number) {
+  const initial = (name || '?').trim()[0]?.toUpperCase() || '?';
+  const charCode = (name || '').charCodeAt(0) || seed;
+  const color = INITIAL_COLORS[(charCode + seed) % INITIAL_COLORS.length];
+  return (
+    <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center font-bold text-lg sm:text-xl border ${color} flex-shrink-0 select-none shadow-sm`}>
+      {initial}
+    </div>
+  );
+}
+
 interface WallViewProps {
   onBack: () => void;
 }
@@ -24,13 +44,13 @@ export const WallView: React.FC<WallViewProps> = ({ onBack }) => {
       const [ps, wallFeedRes, pos] = await Promise.all([
         db.list<Profile>('profiles', { limit: 500 }),
         fetch('/api/wall/feed')
-          .then(r => r.ok ? r.json() : { matches: [], total_matches: 0 })
-          .catch(() => ({ matches: [], total_matches: 0 })),
+          .then(r => r.ok ? r.json() : { matches: [], count: 0 })
+          .catch(() => ({ matches: [], count: 0 })),
         db.list<Post>('posts', { limit: 200 })
       ]);
       setProfiles(ps || []);
       setMatches(wallFeedRes.matches || []);
-      setTotalMatchesCount(wallFeedRes.total_matches ?? (wallFeedRes.matches?.length || 0));
+      setTotalMatchesCount(wallFeedRes.count ?? wallFeedRes.total_matches ?? (wallFeedRes.matches?.length || 0));
       setPosts(pos || []);
     } catch (e) {
       console.error('Error fetching wall data:', e);
@@ -160,59 +180,34 @@ export const WallView: React.FC<WallViewProps> = ({ onBack }) => {
                 </div>
               ) : (
                 <div className="divide-y divide-[var(--card-border)]">
-                  {(() => {
-                    const seenPairs = new Set<string>();
-                    const uniqueMatches = matches.filter(m => {
-                      const pairKey = [m.a_id, m.b_id].sort().join(':');
-                      if (seenPairs.has(pairKey)) return false;
-                      seenPairs.add(pairKey);
-                      return true;
-                    });
-                    return uniqueMatches.slice(0, 7).map(m => {
-                      const a = profiles.find(p => p.id === m.a_id);
-                      const b = profiles.find(p => p.id === m.b_id);
-                      const firstNameA = m.first_name_a || a?.name?.trim().split(' ')[0] || 'Member';
-                      const firstNameB = m.first_name_b || b?.name?.trim().split(' ')[0] || 'Member';
-                      const avatarA = m.avatar_a ? { id: m.a_id, name: firstNameA, avatar: m.avatar_a } : a;
-                      const avatarB = m.avatar_b ? { id: m.b_id, name: firstNameB, avatar: m.avatar_b } : b;
-
-                      return (
-                        <div
-                          key={m.id}
-                          className="py-4 sm:py-5 flex items-center justify-between gap-4"
-                        >
-                          {/* Member A + Member B (First names and avatars only) */}
-                          <div className="space-y-1 min-w-0 flex-1">
-                            <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-                              <Avatar profile={avatarA as any} className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0" />
-                              <span className="text-xl sm:text-2xl font-bold text-[var(--fg)] truncate">
-                                {firstNameA}
-                              </span>
-                              <span className="text-lg sm:text-xl text-[var(--fg-subtle)] font-mono px-1">
-                                &amp;
-                              </span>
-                              <Avatar profile={avatarB as any} className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0" />
-                              <span className="text-xl sm:text-2xl font-bold text-[var(--fg)] truncate">
-                                {firstNameB}
-                              </span>
-                            </div>
-                            {m.spark && (
-                              <p className="text-sm sm:text-base text-[var(--fg-muted)] truncate max-w-xl">
-                                {m.spark}
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Match Score */}
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <span className="text-xl sm:text-2xl font-extrabold text-[var(--gold)] font-mono tabular-nums">
-                              {m.score}%
-                            </span>
-                          </div>
+                  {matches.slice(0, 8).map((m, idx) => (
+                    <div
+                      key={m.id || idx}
+                      className="py-4 sm:py-5 flex items-start justify-between gap-4"
+                    >
+                      {/* Member A + Member B (First names and initials badges only) */}
+                      <div className="space-y-2 min-w-0 flex-1">
+                        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+                          {renderInitialBadge(m.first_name_a, 0)}
+                          <span className="text-xl sm:text-2xl font-bold text-[var(--fg)] truncate">
+                            {m.first_name_a}
+                          </span>
+                          <span className="text-lg sm:text-xl text-[var(--fg-subtle)] font-mono px-1">
+                            &amp;
+                          </span>
+                          {renderInitialBadge(m.first_name_b, 1)}
+                          <span className="text-xl sm:text-2xl font-bold text-[var(--fg)] truncate">
+                            {m.first_name_b}
+                          </span>
                         </div>
-                      );
-                    });
-                  })()}
+                        {m.spark && (
+                          <p className="text-sm sm:text-base text-[var(--fg-muted)] leading-relaxed max-w-2xl pl-1">
+                            {m.spark}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

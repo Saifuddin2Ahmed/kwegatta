@@ -265,7 +265,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <p className="leading-relaxed font-medium">{errorMsg}</p>
               {errorMsg.includes('unauthorized-domain') && (
                 <p className="text-[13px] text-[var(--fg-muted)]">
-                  Authorised domains for this app: <code className="text-[var(--gold)]">kwegatta.ai.studio</code> and the Cloud Run deployment domain.
+                  Authorised domains for this app: <code className="text-[var(--gold-text)]">kwegatta.ai.studio</code> and the Cloud Run deployment domain.
                 </p>
               )}
             </div>
@@ -291,7 +291,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         className="w-full py-2.5 px-4 rounded-xl border border-[var(--card-border)] bg-[var(--btn)] hover:bg-[var(--btn-hover)] text-xs sm:text-sm font-semibold text-[var(--fg)] flex items-center justify-center gap-3 shadow-xs hover:border-[var(--gold)] transition-all cursor-pointer active:scale-[0.99]"
       >
         {isLoading ? (
-          <RefreshCw className="w-4 h-4 animate-spin text-[var(--gold)]" />
+          <RefreshCw className="w-4 h-4 animate-spin text-[var(--gold-text)]" />
         ) : (
           <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24">
             <path
@@ -332,7 +332,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             onClick={() => setMode('signin')}
             className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
               mode === 'signin'
-                ? 'bg-[var(--card)] text-[var(--gold)] shadow-xs'
+                ? 'bg-[var(--card)] text-[var(--gold-text)] shadow-xs'
                 : 'text-[var(--fg-muted)] hover:text-[var(--fg)]'
             }`}
           >
@@ -343,7 +343,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             onClick={() => setMode('signup')}
             className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
               mode === 'signup'
-                ? 'bg-[var(--card)] text-[var(--gold)] shadow-xs'
+                ? 'bg-[var(--card)] text-[var(--gold-text)] shadow-xs'
                 : 'text-[var(--fg-muted)] hover:text-[var(--fg)]'
             }`}
           >
@@ -356,7 +356,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <button
             type="button"
             onClick={() => setMode('signin')}
-            className="text-[var(--gold)] hover:underline cursor-pointer"
+            className="text-[var(--gold-text)] hover:underline cursor-pointer"
           >
             Back to Sign In
           </button>
@@ -416,7 +416,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setMode('forgot')}
-                  className="text-[13px] text-[var(--gold)] hover:underline cursor-pointer"
+                  className="text-[13px] text-[var(--gold-text)] hover:underline cursor-pointer"
                 >
                   Forgot password?
                 </button>

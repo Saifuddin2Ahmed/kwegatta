@@ -23,7 +23,7 @@ export const LicenseView: React.FC<LicenseViewProps> = ({ onBack }) => {
       {/* Header */}
       <div className="space-y-3 border-b border-[var(--card-border)] pb-6">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[var(--gold-subtle)] text-[var(--fg)] text-[13px] font-semibold">
-          <Scale className="w-3.5 h-3.5 text-[var(--gold)]" />
+          <Scale className="w-3.5 h-3.5 text-[var(--gold-text)]" />
           <span>OSI-approved open source</span>
         </div>
         <h1 className="text-2xl sm:text-3xl font-display font-bold text-[var(--fg)] tracking-tight">
@@ -36,7 +36,7 @@ export const LicenseView: React.FC<LicenseViewProps> = ({ onBack }) => {
 
       {/* License Body */}
       <div className="kw-card p-6 sm:p-8 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl font-mono text-xs text-[var(--fg)] leading-relaxed shadow-sm space-y-4">
-        <p className="font-bold text-sm text-[var(--gold)]">
+        <p className="font-bold text-sm text-[var(--gold-text)]">
           Copyright (c) 2026 The Kwegatta Team
         </p>
         <p>

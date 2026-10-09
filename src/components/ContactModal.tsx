@@ -33,7 +33,7 @@ export const ContactModal: React.FC<ContactModalProps> = ({ isOpen, onClose }) =
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-[var(--card-border)]">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-[var(--gold-subtle)] text-[var(--gold)] grid place-items-center border border-[var(--gold)]/30">
+            <div className="w-9 h-9 rounded-xl bg-[var(--gold-subtle)] text-[var(--gold-text)] grid place-items-center border border-[var(--gold)]/30">
               <Mail className="w-4 h-4" />
             </div>
             <div>
@@ -56,13 +56,13 @@ export const ContactModal: React.FC<ContactModalProps> = ({ isOpen, onClose }) =
         <div className="p-3.5 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] space-y-2 text-xs">
           <div className="flex items-center justify-between font-semibold text-[var(--fg)]">
             <span>Saifuddin Ahmed</span>
-            <span className="text-[var(--gold)] font-mono text-[13px]">Team Lead</span>
+            <span className="text-[var(--gold-text)] font-mono text-[13px]">Team Lead</span>
           </div>
           <p className="text-[var(--fg-muted)] leading-relaxed">
             Future Stars Center for Development &amp; Capacity Building · Hack Day Kampala × MUBS
           </p>
           <div className="flex items-center gap-1.5 text-[var(--fg-subtle)] text-[13px] pt-1 border-t border-[var(--card-border)]/50">
-            <MapPin className="w-3 h-3 text-[var(--teal)] flex-shrink-0" />
+            <MapPin className="w-3 h-3 text-[var(--teal-text)] flex-shrink-0" />
             <span>Makerere University Business School (MUBS), Kampala, Uganda</span>
           </div>
         </div>
@@ -106,7 +106,7 @@ export const ContactModal: React.FC<ContactModalProps> = ({ isOpen, onClose }) =
             href={`mailto:${email}?subject=Kwegatta%20Inquiry`}
             className="w-full kw-btn kw-btn-ghost text-xs py-2 px-3 flex items-center justify-center gap-2 border border-[var(--card-border)] hover:border-[var(--gold)]"
           >
-            <Mail className="w-3.5 h-3.5 text-[var(--gold)]" />
+            <Mail className="w-3.5 h-3.5 text-[var(--gold-text)]" />
             <span>Open in Mail App</span>
             <ExternalLink className="w-3 h-3 opacity-60 ml-auto" />
           </a>

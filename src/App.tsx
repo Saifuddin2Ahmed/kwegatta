@@ -16,8 +16,10 @@ import {
   db,
   APP_NAME,
   ensureAuthToken,
+  getFreshAuthToken,
   claimExistingProfile,
-  fetchMyAccountProfile
+  fetchMyAccountProfile,
+  markNotificationAsRead
 } from './services/api';
 import {
   ThemePreference,
@@ -184,27 +186,38 @@ export default function App() {
         }
       }
 
-      const [ps, pos, ms] = await Promise.all([
+      // Only public collections requested on initial visitor load
+      const [ps, pos] = await Promise.all([
         db.list<Profile>('profiles', { limit: 500 }),
-        db.list<Post>('posts', { limit: 100 }),
-        db.list<any>('matches', { limit: 100 })
+        db.list<Post>('posts', { limit: 100 })
       ]);
       
       setAllProfiles(ps || []);
       setPosts(pos || []);
-      setMatches(ms || []);
 
-      if (myId && ps && ps.length > 0) {
+      // PART 2: Only request matches, follows and notifications after a member is signed in and their ID token is ready
+      const token = await getFreshAuthToken();
+      if (myId && token && ps && ps.length > 0) {
         const found = ps.find(p => p.id === myId);
         if (found) {
           setCurrentProfile(found);
-          const [fls, notifs] = await Promise.all([
+          const [fls, notifs, ms] = await Promise.all([
             db.list<Follow>('follows', { eq: { follower_id: myId }, limit: 500 }),
-            db.list<NotificationItem>('notifications', { eq: { to_id: myId }, limit: 100 })
+            db.list<NotificationItem>('notifications', { eq: { to_id: myId }, limit: 100 }),
+            db.list<any>('matches', { limit: 100 })
           ]);
           setFollows(fls || []);
           setNotifications(notifs || []);
+          setMatches(ms || []);
+        } else {
+          setFollows([]);
+          setNotifications([]);
+          setMatches([]);
         }
+      } else {
+        setFollows([]);
+        setNotifications([]);
+        setMatches([]);
       }
     } catch (err) {
       // Quiet fallback
@@ -374,6 +387,15 @@ export default function App() {
     }
   };
 
+  const handleMarkNotificationRead = async (id: string) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    try {
+      await markNotificationAsRead(id);
+    } catch (e) {
+      // quiet fallback
+    }
+  };
+
   // Listen for Firebase auth state and handle redirect logins
   useEffect(() => {
     handleRedirectResult().catch(err => console.warn('[Firebase Auth] Redirect check:', err));
@@ -401,7 +423,13 @@ export default function App() {
           }
         } catch (e) {
           console.warn('[Firebase Auth] Profile sync note:', e);
+        } finally {
+          refreshData();
         }
+      } else {
+        setFollows([]);
+        setNotifications([]);
+        setMatches([]);
       }
     });
 
@@ -643,8 +671,11 @@ export default function App() {
           <InboxView
             notifications={notifications}
             allProfiles={allProfiles}
+            follows={follows}
             onMarkAllRead={handleMarkAllRead}
             onViewProfile={navigateToProfile}
+            onToggleFollow={handleToggleFollow}
+            onMarkRead={handleMarkNotificationRead}
           />
         ) : activeTab === 'admin' ? (
           <React.Suspense fallback={<div className="p-12 text-center"><div className="w-8 h-8 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin mx-auto"></div></div>}>

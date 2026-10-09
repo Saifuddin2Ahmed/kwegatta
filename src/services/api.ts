@@ -851,6 +851,23 @@ export async function deleteMemberProfile(profileId: string): Promise<boolean> {
   return res.ok;
 }
 
+// Mark single notification as read on server
+export async function markNotificationAsRead(id: string): Promise<boolean> {
+  try {
+    await getFreshAuthToken();
+    const headers = getAuthHeaders();
+    const res = await fetch(`/api/notifications/${encodeURIComponent(id)}/read`, {
+      method: 'PATCH',
+      headers
+    });
+    if (res.ok) return true;
+    await db.update('notifications', id, { read: true });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 // Export member's complete data bundle (DPG Open Data / User Sovereignty indicator)
 export async function exportMemberData(profile: Profile): Promise<string> {
   const [posts, follows, matches, notifs] = await Promise.all([
@@ -886,6 +903,13 @@ export const db = {
       if (options.after) params.set('after', options.after);
 
       const headers = getAuthHeaders();
+
+      // PART 2: Prevent signed-out 401 noise in browser console.
+      // matches, follows and notifications require an authenticated member with an ID token.
+      const protectedCollections = ['matches', 'follows', 'notifications'];
+      if (protectedCollections.includes(collection) && !headers['Authorization']) {
+        return [];
+      }
 
       const res = await fetch(`/api/data/${collection}?${params.toString()}`, { headers });
       if (!res.ok) {

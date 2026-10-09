@@ -565,7 +565,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                 <span
                   className={`text-[13px] font-medium hidden sm:block truncate w-full text-center ${
                     isCurrent
-                      ? 'text-[var(--gold)] font-bold'
+                      ? 'text-[var(--gold-text)] font-bold'
                       : isDone
                       ? 'text-[var(--fg)]'
                       : 'text-[var(--fg-subtle)]'
@@ -585,14 +585,14 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
           {screenIndex > 0 && selectedIntents.length > 0 && (
             <div className="flex items-center justify-between px-4 py-2.5 bg-[var(--bg-subtle)]/60 border border-[var(--card-border)] rounded-xl text-xs text-[var(--fg-muted)] animate-in fade-in">
               <div className="flex items-center gap-2 truncate pr-2">
-                <Check className="w-3.5 h-3.5 text-[var(--gold)] flex-shrink-0" />
+                <Check className="w-3.5 h-3.5 text-[var(--gold-text)] flex-shrink-0" />
                 <span className="font-semibold text-[var(--fg)]">Intent:</span>
                 <span className="truncate">{selectedIntents.join(', ')}</span>
               </div>
               <button
                 type="button"
                 onClick={() => setScreenIndex(0)}
-                className="text-[var(--gold)] hover:underline font-semibold flex items-center gap-1 flex-shrink-0 cursor-pointer text-xs"
+                className="text-[var(--gold-text)] hover:underline font-semibold flex items-center gap-1 flex-shrink-0 cursor-pointer text-xs"
               >
                 <Edit2 className="w-3 h-3" />
                 <span>Edit</span>
@@ -603,7 +603,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
           {screenIndex > 1 && (selectedRoles.length > 0 || selectedStage) && (
             <div className="flex items-center justify-between px-4 py-2.5 bg-[var(--bg-subtle)]/60 border border-[var(--card-border)] rounded-xl text-xs text-[var(--fg-muted)] animate-in fade-in">
               <div className="flex items-center gap-2 truncate pr-2">
-                <Check className="w-3.5 h-3.5 text-[var(--gold)] flex-shrink-0" />
+                <Check className="w-3.5 h-3.5 text-[var(--gold-text)] flex-shrink-0" />
                 <span className="font-semibold text-[var(--fg)]">Role &amp; Stage:</span>
                 <span className="truncate">
                   {selectedRoles.join(' & ') || 'Role not set'} · {selectedStage || 'Stage not set'}
@@ -612,7 +612,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
               <button
                 type="button"
                 onClick={() => setScreenIndex(1)}
-                className="text-[var(--gold)] hover:underline font-semibold flex items-center gap-1 flex-shrink-0 cursor-pointer text-xs"
+                className="text-[var(--gold-text)] hover:underline font-semibold flex items-center gap-1 flex-shrink-0 cursor-pointer text-xs"
               >
                 <Edit2 className="w-3 h-3" />
                 <span>Edit</span>
@@ -623,7 +623,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
           {screenIndex > 2 && formData.name && (
             <div className="flex items-center justify-between px-4 py-2.5 bg-[var(--bg-subtle)]/60 border border-[var(--card-border)] rounded-xl text-xs text-[var(--fg-muted)] animate-in fade-in">
               <div className="flex items-center gap-2 truncate pr-2">
-                <Check className="w-3.5 h-3.5 text-[var(--gold)] flex-shrink-0" />
+                <Check className="w-3.5 h-3.5 text-[var(--gold-text)] flex-shrink-0" />
                 <span className="font-semibold text-[var(--fg)]">Basic Details:</span>
                 <span className="truncate">
                   {formData.name} · {formData.location || 'Kampala'} ({formData.hours_per_week || 'Flexible'})
@@ -632,7 +632,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
               <button
                 type="button"
                 onClick={() => setScreenIndex(2)}
-                className="text-[var(--gold)] hover:underline font-semibold flex items-center gap-1 flex-shrink-0 cursor-pointer text-xs"
+                className="text-[var(--gold-text)] hover:underline font-semibold flex items-center gap-1 flex-shrink-0 cursor-pointer text-xs"
               >
                 <Edit2 className="w-3 h-3" />
                 <span>Edit</span>
@@ -643,7 +643,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
           {screenIndex > 3 && (formData.offers || formData.needs) && (
             <div className="flex items-center justify-between px-4 py-2.5 bg-[var(--bg-subtle)]/60 border border-[var(--card-border)] rounded-xl text-xs text-[var(--fg-muted)] animate-in fade-in">
               <div className="flex items-center gap-2 truncate pr-2">
-                <Check className="w-3.5 h-3.5 text-[var(--gold)] flex-shrink-0" />
+                <Check className="w-3.5 h-3.5 text-[var(--gold-text)] flex-shrink-0" />
                 <span className="font-semibold text-[var(--fg)]">Offers &amp; Needs:</span>
                 <span className="truncate">
                   Offers: {formData.offers || '-'} · Needs: {formData.needs || '-'}
@@ -652,7 +652,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
               <button
                 type="button"
                 onClick={() => setScreenIndex(3)}
-                className="text-[var(--gold)] hover:underline font-semibold flex items-center gap-1 flex-shrink-0 cursor-pointer text-xs"
+                className="text-[var(--gold-text)] hover:underline font-semibold flex items-center gap-1 flex-shrink-0 cursor-pointer text-xs"
               >
                 <Edit2 className="w-3 h-3" />
                 <span>Edit</span>
@@ -663,7 +663,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
           {screenIndex > 4 && (formData.teaches || formData.learns) && (
             <div className="flex items-center justify-between px-4 py-2.5 bg-[var(--bg-subtle)]/60 border border-[var(--card-border)] rounded-xl text-xs text-[var(--fg-muted)] animate-in fade-in">
               <div className="flex items-center gap-2 truncate pr-2">
-                <Check className="w-3.5 h-3.5 text-[var(--gold)] flex-shrink-0" />
+                <Check className="w-3.5 h-3.5 text-[var(--gold-text)] flex-shrink-0" />
                 <span className="font-semibold text-[var(--fg)]">Teaches &amp; Learns:</span>
                 <span className="truncate">
                   Teaches: {formData.teaches || '-'} · Learns: {formData.learns || '-'}
@@ -672,7 +672,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
               <button
                 type="button"
                 onClick={() => setScreenIndex(4)}
-                className="text-[var(--gold)] hover:underline font-semibold flex items-center gap-1 flex-shrink-0 cursor-pointer text-xs"
+                className="text-[var(--gold-text)] hover:underline font-semibold flex items-center gap-1 flex-shrink-0 cursor-pointer text-xs"
               >
                 <Edit2 className="w-3 h-3" />
                 <span>Edit</span>
@@ -688,7 +688,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
           /* Profile Saved View & Gemma Polish Status */
           <div className="space-y-4 animate-in fade-in">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-[var(--gold-subtle)] text-[var(--gold)] grid place-items-center flex-shrink-0">
+              <div className="w-10 h-10 rounded-full bg-[var(--gold-subtle)] text-[var(--gold-text)] grid place-items-center flex-shrink-0">
                 <Sparkles className="w-5 h-5" />
               </div>
               <div>
@@ -709,7 +709,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                   <div className="font-bold text-sm sm:text-base text-[var(--fg)] truncate">
                     {savedProfile.name}
                   </div>
-                  <div className="text-xs text-[var(--gold)] font-semibold mt-0.5 line-clamp-1">
+                  <div className="text-xs text-[var(--gold-text)] font-semibold mt-0.5 line-clamp-1">
                     {savedProfile.headline}
                   </div>
                   <div className="flex flex-wrap gap-1 mt-1">
@@ -741,18 +741,18 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
 
             {/* AI Polish Banner */}
             {aiPolishStatus === 'polishing' ? (
-              <div className="flex items-center gap-2 text-xs text-[var(--gold)] font-medium bg-[var(--gold-subtle)] p-3.5 rounded-xl border border-[var(--gold)]/20 animate-pulse">
-                <Sparkles className="w-4 h-4 animate-spin text-[var(--gold)] flex-shrink-0" />
+              <div className="flex items-center gap-2 text-xs text-[var(--gold-text)] font-medium bg-[var(--gold-subtle)] p-3.5 rounded-xl border border-[var(--gold)]/20 animate-pulse">
+                <Sparkles className="w-4 h-4 animate-spin text-[var(--gold-text)] flex-shrink-0" />
                 <span>Gemma 4 is polishing your headline &amp; bio in the background...</span>
               </div>
             ) : aiPolishStatus === 'done' ? (
-              <div className="flex items-center gap-2 text-xs text-[var(--teal)] font-medium bg-[var(--teal-subtle)] p-3.5 rounded-xl border border-[var(--teal)]/20 animate-in fade-in">
-                <Sparkles className="w-4 h-4 text-[var(--teal)] flex-shrink-0" />
+              <div className="flex items-center gap-2 text-xs text-[var(--teal-text)] font-medium bg-[var(--teal-subtle)] p-3.5 rounded-xl border border-[var(--teal)]/20 animate-in fade-in">
+                <Sparkles className="w-4 h-4 text-[var(--teal-text)] flex-shrink-0" />
                 <span>AI polish applied! Headline, bio, and tags have been enriched.</span>
               </div>
             ) : (
-              <div className="flex items-center gap-2 text-xs text-[var(--gold)] font-medium bg-[var(--gold-subtle)] p-3.5 rounded-xl border border-[var(--gold)]/30">
-                <AlertCircle className="w-4 h-4 flex-shrink-0 text-[var(--gold)]" />
+              <div className="flex items-center gap-2 text-xs text-[var(--gold-text)] font-medium bg-[var(--gold-subtle)] p-3.5 rounded-xl border border-[var(--gold)]/30">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 text-[var(--gold-text)]" />
                 <span>{polishNotice || 'Your profile is saved. AI polish will be added shortly.'}</span>
               </div>
             )}
@@ -796,7 +796,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                   <span className="text-[var(--fg-muted)]">Tap to choose:</span>
                   <div className="flex items-center gap-2">
                     {selectionNotice && (
-                      <span className="text-[var(--gold)] font-bold text-xs animate-in fade-in">
+                      <span className="text-[var(--gold-text)] font-bold text-xs animate-in fade-in">
                         {selectionNotice}
                       </span>
                     )}
@@ -863,7 +863,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                     <span className="text-[var(--fg-muted)] font-medium">Your primary role(s):</span>
                     <div className="flex items-center gap-2">
                       {selectionNotice && (
-                        <span className="text-[var(--gold)] font-bold text-xs animate-in fade-in">
+                        <span className="text-[var(--gold-text)] font-bold text-xs animate-in fade-in">
                           {selectionNotice}
                         </span>
                       )}
@@ -949,7 +949,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                 {/* Name */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-[var(--fg)] block">
-                    Your Name <span className="text-[var(--gold)]">*</span>
+                    Your Name <span className="text-[var(--gold-text)]">*</span>
                   </label>
                   <input
                     type="text"
@@ -1047,8 +1047,8 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
 
                 {/* What you offer */}
                 <div className="space-y-2">
-                  <label className="text-xs font-semibold text-[var(--gold)] block">
-                    What you offer (skills, domain knowledge, tools) <span className="text-[var(--gold)]">*</span>
+                  <label className="text-xs font-semibold text-[var(--gold-text)] block">
+                    What you offer (skills, domain knowledge, tools) <span className="text-[var(--gold-text)]">*</span>
                   </label>
                   <div className="flex flex-wrap gap-1.5">
                     {activeOffersSuggestions.map(sug => (
@@ -1078,8 +1078,8 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
 
                 {/* What you need */}
                 <div className="space-y-2">
-                  <label className="text-xs font-semibold text-[var(--teal)] block">
-                    What you need (co-founders, builders, mentors, data) <span className="text-[var(--teal)]">*</span>
+                  <label className="text-xs font-semibold text-[var(--teal-text)] block">
+                    What you need (co-founders, builders, mentors, data) <span className="text-[var(--teal-text)]">*</span>
                   </label>
                   <div className="flex flex-wrap gap-1.5">
                     {SUGGESTED_NEEDS.map(need => (
@@ -1113,7 +1113,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                     type="button"
                     disabled={!formData.offers?.trim() || !formData.needs?.trim() || isProcessing}
                     onClick={handleFinishNow}
-                    className="kw-btn kw-btn-ghost text-xs sm:text-sm py-2.5 px-4 font-semibold text-[var(--gold)] border border-[var(--gold)]/40 hover:bg-[var(--gold-subtle)] rounded-xl flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-40"
+                    className="kw-btn kw-btn-ghost text-xs sm:text-sm py-2.5 px-4 font-semibold text-[var(--gold-text)] border border-[var(--gold)]/40 hover:bg-[var(--gold-subtle)] rounded-xl flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-40"
                   >
                     <CheckCheck className="w-4 h-4" />
                     <span>Finish now</span>
@@ -1146,7 +1146,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
 
                 {/* Teaches */}
                 <div className="space-y-2">
-                  <label className="text-xs font-semibold text-[var(--teal)] block">
+                  <label className="text-xs font-semibold text-[var(--teal-text)] block">
                     What can you teach?
                   </label>
                   <div className="flex flex-wrap gap-1.5">
@@ -1177,7 +1177,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
 
                 {/* Learns */}
                 <div className="space-y-2">
-                  <label className="text-xs font-semibold text-[var(--gold)] block">
+                  <label className="text-xs font-semibold text-[var(--gold-text)] block">
                     What do you want to learn?
                   </label>
                   <div className="flex flex-wrap gap-1.5">
@@ -1212,7 +1212,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                     type="button"
                     disabled={isProcessing}
                     onClick={handleFinishNow}
-                    className="kw-btn kw-btn-ghost text-xs sm:text-sm py-2.5 px-4 font-semibold text-[var(--gold)] border border-[var(--gold)]/40 hover:bg-[var(--gold-subtle)] rounded-xl flex items-center gap-1.5 cursor-pointer active:scale-95"
+                    className="kw-btn kw-btn-ghost text-xs sm:text-sm py-2.5 px-4 font-semibold text-[var(--gold-text)] border border-[var(--gold)]/40 hover:bg-[var(--gold-subtle)] rounded-xl flex items-center gap-1.5 cursor-pointer active:scale-95"
                   >
                     <CheckCheck className="w-4 h-4" />
                     <span>Finish now</span>
@@ -1283,7 +1283,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                       type="checkbox"
                       checked={whatsappVisible}
                       onChange={e => setWhatsappVisible(e.target.checked)}
-                      className="rounded border-[var(--card-border)] text-[var(--gold)] focus:ring-[var(--gold)]"
+                      className="rounded border-[var(--card-border)] text-[var(--gold-text)] focus:ring-[var(--gold)]"
                     />
                     <span>Visible to other signed-in members for one-tap WhatsApp connect</span>
                   </label>

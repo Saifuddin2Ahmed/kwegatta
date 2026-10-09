@@ -22,7 +22,7 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({ onBack }) => {
 
       {/* Header */}
       <div className="space-y-3 border-b border-[var(--card-border)] pb-6">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[var(--gold-subtle)] text-[var(--gold)] text-xs font-semibold">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[var(--gold-subtle)] text-[var(--gold-text)] text-xs font-semibold">
           <Shield className="w-3.5 h-3.5" />
           <span>Privacy Policy &amp; Data Handling</span>
         </div>
@@ -36,7 +36,7 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({ onBack }) => {
 
       {/* Section 1: Core Contact & Privacy Philosophy */}
       <section className="kw-card p-6 sm:p-8 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl space-y-4">
-        <div className="flex items-center gap-2.5 text-[var(--gold)]">
+        <div className="flex items-center gap-2.5 text-[var(--gold-text)]">
           <Eye className="w-5 h-5 flex-shrink-0" />
           <h2 className="text-lg font-bold text-[var(--fg)]">1. Core Contact &amp; Privacy Philosophy</h2>
         </div>
@@ -68,7 +68,7 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({ onBack }) => {
 
       {/* Section 2: What Data We Collect */}
       <section className="kw-card p-6 sm:p-8 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl space-y-4">
-        <div className="flex items-center gap-2.5 text-[var(--teal)]">
+        <div className="flex items-center gap-2.5 text-[var(--teal-text)]">
           <Lock className="w-5 h-5 flex-shrink-0" />
           <h2 className="text-lg font-bold text-[var(--fg)]">2. What Data We Collect</h2>
         </div>
@@ -99,7 +99,7 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({ onBack }) => {
 
       {/* Section 3: User Data Sovereignty */}
       <section className="kw-card p-6 sm:p-8 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl space-y-4">
-        <div className="flex items-center gap-2.5 text-[var(--gold)]">
+        <div className="flex items-center gap-2.5 text-[var(--gold-text)]">
           <Download className="w-5 h-5 flex-shrink-0" />
           <h2 className="text-lg font-bold text-[var(--fg)]">3. User Data Sovereignty: Export &amp; Deletion</h2>
         </div>
@@ -109,7 +109,7 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({ onBack }) => {
           </p>
           <div className="space-y-3">
             <div className="flex items-start gap-3 p-3.5 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)]">
-              <Download className="w-4 h-4 text-[var(--gold)] mt-0.5 flex-shrink-0" />
+              <Download className="w-4 h-4 text-[var(--gold-text)] mt-0.5 flex-shrink-0" />
               <div>
                 <strong className="text-[var(--fg)]">Export My Data (JSON):</strong>
                 <p className="text-xs text-[var(--fg-muted)] mt-0.5">
@@ -135,10 +135,10 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({ onBack }) => {
         <h2 className="text-lg font-bold text-[var(--fg)]">4. Where Data is Stored &amp; Model Boundary</h2>
         <div className="space-y-2.5 text-xs sm:text-sm text-[var(--fg-muted)] leading-relaxed">
           <p>
-            * <strong>Database:</strong> Google Cloud Firestore (project <code className="text-[var(--gold)]">kwegatta</code>). Native mode with persistent session storage.
+            * <strong>Database:</strong> Google Cloud Firestore (project <code className="text-[var(--gold-text)]">kwegatta</code>). Native mode with persistent session storage.
           </p>
           <p>
-            * <strong>AI Model Boundary:</strong> Profile synthesis and matchmaking run on the open-weight models <code className="text-[var(--gold)]">gemma-4-26b-a4b-it</code> (default) and <code className="text-[var(--gold)]">gemma-4-31b-it</code> (alternative). Prompts are processed strictly ephemerally and are never retained to train foundation models.
+            * <strong>AI Model Boundary:</strong> Profile synthesis and matchmaking run on the open-weight models <code className="text-[var(--gold-text)]">gemma-4-26b-a4b-it</code> (default) and <code className="text-[var(--gold-text)]">gemma-4-31b-it</code> (alternative). Prompts are processed strictly ephemerally and are never retained to train foundation models.
           </p>
           <p>
             * <strong>No Ad Trackers:</strong> Zero advertising SDKs, zero third-party telemetry, and zero tracking cookies.

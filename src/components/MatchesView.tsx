@@ -210,7 +210,7 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
               {errorMessage || 'Gemma is currently busy'}. Results are calculated based on complementary skills.
             </p>
             <p className="text-[13px] text-[var(--fg-muted)]">
-              What to do next: Click <button onClick={() => loadMatches(true)} className="underline text-[var(--gold)] font-medium inline">Refresh</button> to re-run AI inference, or explore members in the People tab.
+              What to do next: Click <button onClick={() => loadMatches(true)} className="underline text-[var(--gold-text)] font-medium inline">Refresh</button> to re-run AI inference, or explore members in the People tab.
             </p>
           </div>
         </div>
@@ -224,7 +224,7 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
               Recommended Collaborators
             </h2>
             {isRefining && (
-              <span className="text-[13px] text-[var(--gold)] flex items-center gap-1.5 font-medium bg-[var(--gold-subtle)] px-2.5 py-0.5 rounded-full border border-[var(--gold)]/20 animate-pulse">
+              <span className="text-[13px] text-[var(--gold-text)] flex items-center gap-1.5 font-medium bg-[var(--gold-subtle)] px-2.5 py-0.5 rounded-full border border-[var(--gold)]/20 animate-pulse">
                 <Sparkles className="w-3 h-3 animate-spin" />
                 <span>Refining with Gemma 4...</span>
               </span>
@@ -250,7 +250,7 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
         <div className="space-y-6 py-4">
           <div className="flex items-center justify-between text-xs text-[var(--fg-muted)] animate-pulse">
             <span className="flex items-center gap-2">
-              <Sparkles className="w-3.5 h-3.5 text-[var(--gold)] animate-spin" />
+              <Sparkles className="w-3.5 h-3.5 text-[var(--gold-text)] animate-spin" />
               Evaluating complementary profiles with Gemma 4...
             </span>
           </div>
@@ -277,7 +277,7 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
         </div>
       ) : matches.length === 0 ? (
         <div className="py-8 px-6 border border-dashed border-[var(--card-border)] rounded-2xl space-y-6 bg-[var(--card)]/40 text-center">
-          <div className="w-12 h-12 rounded-full bg-[var(--gold-subtle)] text-[var(--gold)] grid place-items-center mx-auto">
+          <div className="w-12 h-12 rounded-full bg-[var(--gold-subtle)] text-[var(--gold-text)] grid place-items-center mx-auto">
             <Users className="w-6 h-6" />
           </div>
 
@@ -290,7 +290,7 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
 
           {/* What happens next box */}
           <div className="max-w-lg mx-auto p-4 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] text-left space-y-2.5">
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--gold)]">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--gold-text)]">
               <Compass className="w-4 h-4" />
               <span>What happens next:</span>
             </div>
@@ -398,21 +398,21 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
                       <div className="flex items-center gap-2 flex-wrap">
                         <button
                           onClick={() => onViewProfile(profile.id)}
-                          className="font-semibold text-sm sm:text-base text-[var(--fg)] hover:text-[var(--gold)] transition-colors text-left"
+                          className="font-semibold text-sm sm:text-base text-[var(--fg)] hover:text-[var(--gold-text)] transition-colors text-left"
                         >
                           {profile.name}
                         </button>
-                        <span className="text-xs text-[var(--teal)] font-medium">
+                        <span className="text-xs text-[var(--teal-text)] font-medium">
                           {profile.role}
                         </span>
                         {/* Requirement 3: Labelled Quick match or AI match */}
                         {m.matchType === 'quick' ? (
                           <span className="kw-badge text-[13px] bg-[var(--bg-subtle)] text-[var(--fg-muted)] border border-[var(--card-border)] flex items-center gap-1 font-medium transition-all">
-                            <Zap className="w-2.5 h-2.5 text-[var(--gold)]" />
+                            <Zap className="w-2.5 h-2.5 text-[var(--gold-text)]" />
                             <span>Quick match</span>
                           </span>
                         ) : (
-                          <span className="kw-badge text-[13px] bg-[var(--gold-subtle)] text-[var(--gold)] border border-[var(--gold)]/30 flex items-center gap-1 font-semibold transition-all animate-in fade-in">
+                          <span className="kw-badge text-[13px] bg-[var(--gold-subtle)] text-[var(--gold-text)] border border-[var(--gold)]/30 flex items-center gap-1 font-semibold transition-all animate-in fade-in">
                             <Sparkles className="w-2.5 h-2.5" />
                             <span>AI match</span>
                           </span>
@@ -461,7 +461,7 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
                 {/* Build Opportunity */}
                 {m.spark && (
                   <div className="ml-1 sm:ml-14 p-3 rounded-lg bg-[var(--bg-subtle)] border border-[var(--card-border)] flex items-start gap-2.5 text-xs">
-                    <Lightbulb className="w-4 h-4 text-[var(--gold)] flex-shrink-0 mt-0.5" />
+                    <Lightbulb className="w-4 h-4 text-[var(--gold-text)] flex-shrink-0 mt-0.5" />
                     <div>
                       <span className="font-semibold text-[var(--fg)]">Opportunity: </span>
                       <span className="text-[var(--fg-muted)]">{m.spark}</span>

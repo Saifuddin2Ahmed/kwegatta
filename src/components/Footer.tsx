@@ -117,17 +117,17 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
           </button>
         </div>
 
-        {/* Bottom line: © 2026 Kwegatta · Powered by open-weight Gemma 4 */}
-        <div className="pt-1 text-[13px] text-[var(--fg-subtle)]">
+        {/* Bottom lines: Two centred lines, one under the other with 4px gap */}
+        <div className="pt-1 text-[13px] text-[var(--fg-subtle)] flex flex-col items-center gap-1">
+          <p>© 2026 Kwegatta</p>
           <p>
-            © 2026 Kwegatta ·{' '}
             <a
               href="https://ai.google.dev/gemma/docs/core"
               target="_blank"
               rel="noopener noreferrer"
               className="text-[var(--fg-muted)] hover:text-[var(--fg)] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--gold)] rounded"
             >
-              Powered by open-weight Gemma 4
+              Powered by Gemma 4
             </a>
           </p>
         </div>

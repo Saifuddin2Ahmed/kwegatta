@@ -6,6 +6,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.2] - 2026-10-09
+
+### Changed
+- **Part 1: Live Wall Feed Data Minimization (`GET /api/wall/feed`)**:
+  - Expose per match item strictly `{ id, first_name_a, first_name_b, spark }` with opaque random identifiers.
+  - Suppressed member ids, avatar URLs, scores, and match reasons.
+  - Projector wall displays initials in coloured circles instead of photos.
+  - Filtered out any item with empty spark, length < 20 chars, trailing dangling punctuation/commas, broken punctuation `, .`, or cut-off fragments.
+  - Deduplicated pairs across feed cycles.
+- **Part 2: Signed-Out 401 Noise Elimination**:
+  - Guarded client data fetching for `/api/data/matches`, `/api/data/follows`, and `/api/data/notifications` to only execute once a member is authenticated and their ID token is ready.
+- **Part 3: Light-Theme Contrast Hardening**:
+  - Replaced raw `#F5B700` and `#12B5A6` text classes with `--gold-text` and `--teal-text` across all views (About page, landing stat tiles, desktop onboarding, mobile active navigation, Matches, Learn, Feed, Inbox, Profile, Admin, and modals).
+  - Maintained bright accents on dark-only surfaces (such as the live wall).
+- **Part 4: Footer Bottom Lines**:
+  - Updated `Footer.tsx` bottom section to two centered lines separated by a 4px gap (`Line 1: © 2026 Kwegatta`, `Line 2: Powered by Gemma 4` linking to Google Gemma docs without "open-weight" here).
+- **Part 5: Notifications Modal Popup & Mark as Read**:
+  - Clicking any notification in the Inbox opens a centered accessible modal (`role="dialog"`, `aria-modal="true"`, bottom sheet on mobile) displaying sender info, full body text, and relative time.
+  - Contextual action buttons: WhatsApp direct link (with consent/number guard), Follow back, and View profile.
+  - Trap keyboard focus while open and restore focus to trigger row upon close (Escape key or click outside).
+  - Automatically marks notification as read via `PATCH /api/notifications/:id/read` (with user ownership validation) and updates unread badge counter.
+- **Part 6: Event Cover Image Support**:
+  - Added optional cover image upload to event suggestion and admin create/edit forms.
+  - Client-side pre-upload resizing to max 1200px width with JPEG/WebP compression (~80% quality) and 400 KB limit validation.
+  - Previews with "Replace" and "Remove" controls before submission.
+  - Server-side byte inspection validating JPEG, PNG, and WebP, rejecting SVG and remote URLs.
+  - Served via `GET /api/event-image/:id` with `Cache-Control` and `ETag` headers; hidden until admin approval.
+  - Fixed 16:9 aspect ratio display with `object-fit: cover` on event cards and detail view; no empty box for events without an image.
+  - Event deletion automatically purges associated cover image.
+- **Part 7: Service Worker & Quality Assurance**:
+  - Upgraded service worker cache name to `kwegatta-1.3.2`.
+  - Added security and regression tests verifying upload auth guards, file size/type rejection, and unapproved event visibility controls.
+
+---
+
 ## [1.3.1] - 2026-10-09
 
 ### Changed

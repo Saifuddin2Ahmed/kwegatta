@@ -164,4 +164,68 @@ export function applyThemeToDocument(resolved: ResolvedTheme): void {
   }
 }
 
+export async function processEventCoverImage(file: File): Promise<string> {
+  const validTypes = ['image/jpeg', 'image/png', 'image/webp'];
+  if (!validTypes.includes(file.type)) {
+    throw new Error('Please upload a JPEG, PNG, or WebP image only.');
+  }
+
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      let width = img.naturalWidth || img.width;
+      let height = img.naturalHeight || img.height;
+
+      const maxDim = 1200;
+      if (width > maxDim) {
+        height = Math.round((height * maxDim) / width);
+        width = maxDim;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Failed to initialize 2D canvas.'));
+        return;
+      }
+
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Re-encode as JPEG or WebP at ~80% quality
+      const encodeFormat = file.type === 'image/webp' ? 'image/webp' : 'image/jpeg';
+      let dataUrl = canvas.toDataURL(encodeFormat, 0.8);
+
+      // Calculate approximate size in bytes from base64 string
+      const base64Index = dataUrl.indexOf(',');
+      const base64Str = base64Index !== -1 ? dataUrl.slice(base64Index + 1) : dataUrl;
+      const sizeInBytes = Math.round((base64Str.length * 3) / 4);
+
+      if (sizeInBytes > 400 * 1024) {
+        // Try lower quality once if slightly over
+        dataUrl = canvas.toDataURL('image/jpeg', 0.65);
+        const lowerBase64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+        const lowerSize = Math.round((lowerBase64.length * 3) / 4);
+        if (lowerSize > 400 * 1024) {
+          reject(new Error('Cover image is too large (exceeds 400 KB limit after compression). Please choose a smaller photo.'));
+          return;
+        }
+      }
+
+      resolve(dataUrl);
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Failed to load image file.'));
+    };
+
+    img.src = objectUrl;
+  });
+}
+
 

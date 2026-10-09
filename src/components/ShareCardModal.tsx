@@ -267,7 +267,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({
       <div className="kw-card max-w-2xl w-full p-5 sm:p-6 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-2xl space-y-4">
         <div className="flex items-center justify-between border-b border-[var(--card-border)]/60 pb-3">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-[var(--gold)]" />
+            <Sparkles className="w-5 h-5 text-[var(--gold-text)]" />
             <h3 className="text-base sm:text-lg font-bold font-display text-[var(--fg)]">
               Share Profile Card
             </h3>
@@ -284,7 +284,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({
         <div className="relative rounded-xl overflow-hidden border border-[var(--card-border)] bg-black aspect-[1200/630] shadow-inner">
           <canvas ref={canvasRef} className="w-full h-full object-contain" />
           {isGenerating && (
-            <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-xs text-[var(--gold)] font-semibold gap-2">
+            <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-xs text-[var(--gold-text)] font-semibold gap-2">
               <span className="w-4 h-4 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin" />
               <span>Generating high-res card (1200 × 630)...</span>
             </div>

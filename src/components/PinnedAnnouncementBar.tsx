@@ -44,8 +44,8 @@ export const PinnedAnnouncementBar: React.FC = () => {
     >
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0 flex-1">
-          <Megaphone className="w-3.5 h-3.5 text-[var(--gold)] flex-shrink-0 animate-pulse" />
-          <span className="font-semibold text-[var(--gold)] text-[13px] uppercase tracking-wider flex-shrink-0">
+          <Megaphone className="w-3.5 h-3.5 text-[var(--gold-text)] flex-shrink-0 animate-pulse" />
+          <span className="font-semibold text-[var(--gold-text)] text-[13px] uppercase tracking-wider flex-shrink-0">
             Notice
           </span>
           <span className="truncate font-medium text-xs">
@@ -56,7 +56,7 @@ export const PinnedAnnouncementBar: React.FC = () => {
               href={announcement.link}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-[var(--gold)] hover:underline font-semibold flex-shrink-0 text-xs ml-1"
+              className="inline-flex items-center gap-1 text-[var(--gold-text)] hover:underline font-semibold flex-shrink-0 text-xs ml-1"
             >
               <span>Learn more</span>
               <ExternalLink className="w-3 h-3" />

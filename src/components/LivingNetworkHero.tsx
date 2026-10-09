@@ -258,9 +258,9 @@ export const HeroSection: React.FC<HeroProps> = ({
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <Zap className="w-3.5 h-3.5 text-[var(--gold)]" />
+            <Zap className="w-3.5 h-3.5 text-[var(--gold-text)]" />
             <span>
-              <strong className="text-[var(--gold)] font-bold">{matchesCount}</strong> matches made
+              <strong className="text-[var(--gold-text)] font-bold">{matchesCount}</strong> matches made
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -355,14 +355,14 @@ export const KampalaStorySection: React.FC<KampalaStoryProps> = () => {
         </div>
 
         <div className="p-5 sm:p-6 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] space-y-1">
-          <div className="text-2xl sm:text-3xl font-extrabold text-[var(--gold)] font-display tracking-tight">
+          <div className="text-2xl sm:text-3xl font-extrabold text-[var(--gold-text)] font-display tracking-tight">
             7 people
           </div>
           <p className="text-xs text-[var(--fg-muted)]">Collaborating team</p>
         </div>
 
         <div className="p-5 sm:p-6 rounded-2xl bg-[var(--card)] border border-[var(--card-border)] space-y-1">
-          <div className="text-2xl sm:text-3xl font-extrabold text-[var(--teal)] font-display tracking-tight">
+          <div className="text-2xl sm:text-3xl font-extrabold text-[var(--teal-text)] font-display tracking-tight">
             Gemma 4
           </div>
           <p className="text-xs text-[var(--fg-muted)]">Open-weight AI model</p>
@@ -408,7 +408,7 @@ export const KampalaStorySection: React.FC<KampalaStoryProps> = () => {
                         className="w-10 h-10 rounded-full object-cover flex-shrink-0 border border-[var(--card-border)]"
                       />
                     ) : (
-                      <div className="w-10 h-10 rounded-full bg-[var(--gold-subtle)] text-[var(--gold)] font-bold text-xs grid place-items-center flex-shrink-0">
+                      <div className="w-10 h-10 rounded-full bg-[var(--gold-subtle)] text-[var(--gold-text)] font-bold text-xs grid place-items-center flex-shrink-0">
                         {getInitials(member.name)}
                       </div>
                     )}
@@ -416,7 +416,7 @@ export const KampalaStorySection: React.FC<KampalaStoryProps> = () => {
                       {member.linked_profile_id ? (
                         <a
                           href={`/#/u/${member.linked_profile_id}`}
-                          className="text-sm font-bold text-[var(--fg)] hover:text-[var(--gold)] hover:underline truncate block"
+                          className="text-sm font-bold text-[var(--fg)] hover:text-[var(--gold-text)] hover:underline truncate block"
                           title={`View ${member.name}'s profile`}
                         >
                           {member.name}
@@ -452,7 +452,7 @@ export const KampalaStorySection: React.FC<KampalaStoryProps> = () => {
                         href={`https://github.com/${member.github}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-[var(--fg-muted)] hover:text-[var(--gold)] inline-flex items-center gap-1.5 transition-colors"
+                        className="text-[var(--fg-muted)] hover:text-[var(--gold-text)] inline-flex items-center gap-1.5 transition-colors"
                       >
                         <Github className="w-3.5 h-3.5" />
                         <span>@{member.github}</span>
@@ -464,7 +464,7 @@ export const KampalaStorySection: React.FC<KampalaStoryProps> = () => {
                         href={member.linkedin.startsWith('http') ? member.linkedin : `https://linkedin.com/in/${member.linkedin}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-[var(--fg-muted)] hover:text-[var(--gold)] inline-flex items-center gap-1.5 transition-colors"
+                        className="text-[var(--fg-muted)] hover:text-[var(--gold-text)] inline-flex items-center gap-1.5 transition-colors"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
                         <span>LinkedIn</span>
@@ -472,7 +472,7 @@ export const KampalaStorySection: React.FC<KampalaStoryProps> = () => {
                     ) : member.linked_profile_id ? (
                       <a
                         href={`/#/u/${member.linked_profile_id}`}
-                        className="text-[var(--gold)] hover:underline inline-flex items-center gap-1 font-medium text-xs"
+                        className="text-[var(--gold-text)] hover:underline inline-flex items-center gap-1 font-medium text-xs"
                       >
                         <span>Profile</span>
                         <ExternalLink className="w-3 h-3" />

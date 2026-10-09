@@ -116,7 +116,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
             <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-1 transition-transform" />
             <span>Back to Matches</span>
           </button>
-          <span className="text-xs font-medium text-[var(--gold)] tracking-wide uppercase">
+          <span className="text-xs font-medium text-[var(--gold-text)] tracking-wide uppercase">
             Open-Source AI Matchmaking
           </span>
         </div>
@@ -200,17 +200,17 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
                 </div>
               </div>
               <div className="space-y-1.5 text-xs">
-                <div className="text-[var(--teal)] font-medium">Offers: System Architecture &amp; UI</div>
-                <div className="text-[var(--gold)] font-medium">Needs: Backend API &amp; Database</div>
+                <div className="text-[var(--teal-text)] font-medium">Offers: System Architecture &amp; UI</div>
+                <div className="text-[var(--gold-text)] font-medium">Needs: Backend API &amp; Database</div>
               </div>
             </div>
 
             {/* Match Engine Node */}
             <div className="md:col-span-1 flex flex-col items-center justify-center text-center py-2 md:py-0">
-              <div className="w-10 h-10 rounded-full bg-[var(--teal-subtle)] border border-[var(--teal)]/40 text-[var(--teal)] grid place-items-center shadow-xs">
+              <div className="w-10 h-10 rounded-full bg-[var(--teal-subtle)] border border-[var(--teal)]/40 text-[var(--teal-text)] grid place-items-center shadow-xs">
                 <Zap className="w-4 h-4" />
               </div>
-              <span className="text-[13px] font-mono font-semibold text-[var(--teal)] mt-1.5">91% Match</span>
+              <span className="text-[13px] font-mono font-semibold text-[var(--teal-text)] mt-1.5">91% Match</span>
             </div>
 
             {/* Person B */}
@@ -225,8 +225,8 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
                 </div>
               </div>
               <div className="space-y-1.5 text-xs">
-                <div className="text-[var(--teal)] font-medium">Offers: Backend API &amp; Database</div>
-                <div className="text-[var(--gold)] font-medium">Needs: System Architecture &amp; UI</div>
+                <div className="text-[var(--teal-text)] font-medium">Offers: Backend API &amp; Database</div>
+                <div className="text-[var(--gold-text)] font-medium">Needs: System Architecture &amp; UI</div>
               </div>
             </div>
 
@@ -235,12 +235,12 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
           {/* Outcome Result */}
           <div className="p-4 rounded-xl bg-[var(--card)] border border-[var(--card-border)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-2.5">
-              <Sparkles className="w-4 h-4 text-[var(--gold)] flex-shrink-0" />
+              <Sparkles className="w-4 h-4 text-[var(--gold-text)] flex-shrink-0" />
               <span className="text-[var(--fg)]">
                 <strong>Synthesized Collaboration:</strong> Build a high-throughput mobile community portal together.
               </span>
             </div>
-            <span className="text-xs font-semibold text-[var(--gold)] shrink-0">1-Tap WhatsApp Connect</span>
+            <span className="text-xs font-semibold text-[var(--gold-text)] shrink-0">1-Tap WhatsApp Connect</span>
           </div>
         </div>
       </section>
@@ -390,7 +390,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
                         {member.linked_profile_id ? (
                           <a
                             href={`/#/u/${member.linked_profile_id}`}
-                            className="font-semibold text-sm sm:text-base text-[var(--fg)] hover:text-[var(--gold)] hover:underline block"
+                            className="font-semibold text-sm sm:text-base text-[var(--fg)] hover:text-[var(--gold-text)] hover:underline block"
                             title={`View ${member.name}'s profile`}
                           >
                             {member.name}
@@ -400,7 +400,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
                             {member.name}
                           </h4>
                         )}
-                        <p className="text-xs text-[var(--teal)] font-medium">{title}</p>
+                        <p className="text-xs text-[var(--teal-text)] font-medium">{title}</p>
                       </div>
                     </div>
 
@@ -421,7 +421,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
                           href={member.linkedin.startsWith('http') ? member.linkedin : `https://linkedin.com/in/${member.linkedin}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-[var(--fg-subtle)] hover:text-[var(--gold)] p-1 transition-colors"
+                          className="text-[var(--fg-subtle)] hover:text-[var(--gold-text)] p-1 transition-colors"
                           aria-label={`${member.name} on LinkedIn`}
                         >
                           <ExternalLink className="w-4 h-4" />
@@ -507,7 +507,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
               </div>
 
               <div className="flex items-start gap-3">
-                <Lock className="w-5 h-5 text-[var(--gold)] flex-shrink-0 mt-0.5" />
+                <Lock className="w-5 h-5 text-[var(--gold-text)] flex-shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <h4 className="font-semibold text-sm text-[var(--fg)]">Fact-Based Open-Source AI Only</h4>
                   <p className="text-xs text-[var(--fg-muted)]">
@@ -517,7 +517,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
               </div>
 
               <div className="flex items-start gap-3">
-                <CheckCircle2 className="w-5 h-5 text-[var(--teal)] flex-shrink-0 mt-0.5" />
+                <CheckCircle2 className="w-5 h-5 text-[var(--teal-text)] flex-shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <h4 className="font-semibold text-sm text-[var(--fg)]">Full Export &amp; Erasure Rights</h4>
                   <p className="text-xs text-[var(--fg-muted)]">

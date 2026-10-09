@@ -109,7 +109,7 @@ export const EventPhotosModal: React.FC<EventPhotosModalProps> = ({
         {/* Header */}
         <div className="flex items-start justify-between gap-4 border-b border-[var(--card-border)] pb-4">
           <div>
-            <div className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--gold)] mb-1">
+            <div className="inline-flex items-center gap-2 text-xs font-semibold text-[var(--gold-text)] mb-1">
               <Camera className="w-3.5 h-3.5" />
               <span>Admin Photo Manager</span>
             </div>
@@ -171,7 +171,7 @@ export const EventPhotosModal: React.FC<EventPhotosModalProps> = ({
                   </>
                 ) : (
                   <>
-                    <Upload className="w-3.5 h-3.5 text-[var(--gold)]" />
+                    <Upload className="w-3.5 h-3.5 text-[var(--gold-text)]" />
                     <span>Upload New</span>
                   </>
                 )}

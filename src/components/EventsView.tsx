@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Calendar,
   MapPin,
@@ -20,10 +20,92 @@ import {
   Flag,
   X,
   Award,
-  AlertCircle
+  AlertCircle,
+  Camera
 } from 'lucide-react';
 import { EventOpportunityItem, OpportunityType, Profile } from '../types';
 import { Avatar } from './Avatar';
+import { processEventCoverImage } from '../utils';
+
+interface CoverImageUploaderProps {
+  value: string;
+  onChange: (val: string) => void;
+  title?: string;
+}
+
+export const CoverImageUploader: React.FC<CoverImageUploaderProps> = ({ value, onChange, title }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string>('');
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError('');
+    try {
+      const dataUrl = await processEventCoverImage(file);
+      onChange(dataUrl);
+    } catch (err: any) {
+      setError(err.message || 'Failed to process cover image.');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  return (
+    <div>
+      <label className="font-semibold text-[var(--fg)] block mb-1">Cover image (optional)</label>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        onChange={handleFileChange}
+        className="hidden"
+      />
+      {value ? (
+        <div className="space-y-2">
+          <div className="relative aspect-[16/9] w-full max-w-sm rounded-xl overflow-hidden bg-black/10 border border-[var(--card-border)] group">
+            <img
+              src={value}
+              alt={title || 'Cover image preview'}
+              className="w-full h-full object-cover"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="kw-btn text-xs py-1.5 px-3 rounded-lg border border-[var(--card-border)] hover:border-[var(--gold)] cursor-pointer"
+            >
+              Replace
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange('')}
+              className="kw-btn kw-btn-danger text-xs py-1.5 px-3 rounded-lg cursor-pointer"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="kw-input text-xs py-2 px-3 text-left flex items-center justify-between text-[var(--fg-muted)] hover:border-[var(--gold)] cursor-pointer w-full"
+        >
+          <span className="flex items-center gap-2">
+            <Camera className="w-4 h-4 text-[var(--fg-subtle)]" />
+            <span>Upload photo (JPEG, PNG, WebP)</span>
+          </span>
+          <span className="text-[13px] text-[var(--fg-subtle)]">Max 400 KB · 1200px</span>
+        </button>
+      )}
+      {error && (
+        <p className="text-xs text-[var(--danger)] mt-1.5">{error}</p>
+      )}
+    </div>
+  );
+};
 import {
   fetchEvents,
   fetchEventById,
@@ -457,7 +539,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
               setSelectedItemId(null);
               window.location.hash = '#/events';
             }}
-            className="flex items-center gap-2 text-xs font-semibold text-[var(--fg-muted)] hover:text-[var(--gold)] transition-colors py-2 px-3 rounded-lg hover:bg-[var(--card)]"
+            className="flex items-center gap-2 text-xs font-semibold text-[var(--fg-muted)] hover:text-[var(--gold-text)] transition-colors py-2 px-3 rounded-lg hover:bg-[var(--card)]"
           >
             <ArrowLeft className="w-4 h-4" />
             Back to all Events & Opportunities
@@ -466,7 +548,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
             onClick={() => handleShare(detailedItem)}
             className="flex items-center gap-2 text-xs font-medium kw-btn py-1.5 px-3 rounded-lg border border-[var(--card-border)] bg-[var(--card)] hover:border-[var(--gold)]"
           >
-            <Share2 className="w-3.5 h-3.5 text-[var(--gold)]" />
+            <Share2 className="w-3.5 h-3.5 text-[var(--gold-text)]" />
             Share
           </button>
         </div>
@@ -474,7 +556,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
         {/* Hero Card */}
         <div className="kw-card p-6 sm:p-8 space-y-6">
           {detailedItem.cover_image && (
-            <div className="w-full h-48 sm:h-64 rounded-xl overflow-hidden bg-black/10">
+            <div className="w-full aspect-[16/9] rounded-xl overflow-hidden bg-black/10">
               <img
                 src={detailedItem.cover_image}
                 alt={detailedItem.title}
@@ -488,7 +570,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
               <span
                 className={`px-2.5 py-1 rounded-full text-[13px] font-bold tracking-wide uppercase ${
                   isEvent
-                    ? 'bg-amber-500/15 text-[var(--gold)] border border-amber-500/30'
+                    ? 'bg-amber-500/15 text-[var(--gold-text)] border border-amber-500/30'
                     : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                 }`}
               >
@@ -496,7 +578,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
               </span>
               {detailedItem.datetime && (
                 <span className="flex items-center gap-1.5 text-xs text-[var(--fg-muted)]">
-                  <Calendar className="w-3.5 h-3.5 text-[var(--gold)]" />
+                  <Calendar className="w-3.5 h-3.5 text-[var(--gold-text)]" />
                   {detailedItem.datetime}
                 </span>
               )}
@@ -508,7 +590,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
               )}
               {detailedItem.location && (
                 <span className="flex items-center gap-1.5 text-xs text-[var(--fg-muted)]">
-                  <MapPin className="w-3.5 h-3.5 text-[var(--gold)]" />
+                  <MapPin className="w-3.5 h-3.5 text-[var(--gold-text)]" />
                   {detailedItem.location}
                 </span>
               )}
@@ -535,7 +617,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 <button
                   type="button"
                   onClick={() => detailedItem.author_id && onViewProfile(detailedItem.author_id)}
-                  className="font-bold text-[var(--gold)] hover:underline flex items-center gap-1.5"
+                  className="font-bold text-[var(--gold-text)] hover:underline flex items-center gap-1.5"
                 >
                   {detailedItem.author_name}
                   {detailedItem.author_is_organiser && (
@@ -589,7 +671,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   rel="noopener noreferrer"
                   className="kw-btn py-2.5 px-4 text-xs font-semibold rounded-lg border border-[var(--card-border)] bg-[var(--card)] hover:border-[var(--gold)] flex items-center gap-2"
                 >
-                  <ExternalLink className="w-3.5 h-3.5 text-[var(--gold)]" />
+                  <ExternalLink className="w-3.5 h-3.5 text-[var(--gold-text)]" />
                   Register here
                 </a>
               )}
@@ -614,7 +696,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     className="kw-btn py-2 px-3 text-xs font-medium rounded-lg flex items-center gap-1.5 border border-[var(--card-border)] hover:border-[var(--gold)]"
                     title="Edit your item"
                   >
-                    <Edit className="w-3.5 h-3.5 text-[var(--gold)]" />
+                    <Edit className="w-3.5 h-3.5 text-[var(--gold-text)]" />
                     <span>Edit</span>
                   </button>
                   <button
@@ -653,7 +735,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
         {currentProfile && (
           <div className="kw-card p-6 space-y-4">
             <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-[var(--gold)]" />
+              <Sparkles className="w-4 h-4 text-[var(--gold-text)]" />
               <h2 className="text-sm font-bold text-[var(--fg)]">
                 People you should meet there
               </h2>
@@ -683,7 +765,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                           <h4 className="text-xs font-bold text-[var(--fg)] truncate">
                             {m.profile.name}
                           </h4>
-                          <span className="text-[13px] font-bold text-[var(--gold)] bg-amber-500/10 px-1.5 py-0.5 rounded">
+                          <span className="text-[13px] font-bold text-[var(--gold-text)] bg-amber-500/10 px-1.5 py-0.5 rounded">
                             {m.score}% Match
                           </span>
                         </div>
@@ -692,7 +774,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                         </p>
                       </div>
                     </div>
-                    <p className="text-[13px] text-[var(--gold)] bg-amber-500/5 p-2 rounded border border-amber-500/20 italic">
+                    <p className="text-[13px] text-[var(--gold-text)] bg-amber-500/5 p-2 rounded border border-amber-500/20 italic">
                       "{m.reason}"
                     </p>
                   </div>
@@ -706,7 +788,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
         <div className="kw-card p-6 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Users className="w-4 h-4 text-[var(--gold)]" />
+              <Users className="w-4 h-4 text-[var(--gold-text)]" />
               <h2 className="text-sm font-bold text-[var(--fg)]">
                 {isEvent ? "Who's going" : "Who's interested"} ({attendees.length})
               </h2>
@@ -815,7 +897,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
         </div>
       ) : upcomingItems.length === 0 && pastItems.length === 0 ? (
         <div className="kw-card p-12 text-center space-y-4">
-          <Calendar className="w-8 h-8 text-[var(--gold)] mx-auto opacity-70" />
+          <Calendar className="w-8 h-8 text-[var(--gold-text)] mx-auto opacity-70" />
           <h3 className="text-base font-bold text-[var(--fg)]">No events scheduled</h3>
           <p className="text-[13px] text-[var(--fg-muted)] max-w-sm mx-auto">
             Check back soon for upcoming Kampala developer events, training sessions, and grants.
@@ -852,7 +934,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                         <span
                           className={`px-2 py-0.5 rounded text-[13px] font-bold uppercase tracking-wider ${
                             isEvent
-                              ? 'bg-amber-500/15 text-[var(--gold)] border border-amber-500/30'
+                              ? 'bg-amber-500/15 text-[var(--gold-text)] border border-amber-500/30'
                               : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                           }`}
                         >
@@ -860,7 +942,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                         </span>
                         {item.datetime && (
                           <span className="flex items-center gap-1 text-[13px] text-[var(--fg-muted)]">
-                            <Calendar className="w-3 h-3 text-[var(--gold)]" />
+                            <Calendar className="w-3 h-3 text-[var(--gold-text)]" />
                             {item.datetime}
                           </span>
                         )}
@@ -882,7 +964,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                         )}
                       </div>
 
-                      <h3 className="text-base font-bold text-[var(--fg)] group-hover:text-[var(--gold)] transition-colors">
+                      <h3 className="text-base font-bold text-[var(--fg)] group-hover:text-[var(--gold-text)] transition-colors">
                         {item.title}
                       </h3>
 
@@ -894,7 +976,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                               e.stopPropagation();
                               if (item.author_id) onViewProfile(item.author_id);
                             }}
-                            className="text-[var(--gold)] font-semibold hover:underline inline-flex items-center gap-1 cursor-pointer"
+                            className="text-[var(--gold-text)] font-semibold hover:underline inline-flex items-center gap-1 cursor-pointer"
                           >
                             {item.author_name}
                             {item.author_is_organiser && (
@@ -909,7 +991,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
                       {item.location && (
                         <p className="flex items-center gap-1 text-xs text-[var(--fg-muted)]">
-                          <MapPin className="w-3 h-3 text-[var(--gold)] flex-shrink-0" />
+                          <MapPin className="w-3 h-3 text-[var(--gold-text)] flex-shrink-0" />
                           <span className="truncate">{item.location}</span>
                         </p>
                       )}
@@ -920,7 +1002,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     </div>
 
                     {item.cover_image && (
-                      <div className="w-full sm:w-28 sm:h-24 rounded-lg overflow-hidden bg-black/10 flex-shrink-0">
+                      <div className="w-full sm:w-44 aspect-[16/9] rounded-lg overflow-hidden bg-black/10 flex-shrink-0">
                         <img
                           src={item.cover_image}
                           alt={item.title}
@@ -932,7 +1014,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
                   <div className="pt-3 border-t border-[var(--card-border)] flex items-center justify-between gap-2 text-xs">
                     <div className="flex items-center gap-2 text-[var(--fg-muted)] text-[13px]">
-                      <Users className="w-3.5 h-3.5 text-[var(--gold)]" />
+                      <Users className="w-3.5 h-3.5 text-[var(--gold-text)]" />
                       <span>{item.attendee_ids.length} {isEvent ? 'going' : 'interested'}</span>
                     </div>
 
@@ -1049,7 +1131,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       </h4>
                       <div className="flex items-center justify-between text-[13px] text-[var(--fg-muted)]">
                         <span>{item.attendee_ids.length} attended</span>
-                        <span className="text-[var(--gold)] hover:underline">View details →</span>
+                        <span className="text-[var(--gold-text)] hover:underline">View details →</span>
                       </div>
                     </div>
                   ))}
@@ -1149,17 +1231,6 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   </div>
 
                   <div>
-                    <label className="font-semibold text-[var(--fg)] block mb-1">Cover Image URL (optional)</label>
-                    <input
-                      type="url"
-                      value={suggestCoverImage}
-                      onChange={e => setSuggestCoverImage(e.target.value)}
-                      placeholder="https://..."
-                      className="kw-input text-xs"
-                    />
-                  </div>
-
-                  <div>
                     <label className="font-semibold text-[var(--fg)] block mb-1">Registration Link (optional, must be https://)</label>
                     <input
                       type="url"
@@ -1169,6 +1240,12 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       className="kw-input text-xs"
                     />
                   </div>
+
+                  <CoverImageUploader
+                    value={suggestCoverImage}
+                    onChange={setSuggestCoverImage}
+                    title={suggestTitle}
+                  />
                 </>
               ) : (
                 <>
@@ -1210,6 +1287,12 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       className="kw-input text-xs"
                     />
                   </div>
+
+                  <CoverImageUploader
+                    value={suggestCoverImage}
+                    onChange={setSuggestCoverImage}
+                    title={suggestTitle}
+                  />
                 </>
               )}
 
@@ -1311,16 +1394,6 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   </div>
 
                   <div>
-                    <label className="font-semibold text-[var(--fg)] block mb-1">Cover Image URL (optional)</label>
-                    <input
-                      type="url"
-                      value={suggestCoverImage}
-                      onChange={e => setSuggestCoverImage(e.target.value)}
-                      className="kw-input text-xs"
-                    />
-                  </div>
-
-                  <div>
                     <label className="font-semibold text-[var(--fg)] block mb-1">Registration Link (optional, must be https://)</label>
                     <input
                       type="url"
@@ -1329,6 +1402,12 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       className="kw-input text-xs"
                     />
                   </div>
+
+                  <CoverImageUploader
+                    value={suggestCoverImage}
+                    onChange={setSuggestCoverImage}
+                    title={suggestTitle}
+                  />
                 </>
               ) : (
                 <>
@@ -1368,6 +1447,12 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       className="kw-input text-xs"
                     />
                   </div>
+
+                  <CoverImageUploader
+                    value={suggestCoverImage}
+                    onChange={setSuggestCoverImage}
+                    title={suggestTitle}
+                  />
                 </>
               )}
 

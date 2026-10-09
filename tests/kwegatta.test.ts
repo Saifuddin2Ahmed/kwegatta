@@ -235,14 +235,14 @@ describe('Member-Submitted Events & Approval Permissions', () => {
   });
 });
 
-describe('Service Worker & Cache-Control Configuration (PWA v1.3.1)', () => {
-  it('public/sw.js specifies CACHE_NAME as kwegatta-1.3.1 and handles cache strategies correctly', async () => {
+describe('Service Worker & Cache-Control Configuration (PWA v1.3.2)', () => {
+  it('public/sw.js specifies CACHE_NAME as kwegatta-1.3.2 and handles cache strategies correctly', async () => {
     const fs = await import('fs');
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.3.1
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.3.1'");
+    // 1. Cache name includes version kwegatta-1.3.2
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.3.2'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -387,9 +387,91 @@ describe('Privacy and Access Isolation (v1.3.1)', () => {
     const data = await res.json();
     expect(Array.isArray(data.matches)).toBe(true);
     for (const m of data.matches) {
+      expect(m.id).toBeDefined();
+      expect(m.first_name_a).toBeDefined();
+      expect(m.first_name_b).toBeDefined();
+      expect(m.spark).toBeDefined();
+      expect(m.a_id).toBeUndefined();
+      expect(m.b_id).toBeUndefined();
+      expect(m.avatar).toBeUndefined();
+      expect(m.score).toBeUndefined();
+      expect(m.reason).toBeUndefined();
       expect(m.email).toBeUndefined();
       expect(m.account_uid).toBeUndefined();
     }
+  });
+
+  it('anonymous upload on /api/event-image/upload returns 401', async () => {
+    const res = await fetch(`${baseUrl}/api/event-image/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+      })
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('an oversized or wrong-type file is rejected on /api/event-image/upload', async () => {
+    // 1. Wrong type (SVG payload)
+    const resSvg = await fetch(`${baseUrl}/api/event-image/upload`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-user-a'
+      },
+      body: JSON.stringify({ image: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=' })
+    });
+    expect(resSvg.status).toBe(400);
+
+    // 2. Oversized file (> 400 KB)
+    const largeBuffer = Buffer.alloc(450 * 1024, 0);
+    largeBuffer[0] = 0x89; largeBuffer[1] = 0x50; largeBuffer[2] = 0x4e; largeBuffer[3] = 0x47;
+    largeBuffer[4] = 0x0d; largeBuffer[5] = 0x0a; largeBuffer[6] = 0x1a; largeBuffer[7] = 0x0a;
+    const resLarge = await fetch(`${baseUrl}/api/event-image/upload`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-user-a'
+      },
+      body: JSON.stringify({ image: `data:image/png;base64,${largeBuffer.toString('base64')}` })
+    });
+    expect(resLarge.status).toBe(400);
+  });
+
+  it("an unapproved event's image is not served to the public", async () => {
+    const validPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+    // Submit an event as a regular user (not admin/organiser) -> status is 'pending', published is false
+    const postRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-user-unapproved-author'
+      },
+      body: JSON.stringify({
+        kind: 'event',
+        title: 'Unapproved Test Community Hack',
+        description: 'Testing cover image access control before approval.',
+        datetime: 'Sat, Nov 14 • 2:00 PM EAT',
+        location: 'Kampala',
+        cover_image: validPng
+      })
+    });
+    expect(postRes.status).toBe(200);
+    const eventData = await postRes.json();
+    const eventId = eventData.item.id;
+    expect(eventData.item.status).toBe('pending');
+
+    // Public / anonymous request to /api/event-image/:id returns 404
+    const publicRes = await fetch(`${baseUrl}/api/event-image/${eventId}`);
+    expect(publicRes.status).toBe(404);
+
+    // Unrelated non-admin member request also returns 404
+    const memberRes = await fetch(`${baseUrl}/api/event-image/${eventId}`, {
+      headers: { Authorization: 'Bearer test-user-random-viewer' }
+    });
+    expect(memberRes.status).toBe(404);
   });
 });
 

@@ -49,7 +49,7 @@ export const NavTabs: React.FC<NavTabsProps> = ({ activeTab, onTabChange }) => {
 
               <Icon
                 className={`w-4 h-4 transition-transform ${
-                  isActive ? 'text-[var(--gold)] scale-110' : 'text-[var(--fg-muted)]'
+                  isActive ? 'text-[var(--gold-text)] scale-110' : 'text-[var(--fg-muted)]'
                 }`}
                 aria-hidden="true"
               />

@@ -820,6 +820,40 @@ function loadStore(): StoreData {
         if (Array.isArray(parsed.posts)) {
           parsed.posts = parsed.posts.filter((p: any) => p && p.body && String(p.body).trim().length > 0 && p.author_id !== 'anonymous');
         }
+        if (!parsed.profiles || !Array.isArray(parsed.profiles) || parsed.profiles.length === 0) {
+          parsed.profiles = [...INITIAL_DEMO_MEMBERS];
+        }
+        if (!parsed.matches || !Array.isArray(parsed.matches) || parsed.matches.length === 0) {
+          parsed.matches = [
+            {
+              id: 'match-amina-brian',
+              a_id: 'demo-amina',
+              b_id: 'demo-brian',
+              score: 94,
+              reason: 'Amina needs a mobile developer for a savings group app, which Brian specializes in with Flutter and Firebase.',
+              spark: 'Kampala Student Thrift: mobile savings and lending circle app with automated ledger sync.',
+              created_at: new Date(Date.now() - 3600000 * 14).toISOString()
+            },
+            {
+              id: 'match-grace-joseph',
+              a_id: 'demo-grace',
+              b_id: 'demo-joseph',
+              score: 92,
+              reason: 'Grace offers complete UI/UX Figma systems that Joseph can immediately implement in React and Tailwind.',
+              spark: 'Campus Boda: on-demand campus parcel courier booking web app.',
+              created_at: new Date(Date.now() - 3600000 * 8).toISOString()
+            },
+            {
+              id: 'match-daniel-esther',
+              a_id: 'demo-daniel',
+              b_id: 'demo-esther',
+              score: 95,
+              reason: 'Daniel provides data science and predictive market scrapers; Esther provides cooperative relationships and ground logistics.',
+              spark: 'Gulu Grain Price Predictor: USSD & web grain price advisory for rural cooperatives.',
+              created_at: new Date(Date.now() - 3600000 * 4).toISOString()
+            }
+          ];
+        }
         return parsed;
       }
     }
@@ -3316,6 +3350,245 @@ app.get('/api/avatar/:id', (req: Request, res: Response) => {
   return res.status(404).send('Avatar not found');
 });
 
+// Event Cover Image Validation
+function validateAndSanitizeEventCoverImage(val: any): string {
+  if (!val || typeof val !== 'string') {
+    throw new Error('No image data provided');
+  }
+  const trimmed = val.trim();
+  if (!trimmed) {
+    throw new Error('No image data provided');
+  }
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    throw new Error('Remote image URLs are not permitted. Please upload an image file.');
+  }
+  let buffer: Buffer | null = null;
+  const match = trimmed.match(/^data:([^;]+);base64,(.+)$/);
+  if (match) {
+    const rawMime = match[1].toLowerCase();
+    if (rawMime.includes('svg')) {
+      throw new Error('SVG images are not permitted. Only JPEG, PNG, and WebP are allowed.');
+    }
+    buffer = Buffer.from(match[2], 'base64');
+  } else {
+    buffer = Buffer.from(trimmed, 'base64');
+  }
+
+  if (!buffer || buffer.length === 0) {
+    throw new Error('Invalid image data');
+  }
+
+  if (buffer.length > 400 * 1024) {
+    throw new Error('File size exceeds 400 KB limit.');
+  }
+
+  const textSnippet = buffer.slice(0, 100).toString('utf8').toLowerCase();
+  if (textSnippet.includes('<svg') || textSnippet.includes('<?xml') || textSnippet.includes('xmlns=')) {
+    throw new Error('SVG images are not permitted. Only JPEG, PNG, and WebP are allowed.');
+  }
+
+  let detectedMime: string | null = null;
+  if (buffer.length >= 3 && buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+    detectedMime = 'image/jpeg';
+  } else if (buffer.length >= 8 &&
+    buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47 &&
+    buffer[4] === 0x0D && buffer[5] === 0x0A && buffer[6] === 0x1A && buffer[7] === 0x0A) {
+    detectedMime = 'image/png';
+  } else if (buffer.length >= 12 &&
+    buffer.toString('ascii', 0, 4) === 'RIFF' &&
+    buffer.toString('ascii', 8, 12) === 'WEBP') {
+    detectedMime = 'image/webp';
+  }
+
+  if (!detectedMime) {
+    throw new Error('Invalid file type. Only JPEG, PNG, and WebP images are allowed.');
+  }
+
+  return `data:${detectedMime};base64,${buffer.toString('base64')}`;
+}
+
+// Event Cover Image Upload Route
+function handleEventImageUpload(req: Request, res: Response) {
+  const callerId = resolveAuthUserId(req);
+  if (!callerId) {
+    return res.status(401).json({ error: 'Please sign in to upload an event cover image.' });
+  }
+
+  let rawData = req.body?.image || req.body?.dataUrl || req.body?.cover_image || req.body?.file;
+  if (Buffer.isBuffer(req.body) && req.body.length > 0) {
+    rawData = req.body;
+  }
+
+  let buffer: Buffer | null = null;
+  if (Buffer.isBuffer(rawData)) {
+    buffer = rawData;
+  } else if (typeof rawData === 'string') {
+    if (rawData.startsWith('http://') || rawData.startsWith('https://')) {
+      return res.status(400).json({ error: 'Remote image URLs are not permitted. Please upload an image file.' });
+    }
+    const match = rawData.match(/^data:([^;]+);base64,(.+)$/);
+    if (match) {
+      if (match[1].toLowerCase().includes('svg')) {
+        return res.status(400).json({ error: 'SVG images are not permitted. Only JPEG, PNG, and WebP are allowed.' });
+      }
+      buffer = Buffer.from(match[2], 'base64');
+    } else {
+      buffer = Buffer.from(rawData, 'base64');
+    }
+  }
+
+  if (!buffer || buffer.length === 0) {
+    return res.status(400).json({ error: 'No image data provided.' });
+  }
+
+  if (buffer.length > 400 * 1024) {
+    return res.status(400).json({ error: 'File size exceeds 400 KB limit.' });
+  }
+
+  const textSnippet = buffer.slice(0, 100).toString('utf8').toLowerCase();
+  if (textSnippet.includes('<svg') || textSnippet.includes('<?xml') || textSnippet.includes('xmlns=')) {
+    return res.status(400).json({ error: 'SVG images are not permitted. Only JPEG, PNG, and WebP are allowed.' });
+  }
+
+  let detectedMime: string | null = null;
+  if (buffer.length >= 3 && buffer[0] === 0xFF && buffer[1] === 0xD8 && buffer[2] === 0xFF) {
+    detectedMime = 'image/jpeg';
+  } else if (buffer.length >= 8 &&
+    buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47 &&
+    buffer[4] === 0x0D && buffer[5] === 0x0A && buffer[6] === 0x1A && buffer[7] === 0x0A) {
+    detectedMime = 'image/png';
+  } else if (buffer.length >= 12 &&
+    buffer.toString('ascii', 0, 4) === 'RIFF' &&
+    buffer.toString('ascii', 8, 12) === 'WEBP') {
+    detectedMime = 'image/webp';
+  }
+
+  if (!detectedMime) {
+    return res.status(400).json({ error: 'Invalid file type. Only JPEG, PNG, and WebP images are allowed.' });
+  }
+
+  const dataUrl = `data:${detectedMime};base64,${buffer.toString('base64')}`;
+
+  const eventId = req.body?.event_id || req.query.event_id;
+  if (eventId) {
+    const item = (store.events || []).find((e: any) => e.id === eventId);
+    if (item) {
+      item.cover_image = dataUrl;
+    }
+  }
+
+  return res.json({
+    success: true,
+    dataUrl,
+    mime: detectedMime,
+    size: buffer.length
+  });
+}
+
+app.post('/api/event-image/upload', handleEventImageUpload);
+app.post('/api/event-image', handleEventImageUpload);
+app.post('/api/events/upload-image', handleEventImageUpload);
+
+// Event Cover Image Serving Route (with Cache-Control, ETag, and approval visibility guard)
+app.get('/api/event-image/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item || !item.cover_image) {
+    return res.status(404).send('Event image not found');
+  }
+
+  const callerId = resolveAuthUserId(req);
+  const isAdmin = checkAdmin(req);
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
+  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
+
+  // The image is hidden from the public until an admin approves the event
+  // (trusted organisers keep their existing auto-approve behaviour).
+  if (!isAdmin && !isAuthor && (item.published === false || item.status === 'pending' || item.status === 'rejected')) {
+    return res.status(404).send('Event image not found or unpublished');
+  }
+
+  const cover = String(item.cover_image);
+  if (cover.startsWith('data:')) {
+    const match = cover.match(/^data:([^;]+);base64,(.+)$/);
+    if (match) {
+      const mimeType = match[1];
+      const buffer = Buffer.from(match[2], 'base64');
+      const hash = crypto.createHash('md5').update(buffer).digest('hex');
+      const etag = `"${hash}"`;
+
+      if (req.headers['if-none-match'] === etag) {
+        return res.status(304).end();
+      }
+
+      res.setHeader('Content-Type', mimeType);
+      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+      res.setHeader('ETag', etag);
+      return res.send(buffer);
+    }
+  }
+
+  return res.status(404).send('Event image not found');
+});
+
+// Mark Notification as Read (own notifications only)
+app.patch('/api/notifications/:id/read', async (req: Request, res: Response) => {
+  const authUserId = resolveAuthUserId(req);
+  const isAdmin = checkAdmin(req);
+  if (!authUserId && !isAdmin) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  const { id } = req.params;
+  const notif = (store.notifications || []).find((n: any) => n.id === id);
+  if (!notif) {
+    return res.status(404).json({ error: 'Notification not found' });
+  }
+
+  const myProfile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
+  const myProfileId = myProfile?.id;
+  const isOwner = authUserId === notif.to_id || myProfileId === notif.to_id;
+
+  if (!isOwner && !isAdmin) {
+    return res.status(403).json({ error: 'Forbidden: You can only modify your own notifications' });
+  }
+
+  notif.read = true;
+  await persistDoc('notifications', notif.id, notif);
+  if (storageMode === 'disk') saveStore(store);
+
+  return res.json({ success: true, notification: notif });
+});
+
+app.post('/api/notifications/:id/read', async (req: Request, res: Response) => {
+  const authUserId = resolveAuthUserId(req);
+  const isAdmin = checkAdmin(req);
+  if (!authUserId && !isAdmin) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  const { id } = req.params;
+  const notif = (store.notifications || []).find((n: any) => n.id === id);
+  if (!notif) {
+    return res.status(404).json({ error: 'Notification not found' });
+  }
+
+  const myProfile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
+  const myProfileId = myProfile?.id;
+  const isOwner = authUserId === notif.to_id || myProfileId === notif.to_id;
+
+  if (!isOwner && !isAdmin) {
+    return res.status(403).json({ error: 'Forbidden: You can only modify your own notifications' });
+  }
+
+  notif.read = true;
+  await persistDoc('notifications', notif.id, notif);
+  if (storageMode === 'disk') saveStore(store);
+
+  return res.json({ success: true, notification: notif });
+});
+
 // Polling Delta Sync Endpoint
 app.get('/api/sync', (req: Request, res: Response) => {
   const callerId = resolveAuthUserId(req);
@@ -3628,7 +3901,12 @@ app.get('/api/events', (req: Request, res: Response) => {
     return timeB - timeA; // past most recent first
   });
 
-  return res.json(list);
+  const sanitizedList = list.map((ev: any) => ({
+    ...ev,
+    cover_image: ev.cover_image ? `/api/event-image/${ev.id}` : undefined
+  }));
+
+  return res.json(sanitizedList);
 });
 
 app.get('/api/events/:id', (req: Request, res: Response) => {
@@ -3713,6 +3991,7 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
 
   return res.json({
     ...item,
+    cover_image: item.cover_image ? `/api/event-image/${item.id}` : undefined,
     attendees: attendeeProfiles,
     people_to_meet: peopleToMeet,
     is_attending: isAttending
@@ -3830,7 +4109,7 @@ app.post('/api/events', async (req: Request, res: Response) => {
     description,
     datetime: raw.datetime ? sanitizeText(raw.datetime, 60) : undefined,
     location: raw.location ? sanitizeText(raw.location, 200) : undefined,
-    cover_image: raw.cover_image ? sanitizeAvatar(raw.cover_image) : undefined,
+    cover_image: raw.cover_image ? validateAndSanitizeEventCoverImage(raw.cover_image) : undefined,
     registration_link,
     opportunity_type: raw.opportunity_type ? sanitizeText(raw.opportunity_type, 50) : undefined,
     deadline: raw.deadline ? sanitizeText(raw.deadline, 60) : undefined,
@@ -3935,7 +4214,9 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
   if (raw.description !== undefined) item.description = sanitizeText(raw.description, 2000);
   if (raw.datetime !== undefined) item.datetime = sanitizeText(raw.datetime, 60);
   if (raw.location !== undefined) item.location = sanitizeText(raw.location, 200);
-  if (raw.cover_image !== undefined) item.cover_image = sanitizeAvatar(raw.cover_image);
+  if (raw.cover_image !== undefined) {
+    item.cover_image = raw.cover_image ? validateAndSanitizeEventCoverImage(raw.cover_image) : undefined;
+  }
   if (raw.registration_link !== undefined) item.registration_link = sanitizeHttpsUrl(raw.registration_link);
   if (raw.opportunity_type !== undefined) item.opportunity_type = sanitizeText(raw.opportunity_type, 50);
   if (raw.deadline !== undefined) item.deadline = sanitizeText(raw.deadline, 60);
@@ -4060,7 +4341,9 @@ app.post('/api/admin/events/:id/approve', async (req: Request, res: Response) =>
   if (raw.description !== undefined) item.description = sanitizeText(raw.description, 2000);
   if (raw.datetime !== undefined) item.datetime = sanitizeText(raw.datetime, 60);
   if (raw.location !== undefined) item.location = sanitizeText(raw.location, 200);
-  if (raw.cover_image !== undefined) item.cover_image = sanitizeAvatar(raw.cover_image);
+  if (raw.cover_image !== undefined) {
+    item.cover_image = raw.cover_image ? validateAndSanitizeEventCoverImage(raw.cover_image) : undefined;
+  }
   if (raw.registration_link !== undefined) item.registration_link = sanitizeHttpsUrl(raw.registration_link);
   if (raw.opportunity_type !== undefined) item.opportunity_type = sanitizeText(raw.opportunity_type, 50);
   if (raw.deadline !== undefined) item.deadline = sanitizeText(raw.deadline, 60);
@@ -4584,16 +4867,36 @@ app.get('/sitemap.xml', (_req: Request, res: Response) => {
 
 /* =========================================================================
    PUBLIC LIVE WALL FEED
-   Returns only what the projector wall displays: first names and match spark sentence.
-   Never exposes full profiles, last names, emails, or personal data.
+   Returns only what the projector wall displays:
+   { id: <random opaque id, not the match id>, first_name_a, first_name_b, spark }
+   No member ids, no avatar URLs, no score, no reason, no total that reveals more than a count.
    ========================================================================= */
+function isValidSpark(spark: any): boolean {
+  if (!spark || typeof spark !== 'string') return false;
+  const trimmed = spark.trim();
+  if (trimmed.length < 20) return false;
+  // Skip any item that ends with dangling comma or ", ." or "..."
+  if (trimmed.endsWith(',') || trimmed.endsWith(', .') || trimmed.endsWith(',.') || trimmed.endsWith('...')) return false;
+  if (/,[\s.]*$/.test(trimmed)) return false;
+  // Skip any item containing broken punctuation pattern ", ."
+  if (trimmed.includes(', .') || trimmed.includes(',.')) return false;
+  // Skip cut-off single-letter fragments (e.g., "enthusiastic b with")
+  if (/\b[b-hj-z]\b/i.test(trimmed)) return false;
+  return true;
+}
+
 app.get('/api/wall/feed', (_req: Request, res: Response) => {
   const matches = store.matches || [];
   const profiles = store.profiles || [];
   const seenPairs = new Set<string>();
 
-  const list: any[] = [];
+  const list: Array<{ id: string; first_name_a: string; first_name_b: string; spark: string }> = [];
+  let validCount = 0;
+
   for (const m of matches) {
+    if (!isValidSpark(m.spark)) continue;
+    validCount++;
+
     const pairKey = [m.a_id, m.b_id].sort().join(':');
     if (seenPairs.has(pairKey)) continue;
     seenPairs.add(pairKey);
@@ -4606,22 +4909,17 @@ app.get('/api/wall/feed', (_req: Request, res: Response) => {
     const firstNameB = (b.name || '').trim().split(' ')[0] || 'Member';
 
     list.push({
-      id: m.id,
-      a_id: m.a_id,
-      b_id: m.b_id,
+      id: crypto.randomBytes(8).toString('hex'),
       first_name_a: firstNameA,
       first_name_b: firstNameB,
-      avatar_a: a.avatar && a.avatar.startsWith('data:') ? `/api/avatar/${a.id}` : (a.avatar || null),
-      avatar_b: b.avatar && b.avatar.startsWith('data:') ? `/api/avatar/${b.id}` : (b.avatar || null),
-      score: m.score || 85,
-      spark: m.spark || ''
+      spark: m.spark.trim()
     });
 
     if (list.length >= 25) break;
   }
 
   return res.json({
-    total_matches: matches.length,
+    count: validCount,
     matches: list
   });
 });

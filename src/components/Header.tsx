@@ -170,7 +170,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* CENTER: Search */}
         <div className="hidden md:flex flex-1 max-w-xs lg:max-w-sm mx-2 lg:mx-4 justify-center">
           <div className="relative w-full group">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--fg-subtle)] group-focus-within:text-[var(--gold)] transition-colors pointer-events-none" />
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--fg-subtle)] group-focus-within:text-[var(--gold-text)] transition-colors pointer-events-none" />
             <input
               ref={searchInputRef}
               type="search"
@@ -342,7 +342,7 @@ export const Header: React.FC<HeaderProps> = ({
                 aria-current={isActive ? 'page' : undefined}
                 className={`px-3 py-1 rounded-md font-medium transition-all cursor-pointer ${
                   isActive
-                    ? 'text-[var(--gold)] bg-[var(--gold-subtle)] font-bold underline underline-offset-4'
+                    ? 'text-[var(--gold-text)] bg-[var(--gold-subtle)] font-bold underline underline-offset-4'
                     : 'text-[var(--fg-muted)] hover:text-[var(--fg)]'
                 }`}
               >

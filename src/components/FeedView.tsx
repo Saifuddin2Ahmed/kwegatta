@@ -142,7 +142,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
 
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1 pl-11">
               <span className="text-[13px] text-[var(--fg-subtle)] flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-[var(--gold)]" />
+                <Sparkles className="w-3.5 h-3.5 text-[var(--gold-text)]" />
                 <span>Title &amp; categories synthesized by Gemma 4</span>
               </span>
 
@@ -178,7 +178,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
         </div>
 
         {selectedTag && (
-          <div className="flex items-center gap-1 text-xs text-[var(--gold)]">
+          <div className="flex items-center gap-1 text-xs text-[var(--gold-text)]">
             <span>#{selectedTag}</span>
             <button onClick={() => onSelectTag(null)} aria-label="Clear filter" className="p-0.5 hover:opacity-80">
               <X className="w-3.5 h-3.5" />
@@ -191,7 +191,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
       <div className="divide-y divide-[var(--card-border)]">
         {filteredPosts.length === 0 ? (
           <div className="py-16 text-center space-y-4">
-            <MessageSquare className="w-8 h-8 text-[var(--gold)] mx-auto opacity-70" />
+            <MessageSquare className="w-8 h-8 text-[var(--gold-text)] mx-auto opacity-70" />
             <h3 className="font-semibold text-base text-[var(--fg)]">No posts on the wall yet</h3>
             <p className="text-[13px] text-[var(--fg-muted)] max-w-sm mx-auto">
               Share what you are building or ask the community for skills and collaboration.
@@ -241,7 +241,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                     <div>
                       <button
                         onClick={() => onViewProfile(author.id)}
-                        className="font-semibold text-xs text-[var(--fg)] hover:text-[var(--gold)] transition-colors text-left"
+                        className="font-semibold text-xs text-[var(--fg)] hover:text-[var(--gold-text)] transition-colors text-left"
                       >
                         {author.name}
                       </button>
@@ -251,7 +251,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                     </div>
                   </div>
 
-                  <span className="text-[13px] font-medium text-[var(--gold)] capitalize">
+                  <span className="text-[13px] font-medium text-[var(--gold-text)] capitalize">
                     {post.kind}
                   </span>
                 </div>
@@ -285,13 +285,13 @@ export const FeedView: React.FC<FeedViewProps> = ({
                 {/* Helpers Section: Gemma matching */}
                 {helpers.length > 0 && (
                   <div className="pt-2 text-xs text-[var(--fg-muted)] flex items-center gap-2 flex-wrap bg-[var(--bg-subtle)] p-2.5 rounded-lg">
-                    <Users className="w-3.5 h-3.5 text-[var(--teal)] flex-shrink-0" />
+                    <Users className="w-3.5 h-3.5 text-[var(--teal-text)] flex-shrink-0" />
                     <span className="text-[var(--fg-subtle)]">In room who could help:</span>
                     {helpers.map((helper, idx) => (
                       <React.Fragment key={helper.id}>
                         <button
                           onClick={() => onViewProfile(helper.id)}
-                          className="font-medium text-[var(--fg)] hover:text-[var(--gold)] transition-colors inline-flex items-center gap-1.5"
+                          className="font-medium text-[var(--fg)] hover:text-[var(--gold-text)] transition-colors inline-flex items-center gap-1.5"
                         >
                           <Avatar profile={helper} className="w-4 h-4 inline-block" />
                           <span>{helper.name.split(' ')[0]}</span>

@@ -111,7 +111,7 @@ export const LearnView: React.FC<LearnViewProps> = ({
           {/* Visitor Join Callout */}
           <div className="p-6 rounded-2xl bg-[var(--card)] border border-[var(--gold)]/40 shadow-lg space-y-4">
             <div className="flex items-start gap-4">
-              <div className="w-12 h-12 rounded-xl bg-[var(--gold-subtle)] text-[var(--gold)] grid place-items-center flex-shrink-0 border border-[var(--gold)]/30">
+              <div className="w-12 h-12 rounded-xl bg-[var(--gold-subtle)] text-[var(--gold-text)] grid place-items-center flex-shrink-0 border border-[var(--gold)]/30">
                 <GraduationCap className="w-6 h-6" />
               </div>
               <div className="space-y-1.5 flex-1">
@@ -156,8 +156,8 @@ export const LearnView: React.FC<LearnViewProps> = ({
                       <p className="text-[13px] text-[var(--fg-muted)] truncate">{profile.role || 'Member'}</p>
                     </div>
                   </div>
-                  <div className="text-xs bg-[var(--teal-subtle)] text-[var(--teal)] p-2 rounded-lg font-medium border border-[var(--teal)]/20">
-                    <span className="block text-[13px] uppercase font-bold text-[var(--teal)] opacity-80">Teaches:</span>
+                  <div className="text-xs bg-[var(--teal-subtle)] text-[var(--teal-text)] p-2 rounded-lg font-medium border border-[var(--teal)]/20">
+                    <span className="block text-[13px] uppercase font-bold text-[var(--teal-text)] opacity-80">Teaches:</span>
                     <span className="line-clamp-2">{profile.teaches}</span>
                   </div>
                 </div>
@@ -189,7 +189,7 @@ export const LearnView: React.FC<LearnViewProps> = ({
             <div className="p-6 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col justify-between space-y-4">
               <div className="space-y-4">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-[var(--gold)] font-semibold uppercase tracking-wider text-[13px] flex items-center gap-1.5">
+                  <span className="text-[var(--gold-text)] font-semibold uppercase tracking-wider text-[13px] flex items-center gap-1.5">
                     <GraduationCap className="w-4 h-4" />
                     <span>Recommended Peer Mentor</span>
                   </span>
@@ -209,7 +209,7 @@ export const LearnView: React.FC<LearnViewProps> = ({
                   <div className="min-w-0">
                     <button
                       onClick={() => onViewProfile(learningMatches.mentor!.profile.id)}
-                      className="font-semibold text-base text-[var(--fg)] hover:text-[var(--gold)] transition-colors text-left block truncate"
+                      className="font-semibold text-base text-[var(--fg)] hover:text-[var(--gold-text)] transition-colors text-left block truncate"
                     >
                       {learningMatches.mentor.profile.name}
                     </button>
@@ -263,7 +263,7 @@ export const LearnView: React.FC<LearnViewProps> = ({
             <div className="p-6 rounded-xl border border-[var(--card-border)] bg-[var(--card)] flex flex-col justify-between space-y-4">
               <div className="space-y-4">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-[var(--teal)] font-semibold uppercase tracking-wider text-[13px] flex items-center gap-1.5">
+                  <span className="text-[var(--teal-text)] font-semibold uppercase tracking-wider text-[13px] flex items-center gap-1.5">
                     <Users2 className="w-4 h-4" />
                     <span>Study Partner</span>
                   </span>
@@ -283,7 +283,7 @@ export const LearnView: React.FC<LearnViewProps> = ({
                   <div className="min-w-0">
                     <button
                       onClick={() => onViewProfile(learningMatches.studyPartner!.profile.id)}
-                      className="font-semibold text-base text-[var(--fg)] hover:text-[var(--gold)] transition-colors text-left block truncate"
+                      className="font-semibold text-base text-[var(--fg)] hover:text-[var(--gold-text)] transition-colors text-left block truncate"
                     >
                       {learningMatches.studyPartner.profile.name}
                     </button>
