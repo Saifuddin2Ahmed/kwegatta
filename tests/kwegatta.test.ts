@@ -11,6 +11,11 @@ import {
   canApproveEvent,
   canEditEvent,
   filterEventsForCaller,
+  sanitizeEventForPublic,
+  getStorageMode,
+  assertStorageModeForTest,
+  cleanupTestEvents,
+  CLEANUP_TEST_EVENTS_FLAG,
   canChangeTeam,
   sanitizeDomainUrl,
   sanitizeCustomLinks,
@@ -235,14 +240,14 @@ describe('Member-Submitted Events & Approval Permissions', () => {
   });
 });
 
-describe('Service Worker & Cache-Control Configuration (PWA v1.3.2)', () => {
-  it('public/sw.js specifies CACHE_NAME as kwegatta-1.3.2 and handles cache strategies correctly', async () => {
+describe('Service Worker & Cache-Control Configuration (PWA v1.3.3)', () => {
+  it('public/sw.js specifies CACHE_NAME as kwegatta-1.3.3 and handles cache strategies correctly', async () => {
     const fs = await import('fs');
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.3.2
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.3.2'");
+    // 1. Cache name includes version kwegatta-1.3.3
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.3.3'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -337,6 +342,7 @@ describe('Privacy and Access Isolation (v1.3.1)', () => {
 
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
+    process.stdout.write(`\n[Test Suite] Active storageMode: ${getStorageMode()}\n`);
     await new Promise<void>((resolve) => {
       server = app.listen(0, () => {
         const port = (server.address() as any).port;
@@ -348,6 +354,19 @@ describe('Privacy and Access Isolation (v1.3.1)', () => {
 
   afterAll(() => {
     if (server) server.close();
+  });
+
+  it('runs against isolated in-memory store only and throws if test resolves storageMode to firestore', () => {
+    expect(getStorageMode()).toBe('memory');
+    expect(() => assertStorageModeForTest('firestore')).toThrow(
+      'FATAL GUARD VIOLATION: Test run cannot resolve storageMode to "firestore". Tests must run against isolated in-memory store only.'
+    );
+  });
+
+  it('cleans up test events from in-memory store and respects migration flag', async () => {
+    const count = await cleanupTestEvents();
+    expect(typeof count).toBe('number');
+    expect(CLEANUP_TEST_EVENTS_FLAG).toBe('cleanup_test_events_unapproved_author_v1');
   });
 
   it('anonymous GET on /api/data/notifications, /api/data/matches, and /api/data/follows returns 401', async () => {
@@ -472,6 +491,146 @@ describe('Privacy and Access Isolation (v1.3.1)', () => {
       headers: { Authorization: 'Bearer test-user-random-viewer' }
     });
     expect(memberRes.status).toBe(404);
+  });
+
+  it('unapproved events are not public on generic /api/data/events and raw data URLs are never returned', async () => {
+    const validPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+    // 1. Submit a pending event as a regular user
+    const postRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-author-pending-part2'
+      },
+      body: JSON.stringify({
+        kind: 'event',
+        title: 'Hidden Pending Hackathon Part 2',
+        description: 'Should not be seen by anonymous users on /api/data/events',
+        datetime: 'Sat, Nov 21 • 3:00 PM EAT',
+        location: 'Kampala',
+        cover_image: validPng
+      })
+    });
+    expect(postRes.status).toBe(200);
+    const postData = await postRes.json();
+    const eventId = postData.item.id;
+    expect(postData.item.status).toBe('pending');
+
+    // 2. Anonymous caller GET /api/data/events
+    const anonRes = await fetch(`${baseUrl}/api/data/events`);
+    expect(anonRes.status).toBe(200);
+    const anonEvents = await anonRes.json();
+    expect(Array.isArray(anonEvents)).toBe(true);
+
+    // Pending event must NOT be visible to anonymous caller
+    expect(anonEvents.some((e: any) => e.id === eventId)).toBe(false);
+
+    // No event on /api/data/events should ever contain a raw data URL
+    for (const ev of anonEvents) {
+      if (ev.cover_image) {
+        expect(ev.cover_image).not.toContain('data:image');
+        expect(ev.cover_image.startsWith('/api/event-image/')).toBe(true);
+      }
+    }
+
+    // 3. Author caller GET /api/data/events can see their own pending event
+    const authorRes = await fetch(`${baseUrl}/api/data/events`, {
+      headers: { Authorization: 'Bearer test-author-pending-part2' }
+    });
+    expect(authorRes.status).toBe(200);
+    const authorEvents = await authorRes.json();
+    expect(authorEvents.some((e: any) => e.id === eventId)).toBe(true);
+    const myPending = authorEvents.find((e: any) => e.id === eventId);
+    expect(myPending.cover_image).toBe(`/api/event-image/${eventId}`);
+  });
+
+  it("member B cannot change member A's event image (403)", async () => {
+    const validPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+    // Member A creates an event
+    const createRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-member-a'
+      },
+      body: JSON.stringify({
+        kind: 'event',
+        title: "Member A's Original Showcase",
+        description: 'Event created by Member A for testing image ownership.',
+        datetime: 'Sun, Dec 1 • 10:00 AM EAT',
+        location: 'Makerere',
+        cover_image: validPng
+      })
+    });
+    expect(createRes.status).toBe(200);
+    const createData = await createRes.json();
+    const eventId = createData.item.id;
+
+    // Member B tries to upload / replace Member A's event image
+    const patchRes = await fetch(`${baseUrl}/api/event-image/upload`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-member-b'
+      },
+      body: JSON.stringify({
+        event_id: eventId,
+        image: validPng
+      })
+    });
+    expect(patchRes.status).toBe(403);
+    const patchData = await patchRes.json();
+    expect(patchData.error).toContain('Forbidden');
+  });
+
+  it("the author can change their event image", async () => {
+    const validPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+    // Member A creates an event
+    const createRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-member-a-author'
+      },
+      body: JSON.stringify({
+        kind: 'event',
+        title: "Member A Author Showcase",
+        description: 'Testing author updating their own event image.',
+        datetime: 'Sun, Dec 8 • 10:00 AM EAT',
+        location: 'Makerere',
+        cover_image: validPng
+      })
+    });
+    expect(createRes.status).toBe(200);
+    const createData = await createRes.json();
+    const eventId = createData.item.id;
+
+    // Author (Member A) updates their event image
+    const updateRes = await fetch(`${baseUrl}/api/event-image/upload`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-member-a-author'
+      },
+      body: JSON.stringify({
+        event_id: eventId,
+        image: validPng
+      })
+    });
+    expect(updateRes.status).toBe(200);
+    const updateData = await updateRes.json();
+    expect(updateData.success).toBe(true);
+
+    // Verify detail endpoint reflects updated image path
+    const detailRes = await fetch(`${baseUrl}/api/events/${eventId}`, {
+      headers: { Authorization: 'Bearer test-member-a-author' }
+    });
+    expect(detailRes.status).toBe(200);
+    const detailData = await detailRes.json();
+    expect(detailData.cover_image).toBe(`/api/event-image/${eventId}`);
   });
 });
 

@@ -6,6 +6,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.3] - 2026-10-09
+
+### Security & Privacy Hardening
+- **Part 1: Test Isolation & Production Data Protection**:
+  - The test suite is strictly restricted to an isolated in-memory store only (`storageMode: 'memory'`).
+  - Added an assertion guard (`assertStorageModeForTest`) that throws immediately if a test run ever attempts to resolve `storageMode` to `"firestore"`.
+  - Firestore is never initialized, snapshot listeners are never started, and `persistDoc` cannot call Firestore when `NODE_ENV === 'test'` or `VITEST` is set.
+  - Implemented one-time cleanup function (`cleanupTestEvents`) guarded by migration flag `cleanup_test_events_unapproved_author_v1` that permanently removes test events with `author_id === "test-user-unapproved-author"` from Firestore, disk, and in-memory store while deleting nothing else.
+- **Part 2: Generic Data Route Event Visibility & Cover Image Sanitization**:
+  - Aligned generic route `GET /api/data/events` with `GET /api/events` visibility rules: anonymous callers can only see approved and published events; authors can also see their own pending submissions; platform admins see all submissions.
+  - Ensured raw `cover_image` data URLs are never returned from any list or detail route, serving only the sanitized `/api/event-image/:id` URL path.
+  - Enforced ownership verification for `PATCH` and `DELETE` on `/api/data/events/:id`.
+- **Part 3: Event Cover Image Access Control & Approval Workflow**:
+  - In `handleEventImageUpload`: when `event_id` is supplied, callers who are neither the event's author nor a platform admin are rejected with `403 Forbidden` and no changes are made.
+  - Successfully persisted cover image updates using `persistDoc`.
+  - When an approved/published event receives a new image from a non-admin, non-organiser author, the event status is automatically set back to `pending` and `published: false` for re-review.
+  - Added comprehensive test coverage confirming member B cannot alter member A's event image (403) and the author can update their event image.
+- **PWA Service Worker**:
+  - Upgraded service worker cache name to `kwegatta-1.3.3`.
+
+---
+
 ## [1.3.2] - 2026-10-09
 
 ### Changed

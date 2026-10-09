@@ -420,7 +420,25 @@ const INITIAL_DEMO_MEMBERS = [
 const FIREBASE_PROJECT_ID = 'kwegatta';
 let firestoreDb: Firestore | null = null;
 let adminAuth: AdminAuth | null = null;
-let storageMode: 'firestore' | 'disk' = 'disk';
+
+export type StorageMode = 'firestore' | 'disk' | 'memory';
+
+export function isTestEnv(): boolean {
+  return process.env.NODE_ENV === 'test' || Boolean(process.env.VITEST);
+}
+
+export function assertStorageModeForTest(mode: StorageMode): void {
+  if (isTestEnv() && mode === 'firestore') {
+    throw new Error('FATAL GUARD VIOLATION: Test run cannot resolve storageMode to "firestore". Tests must run against isolated in-memory store only.');
+  }
+}
+
+export let storageMode: StorageMode = isTestEnv() ? 'memory' : 'disk';
+
+export function getStorageMode(): StorageMode {
+  return storageMode;
+}
+
 const firestoreUnsubscribers: Array<() => void> = [];
 
 const DATA_FILE = path.join(__dirname, '.kwegatta_store.json');
@@ -790,7 +808,131 @@ const aiMetrics = {
 // Demo mode setting (default: false in production, true only when DEMO_MODE=true)
 const isDemoMode = process.env.DEMO_MODE === 'true';
 
+function createInitialStore(demo: boolean = isDemoMode): StoreData {
+  return {
+    profiles: demo ? [...INITIAL_DEMO_MEMBERS] : [],
+    follows: [],
+    matches: demo ? [
+      {
+        id: 'match-amina-brian',
+        a_id: 'demo-amina',
+        b_id: 'demo-brian',
+        score: 94,
+        reason: 'Amina needs a mobile developer for a savings group app, which Brian specializes in with Flutter and Firebase.',
+        spark: 'Kampala Student Thrift: mobile savings and lending circle app with automated ledger sync.',
+        created_at: new Date(Date.now() - 3600000 * 14).toISOString()
+      },
+      {
+        id: 'match-grace-joseph',
+        a_id: 'demo-grace',
+        b_id: 'demo-joseph',
+        score: 92,
+        reason: 'Grace offers complete UI/UX Figma systems that Joseph can immediately implement in React and Tailwind.',
+        spark: 'Campus Boda: on-demand campus parcel courier booking web app.',
+        created_at: new Date(Date.now() - 3600000 * 8).toISOString()
+      },
+      {
+        id: 'match-daniel-esther',
+        a_id: 'demo-daniel',
+        b_id: 'demo-esther',
+        score: 95,
+        reason: 'Daniel provides data science and predictive market scrapers; Esther provides cooperative relationships and ground logistics.',
+        spark: 'Gulu Grain Price Predictor: USSD & web grain price advisory for rural cooperatives.',
+        created_at: new Date(Date.now() - 3600000 * 4).toISOString()
+      }
+    ] : [],
+    notifications: [],
+    posts: demo ? [
+      {
+        id: 'post-1',
+        author_id: 'demo-amina',
+        title: 'Need a Flutter builder for Hack Day project',
+        body: 'We are validating a group savings tool for campus trade associations. Already interviewed 15 students today at MUBS. Looking for a builder to join our pitch team before 4 PM!',
+        kind: 'need',
+        tags: ['fintech', 'flutter', 'hackday', 'mubs'],
+        created_at: new Date(Date.now() - 3600000 * 2).toISOString()
+      },
+      {
+        id: 'post-2',
+        author_id: 'demo-peter',
+        title: 'Offering ESP32 sensors & hardware kit',
+        body: 'I brought 4 ESP32 boards, temperature and soil moisture sensors to the hackathon. If your team has an agritech or climate idea, let me build the hardware layer for you!',
+        kind: 'offer',
+        tags: ['iot', 'hardware', 'agritech'],
+        created_at: new Date(Date.now() - 3600000 * 1.5).toISOString()
+      },
+      {
+        id: 'post-3',
+        author_id: 'demo-grace',
+        title: 'Primer UI tokens ready for hackathon web apps',
+        body: 'Just finished open-sourcing a clean GitHub-style design kit in Figma with dark & light modes. Free for all teams here today!',
+        kind: 'idea',
+        tags: ['design', 'ui-ux', 'figma'],
+        created_at: new Date(Date.now() - 3600000 * 0.8).toISOString()
+      }
+    ] : [],
+    reports: [],
+    events: demo ? [
+      {
+        id: 'event-hackday-showcase',
+        kind: 'event',
+        title: 'Hack Day Kampala 2026 Showcase & Demo Day',
+        description: 'Live product demonstrations, founder matchmaking, and networking with student builders and tech teams across Makerere, MUBS, and Kyambogo.',
+        datetime: new Date(Date.now() + 86400000 * 5).toISOString(),
+        location: 'Makerere Innovation Pod, Kampala',
+        cover_image: '',
+        registration_link: 'https://kwegatta.ai.studio/#/events',
+        created_at: new Date(Date.now() - 3600000 * 24).toISOString(),
+        published: true,
+        attendee_ids: ['demo-amina', 'demo-brian', 'demo-joseph']
+      },
+      {
+        id: 'opp-uganda-ai-grant',
+        kind: 'opportunity',
+        title: 'Uganda Open-Weight AI Grant (Cohort 2)',
+        description: 'Up to $5,000 equity-free seed funding and compute credits for builder teams applying open-weight models to local agriculture, education, and fintech in Uganda.',
+        opportunity_type: 'Grant',
+        deadline: new Date(Date.now() + 86400000 * 18).toISOString(),
+        link: 'https://kwegatta.ai.studio',
+        created_at: new Date(Date.now() - 3600000 * 12).toISOString(),
+        published: true,
+        attendee_ids: ['demo-grace', 'demo-peter']
+      },
+      {
+        id: 'opp-climate-hackathon',
+        kind: 'opportunity',
+        title: 'Kampala Clean Energy & Solar Sprint',
+        description: '48-hour hardware and IoT sprint focused on solar energy monitoring, clean cooking tech, and urban sustainability.',
+        opportunity_type: 'Hackathon',
+        deadline: new Date(Date.now() + 86400000 * 10).toISOString(),
+        link: 'https://kwegatta.ai.studio',
+        created_at: new Date(Date.now() - 3600000 * 6).toISOString(),
+        published: true,
+        attendee_ids: ['demo-peter', 'demo-amina']
+      }
+    ] : [],
+    pinned_announcement: null,
+    admin_emails: [],
+    team: [...INITIAL_TEAM_MEMBERS],
+    audit_log: [
+      {
+        id: 'audit-init',
+        timestamp: new Date().toISOString(),
+        action: 'SYSTEM_BOOT',
+        details: demo ? 'Kwegatta system loaded in Demo Mode with sample cohort.' : 'Kwegatta system loaded in clean production state.',
+        admin: 'system'
+      }
+    ],
+    migrations: {}
+  };
+}
+
 function loadStore(): StoreData {
+  if (isTestEnv()) {
+    storageMode = 'memory';
+    return createInitialStore(true);
+  }
+
   try {
     if (fs.existsSync(DATA_FILE)) {
       const parsed = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
@@ -800,6 +942,9 @@ function loadStore(): StoreData {
         }
         if (!parsed.events || !Array.isArray(parsed.events)) {
           parsed.events = [];
+        } else {
+          // One-time sanitization: purge any leftover test events with test author
+          parsed.events = parsed.events.filter((e: any) => e.author_id !== 'test-user-unapproved-author');
         }
         if (!parsed.admin_emails || !Array.isArray(parsed.admin_emails)) {
           parsed.admin_emails = [];
@@ -861,128 +1006,15 @@ function loadStore(): StoreData {
     console.error('Failed to read persistent store, initializing fresh store:', err);
   }
 
-  const initial: StoreData = {
-    profiles: isDemoMode ? [...INITIAL_DEMO_MEMBERS] : [],
-    follows: [],
-    matches: isDemoMode ? [
-      {
-        id: 'match-amina-brian',
-        a_id: 'demo-amina',
-        b_id: 'demo-brian',
-        score: 94,
-        reason: 'Amina needs a mobile developer for a savings group app, which Brian specializes in with Flutter and Firebase.',
-        spark: 'Kampala Student Thrift: mobile savings and lending circle app with automated ledger sync.',
-        created_at: new Date(Date.now() - 3600000 * 14).toISOString()
-      },
-      {
-        id: 'match-grace-joseph',
-        a_id: 'demo-grace',
-        b_id: 'demo-joseph',
-        score: 92,
-        reason: 'Grace offers complete UI/UX Figma systems that Joseph can immediately implement in React and Tailwind.',
-        spark: 'Campus Boda: on-demand campus parcel courier booking web app.',
-        created_at: new Date(Date.now() - 3600000 * 8).toISOString()
-      },
-      {
-        id: 'match-daniel-esther',
-        a_id: 'demo-daniel',
-        b_id: 'demo-esther',
-        score: 95,
-        reason: 'Daniel provides data science and predictive market scrapers; Esther provides cooperative relationships and ground logistics.',
-        spark: 'Gulu Grain Price Predictor: USSD & web grain price advisory for rural cooperatives.',
-        created_at: new Date(Date.now() - 3600000 * 4).toISOString()
-      }
-    ] : [],
-    notifications: [],
-    posts: isDemoMode ? [
-      {
-        id: 'post-1',
-        author_id: 'demo-amina',
-        title: 'Need a Flutter builder for Hack Day project',
-        body: 'We are validating a group savings tool for campus trade associations. Already interviewed 15 students today at MUBS. Looking for a builder to join our pitch team before 4 PM!',
-        kind: 'need',
-        tags: ['fintech', 'flutter', 'hackday', 'mubs'],
-        created_at: new Date(Date.now() - 3600000 * 2).toISOString()
-      },
-      {
-        id: 'post-2',
-        author_id: 'demo-peter',
-        title: 'Offering ESP32 sensors & hardware kit',
-        body: 'I brought 4 ESP32 boards, temperature and soil moisture sensors to the hackathon. If your team has an agritech or climate idea, let me build the hardware layer for you!',
-        kind: 'offer',
-        tags: ['iot', 'hardware', 'agritech'],
-        created_at: new Date(Date.now() - 3600000 * 1.5).toISOString()
-      },
-      {
-        id: 'post-3',
-        author_id: 'demo-grace',
-        title: 'Primer UI tokens ready for hackathon web apps',
-        body: 'Just finished open-sourcing a clean GitHub-style design kit in Figma with dark & light modes. Free for all teams here today!',
-        kind: 'idea',
-        tags: ['design', 'ui-ux', 'figma'],
-        created_at: new Date(Date.now() - 3600000 * 0.8).toISOString()
-      }
-    ] : [],
-    reports: [],
-    events: isDemoMode ? [
-      {
-        id: 'event-hackday-showcase',
-        kind: 'event',
-        title: 'Hack Day Kampala 2026 Showcase & Demo Day',
-        description: 'Live product demonstrations, founder matchmaking, and networking with student builders and tech teams across Makerere, MUBS, and Kyambogo.',
-        datetime: new Date(Date.now() + 86400000 * 5).toISOString(),
-        location: 'Makerere Innovation Pod, Kampala',
-        cover_image: '',
-        registration_link: 'https://kwegatta.ai.studio/#/events',
-        created_at: new Date(Date.now() - 3600000 * 24).toISOString(),
-        published: true,
-        attendee_ids: ['demo-amina', 'demo-brian', 'demo-joseph']
-      },
-      {
-        id: 'opp-uganda-ai-grant',
-        kind: 'opportunity',
-        title: 'Uganda Open-Weight AI Grant (Cohort 2)',
-        description: 'Up to $5,000 equity-free seed funding and compute credits for builder teams applying open-weight models to local agriculture, education, and fintech in Uganda.',
-        opportunity_type: 'Grant',
-        deadline: new Date(Date.now() + 86400000 * 18).toISOString(),
-        link: 'https://kwegatta.ai.studio',
-        created_at: new Date(Date.now() - 3600000 * 12).toISOString(),
-        published: true,
-        attendee_ids: ['demo-grace', 'demo-peter']
-      },
-      {
-        id: 'opp-climate-hackathon',
-        kind: 'opportunity',
-        title: 'Kampala Clean Energy & Solar Sprint',
-        description: '48-hour hardware and IoT sprint focused on solar energy monitoring, clean cooking tech, and urban sustainability.',
-        opportunity_type: 'Hackathon',
-        deadline: new Date(Date.now() + 86400000 * 10).toISOString(),
-        link: 'https://kwegatta.ai.studio',
-        created_at: new Date(Date.now() - 3600000 * 6).toISOString(),
-        published: true,
-        attendee_ids: ['demo-peter', 'demo-amina']
-      }
-    ] : [],
-    pinned_announcement: null,
-    admin_emails: [],
-    team: [...INITIAL_TEAM_MEMBERS],
-    audit_log: [
-      {
-        id: 'audit-init',
-        timestamp: new Date().toISOString(),
-        action: 'SYSTEM_BOOT',
-        details: isDemoMode ? 'Kwegatta system loaded in Demo Mode with sample cohort.' : 'Kwegatta system loaded in clean production state.',
-        admin: 'system'
-      }
-    ],
-    migrations: {}
-  };
-
+  const initial = createInitialStore(isDemoMode);
   saveStore(initial);
   return initial;
 }
 
 function saveStore(storeData: StoreData) {
+  if (isTestEnv() || storageMode === 'memory') {
+    return;
+  }
   try {
     fs.writeFileSync(DATA_FILE, JSON.stringify(storeData, null, 2), 'utf-8');
   } catch (err) {
@@ -999,33 +1031,45 @@ let store: StoreData = loadStore();
    ========================================================================= */
 
 async function persistDoc(collectionName: string, id: string, docData: any): Promise<void> {
+  assertStorageModeForTest(storageMode);
   if (storageMode === 'firestore' && firestoreDb) {
+    if (isTestEnv()) {
+      throw new Error('FATAL GUARD VIOLATION: persistDoc cannot write to Firestore in test environment!');
+    }
     try {
       await firestoreDb.collection(collectionName).doc(id).set(docData);
     } catch (err: any) {
       console.error(`[Firestore] Failed to write document ${id} to ${collectionName}:`, err?.message || err);
       throw err;
     }
-  } else {
+  } else if (storageMode === 'disk') {
     saveStore(store);
   }
 }
 
 async function removeDoc(collectionName: string, id: string): Promise<void> {
+  assertStorageModeForTest(storageMode);
   if (storageMode === 'firestore' && firestoreDb) {
+    if (isTestEnv()) {
+      throw new Error('FATAL GUARD VIOLATION: removeDoc cannot write to Firestore in test environment!');
+    }
     try {
       await firestoreDb.collection(collectionName).doc(id).delete();
     } catch (err: any) {
       console.error(`[Firestore] Failed to delete document ${id} from ${collectionName}:`, err?.message || err);
       throw err;
     }
-  } else {
+  } else if (storageMode === 'disk') {
     saveStore(store);
   }
 }
 
 async function batchPersistDocs(collectionName: string, items: Array<{ id: string; data: any }>): Promise<void> {
+  assertStorageModeForTest(storageMode);
   if (storageMode === 'firestore' && firestoreDb) {
+    if (isTestEnv()) {
+      throw new Error('FATAL GUARD VIOLATION: batchPersistDocs cannot write to Firestore in test environment!');
+    }
     const BATCH_SIZE = 400;
     for (let i = 0; i < items.length; i += BATCH_SIZE) {
       const batch = firestoreDb.batch();
@@ -1036,13 +1080,17 @@ async function batchPersistDocs(collectionName: string, items: Array<{ id: strin
       }
       await batch.commit();
     }
-  } else {
+  } else if (storageMode === 'disk') {
     saveStore(store);
   }
 }
 
 async function batchRemoveDocs(collectionName: string, ids: string[]): Promise<void> {
+  assertStorageModeForTest(storageMode);
   if (storageMode === 'firestore' && firestoreDb) {
+    if (isTestEnv()) {
+      throw new Error('FATAL GUARD VIOLATION: batchRemoveDocs cannot write to Firestore in test environment!');
+    }
     const BATCH_SIZE = 400;
     for (let i = 0; i < ids.length; i += BATCH_SIZE) {
       const batch = firestoreDb.batch();
@@ -1053,12 +1101,16 @@ async function batchRemoveDocs(collectionName: string, ids: string[]): Promise<v
       }
       await batch.commit();
     }
-  } else {
+  } else if (storageMode === 'disk') {
     saveStore(store);
   }
 }
 
 async function setupFirestoreListeners(): Promise<void> {
+  assertStorageModeForTest(storageMode);
+  if (isTestEnv()) {
+    throw new Error('FATAL GUARD VIOLATION: Snapshot listeners must not be started in test environment.');
+  }
   if (!firestoreDb) return;
 
   while (firestoreUnsubscribers.length > 0) {
@@ -1264,6 +1316,14 @@ async function setupFirestoreListeners(): Promise<void> {
 }
 
 async function initStorage(): Promise<void> {
+  if (isTestEnv()) {
+    storageMode = 'memory';
+    assertStorageModeForTest(storageMode);
+    console.log('[Storage] Test environment detected: isolated in-memory store active (storageMode: memory).');
+    return;
+  }
+
+  assertStorageModeForTest(storageMode);
   const isProduction = process.env.NODE_ENV === 'production';
   console.log(`[Storage] Initializing persistence layer (Environment: ${process.env.NODE_ENV || 'development'})...`);
 
@@ -1304,6 +1364,7 @@ async function initStorage(): Promise<void> {
     await Promise.race([probePromise, timeoutPromise]);
 
     console.log(`✅ [Storage] Successfully connected to Cloud Firestore (Project: ${FIREBASE_PROJECT_ID}, Region: us-west1, Database: (default))`);
+    assertStorageModeForTest('firestore');
     storageMode = 'firestore';
     await setupFirestoreListeners();
   } catch (err: any) {
@@ -1324,13 +1385,14 @@ async function initStorage(): Promise<void> {
     }
   }
 
-  // Run one-time Saifuddin profile migrations (v1, v2, v3) if target exists and flags have not yet been set
+  // Run one-time Saifuddin profile migrations (v1, v2, v3) and test events cleanup
   try {
     await runSaifuddinProfileMigration();
     await runSaifuddinProfileMigrationV2();
     await runSaifuddinProfileMigrationV3();
+    await cleanupTestEvents();
   } catch (mErr: any) {
-    console.warn('[Migration] Notice during Saifuddin profile migration:', mErr?.message || mErr);
+    console.warn('[Migration/Cleanup] Notice during migrations or cleanup:', mErr?.message || mErr);
   }
 }
 
@@ -1732,6 +1794,85 @@ export async function runSaifuddinProfileMigrationV3(): Promise<boolean> {
 
   console.log(`[Migration] Profile migration ${SAIFUDDIN_PROFILE_MIGRATION_V3_FLAG} successfully executed for member ${target.name} (${target.id})`);
   return true;
+}
+
+/* =========================================================================
+   ONE-TIME TEST EVENTS CLEANUP (Part 1 Release 1.3.3)
+   Removes test events with author_id "test-user-unapproved-author" from both
+   in-memory store and live Firestore database.
+   Guarded by flag so it executes only once and touches nothing else.
+   ========================================================================= */
+export const CLEANUP_TEST_EVENTS_FLAG = 'cleanup_test_events_unapproved_author_v1';
+
+export async function cleanupTestEvents(): Promise<number> {
+  // Flag check: stops it running twice or doing duplicate deletions
+  if (store.migrations && store.migrations[CLEANUP_TEST_EVENTS_FLAG]?.completed) {
+    return 0;
+  }
+  if (storageMode === 'firestore' && firestoreDb) {
+    try {
+      const docSnap = await firestoreDb.collection('migrations').doc(CLEANUP_TEST_EVENTS_FLAG).get();
+      if (docSnap.exists && docSnap.data()?.completed) {
+        if (!store.migrations) store.migrations = {};
+        store.migrations[CLEANUP_TEST_EVENTS_FLAG] = { completed: true };
+        return 0;
+      }
+    } catch (_) {}
+  }
+
+  const authorToDelete = 'test-user-unapproved-author';
+  let removedCount = 0;
+
+  // 1. Remove from in-memory store
+  if (Array.isArray(store.events)) {
+    const beforeCount = store.events.length;
+    store.events = store.events.filter((e: any) => e.author_id !== authorToDelete);
+    removedCount += beforeCount - store.events.length;
+  }
+
+  // 2. Remove from live Firestore database if connected
+  if (storageMode === 'firestore' && firestoreDb) {
+    try {
+      const snap = await firestoreDb.collection('events').where('author_id', '==', authorToDelete).get();
+      if (!snap.empty) {
+        const batch = firestoreDb.batch();
+        snap.forEach(doc => {
+          batch.delete(doc.ref);
+          removedCount++;
+        });
+        await batch.commit();
+      }
+
+      await firestoreDb.collection('migrations').doc(CLEANUP_TEST_EVENTS_FLAG).set({
+        completed: true,
+        removed_count: removedCount,
+        timestamp: new Date().toISOString()
+      });
+    } catch (err: any) {
+      console.error('[Cleanup] Error deleting test events from Firestore:', err?.message || err);
+    }
+  }
+
+  if (!store.migrations) store.migrations = {};
+  store.migrations[CLEANUP_TEST_EVENTS_FLAG] = {
+    completed: true,
+    removed_count: removedCount,
+    timestamp: new Date().toISOString()
+  };
+
+  if (storageMode === 'disk') {
+    saveStore(store);
+  }
+
+  if (removedCount > 0) {
+    console.log(`[Cleanup] Removed ${removedCount} test events for author "${authorToDelete}".`);
+  }
+  return removedCount;
+}
+
+// Execute initial disk cleanup on startup if not yet applied
+if (!isTestEnv()) {
+  cleanupTestEvents().catch(() => {});
 }
 
 /* =========================================================================
@@ -3408,10 +3549,31 @@ function validateAndSanitizeEventCoverImage(val: any): string {
 }
 
 // Event Cover Image Upload Route
-function handleEventImageUpload(req: Request, res: Response) {
+export async function handleEventImageUpload(req: Request, res: Response) {
   const callerId = resolveAuthUserId(req);
   if (!callerId) {
     return res.status(401).json({ error: 'Please sign in to upload an event cover image.' });
+  }
+
+  const isAdmin = checkAdmin(req);
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
+  const isOrganiser = Boolean(callerProfile?.is_organiser);
+
+  const eventId = req.body?.event_id || req.query.event_id;
+  let targetEvent: any = null;
+  if (eventId) {
+    targetEvent = (store.events || []).find((e: any) => e.id === eventId);
+    if (!targetEvent) {
+      return res.status(404).json({ error: 'Event not found.' });
+    }
+    const isAuthor = Boolean(
+      (callerProfileId && targetEvent.author_id === callerProfileId) ||
+      (callerId && targetEvent.author_id === callerId)
+    );
+    if (!isAuthor && !isAdmin) {
+      return res.status(403).json({ error: 'Forbidden: You can only set the cover image for your own events.' });
+    }
   }
 
   let rawData = req.body?.image || req.body?.dataUrl || req.body?.cover_image || req.body?.file;
@@ -3469,19 +3631,24 @@ function handleEventImageUpload(req: Request, res: Response) {
 
   const dataUrl = `data:${detectedMime};base64,${buffer.toString('base64')}`;
 
-  const eventId = req.body?.event_id || req.query.event_id;
-  if (eventId) {
-    const item = (store.events || []).find((e: any) => e.id === eventId);
-    if (item) {
-      item.cover_image = dataUrl;
+  if (targetEvent) {
+    targetEvent.cover_image = dataUrl;
+    // If the event was already approved and the caller is not an admin or trusted organiser,
+    // set it back to pending so the new image is reviewed.
+    if ((targetEvent.published || targetEvent.status === 'published' || targetEvent.status === 'approved') && !isAdmin && !isOrganiser) {
+      targetEvent.status = 'pending';
+      targetEvent.published = false;
     }
+    await persistDoc('events', targetEvent.id, targetEvent);
+    if (storageMode === 'disk') saveStore(store);
   }
 
   return res.json({
     success: true,
     dataUrl,
     mime: detectedMime,
-    size: buffer.length
+    size: buffer.length,
+    status: targetEvent ? targetEvent.status : undefined
   });
 }
 
@@ -3863,16 +4030,29 @@ export function canEditEvent(
 export function filterEventsForCaller(
   events: any[],
   callerId: string | null | undefined,
-  isAdmin: boolean
+  isAdmin: boolean,
+  callerAltId?: string | null | undefined
 ): any[] {
   if (isAdmin) return Array.isArray(events) ? [...events] : [];
   return (events || []).filter((item: any) => {
     // Pending or rejected submissions are visible ONLY to their author and admins
     if (item.status === 'pending' || item.status === 'rejected') {
-      return Boolean(callerId && item.author_id === callerId);
+      const isAuthor = Boolean(
+        (callerId && item.author_id === callerId) ||
+        (callerAltId && item.author_id === callerAltId)
+      );
+      return isAuthor;
     }
     return item.published !== false && item.status !== 'rejected';
   });
+}
+
+export function sanitizeEventForPublic(item: any): any {
+  if (!item) return item;
+  return {
+    ...item,
+    cover_image: item.cover_image ? `/api/event-image/${item.id}` : undefined
+  };
 }
 
 app.get('/api/events', (req: Request, res: Response) => {
@@ -4181,7 +4361,7 @@ app.post('/api/events', async (req: Request, res: Response) => {
   await persistDoc('audit_log', auditEntry.id, auditEntry);
 
   if (storageMode === 'disk') saveStore(store);
-  return res.json({ success: true, item });
+  return res.json({ success: true, item: sanitizeEventForPublic(item) });
 });
 
 app.patch('/api/events/:id', async (req: Request, res: Response) => {
@@ -4288,7 +4468,7 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
   await persistDoc('audit_log', auditEntry.id, auditEntry);
 
   if (storageMode === 'disk') saveStore(store);
-  return res.json({ success: true, item });
+  return res.json({ success: true, item: sanitizeEventForPublic(item) });
 });
 
 app.delete('/api/events/:id', async (req: Request, res: Response) => {
@@ -4405,7 +4585,7 @@ app.post('/api/admin/events/:id/approve', async (req: Request, res: Response) =>
 
   await persistDoc('events', item.id, item);
   if (storageMode === 'disk') saveStore(store);
-  return res.json({ success: true, item });
+  return res.json({ success: true, item: sanitizeEventForPublic(item) });
 });
 
 // Admin Review: Reject pending event/opportunity with short reason
@@ -4452,7 +4632,7 @@ app.post('/api/admin/events/:id/reject', async (req: Request, res: Response) => 
 
   await persistDoc('events', item.id, item);
   if (storageMode === 'disk') saveStore(store);
-  return res.json({ success: true, item });
+  return res.json({ success: true, item: sanitizeEventForPublic(item) });
 });
 
 // Admin: Toggle Organiser label on a member
@@ -5054,9 +5234,31 @@ app.get('/api/data/:collection', (req: Request, res: Response) => {
     items = items.filter(item => item.created_at && item.created_at > after);
   }
 
+  // EVENTS VISIBILITY & FILTERING:
+  // Apply exactly the same visibility rules as GET /api/events:
+  // The public sees only approved/published events; an author also sees their own pending ones; admins see everything.
+  if (col === 'events') {
+    const isAdmin = checkAdmin(req);
+    const callerId = resolveAuthUserId(req);
+    const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+    const callerProfileId = callerProfile?.id || callerId;
+
+    if (!isAdmin) {
+      items = filterEventsForCaller(items, callerProfileId || callerId, false, callerId);
+    }
+  }
+
   const limit = Number(req.query.limit) || 300;
   items.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   const sliced = items.slice(0, limit);
+
+  // EVENTS SANITIZATION:
+  // Never return raw cover_image data URL from any list or detail route.
+  // Return only the /api/event-image/:id path.
+  if (col === 'events') {
+    const safeEvents = sliced.map(ev => sanitizeEventForPublic(ev));
+    return res.json(safeEvents);
+  }
 
   // WHATSAPP VISIBILITY & PRIVACY ENFORCEMENT:
   // - Never return email, account_uid or auth secrets in public or member-facing responses.
@@ -5386,6 +5588,12 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Forbidden: You can only modify your own notifications' });
     }
   }
+  if (col === 'events' && !isAdmin) {
+    const isOwner = authUserId === existing.author_id || myProfileId === existing.author_id;
+    if (!isOwner) {
+      return res.status(403).json({ error: 'Forbidden: You can only edit your own submissions' });
+    }
+  }
 
   // Validate patch fields
   const patch = req.body || {};
@@ -5513,6 +5721,9 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
   if (col === 'profiles') {
     return res.json(sanitizePublicProfile(store[col][index], authUserId, isAdmin));
   }
+  if (col === 'events') {
+    return res.json(sanitizeEventForPublic(store[col][index]));
+  }
   return res.json(store[col][index]);
 });
 
@@ -5562,6 +5773,12 @@ app.delete('/api/data/:collection/:id', async (req: Request, res: Response) => {
     const isOwner = authUserId === existing.to_id || myProfileId === existing.to_id;
     if (!isOwner) {
       return res.status(403).json({ error: 'Forbidden: You can only delete your own notifications' });
+    }
+  }
+  if (col === 'events' && !isAdmin) {
+    const isOwner = authUserId === existing.author_id || myProfileId === existing.author_id;
+    if (!isOwner) {
+      return res.status(403).json({ error: 'Forbidden: You can only delete your own submissions' });
     }
   }
 
