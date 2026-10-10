@@ -4,6 +4,24 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-10-10
+
+### Fixed & Improved (Release 1.5.1)
+- **Part 1: Generic Data Route Allowlist**:
+  - Replaced generic blocklist on `/api/data/:collection` with an explicit allowlist across GET, POST, PATCH, PUT, and DELETE methods.
+  - Allowed public read: `profiles`, `posts`, `events`, `team`.
+  - Allowed signed-in own rows: `notifications`, `matches`, `follows`.
+  - Restricted all other collections (`audit_log`, `reports`, `admin_emails`, `migrations`, `event_guests`, `event_questions`, `pinned_announcement`, etc.) to HTTP 404 for all callers including admins.
+  - Applied allowlist filter to `/api/sync`.
+- **Part 2: Real Client IP & Shared Network Guest Rate Limits**:
+  - Added `getClientIp(req)` helper utilizing Express `trust proxy` (configured to trust 1 GFE proxy hop).
+  - Used `getClientIp` consistently across guest registration, admin login limiter, global and Gemma rate limiters, and audit log entries.
+  - Configured guest registration limits suited for shared university networks: 20 per hour per event, 60 per day per event, 100 per day overall.
+- **Part 3: Public Event Data Privacy**:
+  - Updated `sanitizeEventForPublic` to build public event objects from explicit field lists rather than spreading `...rest`.
+  - Concealed attendee lists (`attendee_ids`, `attendees`) from anonymous callers and non-RSVPed members; provided aggregate `attendee_count` and `i_am_going` status instead.
+  - Restricted moderation and internal fields (`hidden_reason`, `report_count`, `under_review`, `reviewed_by_admin`, `approved_by`, `rejection_reason`, `events_blocked`) strictly to the event author and platform admins.
+
 ## [1.5.0] - 2026-10-10
 
 ### Added & Improved (Release 1.5.0)

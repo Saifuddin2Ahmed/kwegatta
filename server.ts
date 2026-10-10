@@ -68,6 +68,13 @@ export function stripUndefined<T>(value: T): T {
 // Security: Disable X-Powered-By header to prevent fingerprinting
 app.disable('x-powered-by');
 
+// Configure Express trust proxy for Google Cloud Run (1 proxy hop = Google Front End / GFE).
+// GFE appends the true connecting client IP as the last IP entry in X-Forwarded-For.
+// Setting 'trust proxy' to 1 instructs Express to trust exactly 1 upstream proxy hop (GFE)
+// and derive req.ip from the right-most address appended by GFE, preventing clients from
+// forging their IP by injecting arbitrary left-most X-Forwarded-For values.
+app.set('trust proxy', 1);
+
 // Security Headers Middleware
 app.use((_req, res, next) => {
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
@@ -134,6 +141,33 @@ function resolveAuthUserId(req: Request): string | null {
   return (req as any).authUserId || null;
 }
 
+/**
+ * Helper to retrieve the real verified client IP address.
+ * Uses Express req.ip (which trusts 1 proxy hop via GFE).
+ * If req.ip is absent or invalid, falls back to req.socket.remoteAddress or '0.0.0.0'.
+ */
+export function getClientIp(req: Request): string {
+  if (req.ip) {
+    return req.ip;
+  }
+  const socketIp = req.socket?.remoteAddress;
+  if (socketIp) {
+    return socketIp;
+  }
+  return '0.0.0.0';
+}
+
+/* =========================================================================
+   GENERIC DATA ROUTE ALLOWLIST (PRIVACY & SECURITY)
+   ========================================================================= */
+export const PUBLIC_READ_COLLECTIONS = ['profiles', 'posts', 'events', 'team'] as const;
+export const SIGNED_IN_OWN_COLLECTIONS = ['notifications', 'matches', 'follows'] as const;
+export const ALLOWED_DATA_COLLECTIONS = [...PUBLIC_READ_COLLECTIONS, ...SIGNED_IN_OWN_COLLECTIONS] as const;
+
+export function isAllowedDataCollection(col: string): boolean {
+  return (ALLOWED_DATA_COLLECTIONS as readonly string[]).includes(col);
+}
+
 /* =========================================================================
    RATE LIMITING MIDDLEWARE
    - Signed-in accounts: 240 req/min each
@@ -158,8 +192,7 @@ function createRateLimiter(options: RateLimitOptions) {
   }, 180000);
 
   return (req: Request, res: Response, next: () => void) => {
-    const forwarded = req.headers['x-forwarded-for'];
-    const ip = (typeof forwarded === 'string' ? forwarded.split(',')[0] : '') || req.ip || req.socket.remoteAddress || 'unknown';
+    const ip = getClientIp(req);
     const key = String(ip).trim();
     const now = Date.now();
 
@@ -203,8 +236,7 @@ function createSmartApiRateLimiter() {
       key = `user:${authUserId}`;
       limit = 240; // 240 requests per minute per signed-in account
     } else {
-      const forwarded = req.headers['x-forwarded-for'];
-      const ip = (typeof forwarded === 'string' ? forwarded.split(',')[0] : '') || req.ip || req.socket.remoteAddress || 'unknown';
+      const ip = getClientIp(req);
       key = `ip:${String(ip).trim()}`;
       limit = 1200; // 1200 requests per minute for visitors on shared event/university networks
     }
@@ -2932,8 +2964,7 @@ interface AdminLockoutInfo {
 const adminLockoutMap = new Map<string, AdminLockoutInfo>();
 
 app.post('/api/admin/login', async (req: Request, res: Response) => {
-  const forwarded = req.headers['x-forwarded-for'];
-  const clientIp = (typeof forwarded === 'string' ? forwarded.split(',')[0] : '') || req.ip || req.socket.remoteAddress || 'unknown';
+  const clientIp = getClientIp(req);
   const ipKey = String(clientIp).trim();
   const now = Date.now();
 
@@ -4398,37 +4429,100 @@ export function canViewHostContact(item: any, callerId?: string | null, isAdmin:
   return false;
 }
 
-export function sanitizeEventForPublic(item: any, callerId?: string | null, isAllowedContact?: boolean): any {
+export function sanitizeEventForPublic(
+  item: any,
+  callerId?: string | null,
+  isAllowedContact?: boolean,
+  isAdmin: boolean = false
+): any {
   if (!item) return item;
+
+  let callerProfileId = callerId;
+  if (callerId) {
+    const callerProfile = store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId);
+    if (callerProfile) callerProfileId = callerProfile.id;
+  }
+
+  const isAuthor = Boolean(
+    callerId && (
+      item.author_id === callerId ||
+      (callerProfileId && item.author_id === callerProfileId)
+    )
+  );
+
+  const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
+  const isAttending = Boolean(
+    callerId && (
+      attendeeIds.includes(callerId) ||
+      (callerProfileId && attendeeIds.includes(callerProfileId))
+    )
+  );
+
+  const canSeeAttendees = isAdmin || isAuthor || isAttending;
+  const canSeeInternalFields = isAdmin || isAuthor;
+
   const phase = computeEventPhase(item);
   const isPast = phase === 'past';
   const hasRealTimes = Boolean(item.starts_at && item.ends_at);
 
-  // Join link: shown only to signed-in members, and hidden when event is past
-  const joinLink = (!callerId || isPast) ? undefined : item.join_link;
-
-  // Host contact details: returned ONLY to (a) author, (b) admins, (c) signed-in members who RSVPed, (d) guests with valid token
-  const contactPhone = isAllowedContact ? item.contact_phone : undefined;
-  const contactEmail = isAllowedContact ? item.contact_email : undefined;
-
-  // Reports: never public and never show reporter identity to anyone except admin in admin routes
-  const { reports, ...rest } = item;
-
   const guestCount = (store.event_guests || []).filter((g: any) => g.event_id === item.id).length;
-  const totalAttendeeCount = (Array.isArray(item.attendee_ids) ? item.attendee_ids.length : 0) + guestCount;
+  const totalAttendeeCount = attendeeIds.length + guestCount;
+
+  const coverImage = item.cover_image
+    ? (item.cover_image.startsWith('/') ? item.cover_image : `/api/event-image/${item.id}`)
+    : undefined;
 
   return {
-    ...rest,
+    id: item.id,
+    kind: item.kind || 'event',
+    title: item.title,
+    description: item.description,
+    format: item.format,
+    location: item.location,
+    starts_at: item.starts_at,
+    ends_at: item.ends_at,
+    timezone: item.timezone,
+    start_date: item.start_date,
+    start_time: item.start_time,
+    end_date: item.end_date,
+    end_time: item.end_time,
+    datetime: item.datetime,
+    deadline: item.deadline,
+    link: item.link,
+    registration_link: item.registration_link,
+    capacity: item.capacity,
+    author_id: item.author_id,
+    author_name: item.author_name,
+    published: item.published,
+    status: item.status,
+    is_cancelled: item.is_cancelled,
+    cancellation_reason: item.cancellation_reason,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
     phase,
     time_needs_update: !hasRealTimes && item.kind === 'event',
-    join_link: joinLink,
-    contact_phone: contactPhone,
-    contact_email: contactEmail,
+    cover_image: coverImage,
     guest_count: guestCount,
     attendee_count: totalAttendeeCount,
-    cover_image: item.cover_image ? `/api/event-image/${item.id}` : undefined,
-    report_count: Array.isArray(reports) ? reports.length : (item.report_count || 0),
-    under_review: Boolean(item.under_review || (item.hidden_by_moderation && !item.reviewed_by_admin))
+    i_am_going: isAttending,
+
+    // Conditional fields
+    join_link: (!callerId || isPast) ? undefined : item.join_link,
+    contact_phone: isAllowedContact ? item.contact_phone : undefined,
+    contact_email: isAllowedContact ? item.contact_email : undefined,
+
+    // Attendee lists: author, admins, and RSVPed members only
+    attendee_ids: canSeeAttendees ? item.attendee_ids : undefined,
+    attendees: canSeeAttendees ? item.attendees : undefined,
+
+    // Moderation & internal fields: author and admins only
+    hidden_reason: canSeeInternalFields ? item.hidden_reason : undefined,
+    report_count: canSeeInternalFields ? (Array.isArray(item.reports) ? item.reports.length : (item.report_count || 0)) : undefined,
+    under_review: canSeeInternalFields ? Boolean(item.under_review || (item.hidden_by_moderation && !item.reviewed_by_admin)) : undefined,
+    reviewed_by_admin: canSeeInternalFields ? item.reviewed_by_admin : undefined,
+    approved_by: canSeeInternalFields ? item.approved_by : undefined,
+    rejection_reason: canSeeInternalFields ? item.rejection_reason : undefined,
+    events_blocked: canSeeInternalFields ? item.events_blocked : undefined
   };
 }
 
@@ -4478,7 +4572,7 @@ app.get('/api/events', (req: Request, res: Response) => {
 
   const sanitizedList = list.map((ev: any) => {
     const isAllowed = canViewHostContact(ev, callerId, isAdmin);
-    return sanitizeEventForPublic(ev, callerId, isAllowed);
+    return sanitizeEventForPublic(ev, callerId, isAllowed, isAdmin);
   });
   return res.json(sanitizedList);
 });
@@ -4510,7 +4604,6 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
 
   const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
 
-  // Signed-out visitors see everything except the join link and the list of who is going; they see only the count.
   let attendeeProfiles: any[] = [];
   let peopleToMeet: Array<{ profile: any; reason: string; score: number }> = [];
 
@@ -4573,7 +4666,7 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
 
   const guestToken = typeof req.query.g === 'string' ? req.query.g : undefined;
   const isAllowedContact = canViewHostContact(item, callerId, isAdmin, guestToken);
-  const sanitized = sanitizeEventForPublic(item, callerId, isAllowedContact);
+  const sanitized = sanitizeEventForPublic(item, callerId, isAllowedContact, isAdmin);
 
   // Guest details for guest holder
   let guestInfo: any = undefined;
@@ -4591,9 +4684,11 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
     }
   }
 
+  const canSeeAttendees = isAdmin || isAuthor || isAttending;
+
   return res.json({
     ...sanitized,
-    attendees: callerId ? attendeeProfiles : undefined,
+    attendees: (callerId && canSeeAttendees) ? attendeeProfiles : undefined,
     people_to_meet: callerId ? peopleToMeet : undefined,
     is_attending: isAttending,
     guest_info: guestInfo
@@ -4843,7 +4938,7 @@ app.post('/api/events', async (req: Request, res: Response) => {
 
   if (storageMode === 'disk') saveStore(store);
   const isAllowedContact = canViewHostContact(item, callerId, isAdmin);
-  return res.json({ success: true, item: sanitizeEventForPublic(item, callerId, isAllowedContact) });
+  return res.json({ success: true, item: sanitizeEventForPublic(item, callerId, isAllowedContact, isAdmin) });
 });
 
 app.patch('/api/events/:id', async (req: Request, res: Response) => {
@@ -4944,7 +5039,8 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
   await persistDoc('audit_log', auditEntry.id, auditEntry);
 
   if (storageMode === 'disk') saveStore(store);
-  return res.json({ success: true, item: sanitizeEventForPublic(item, callerId) });
+  const isAllowedContact = canViewHostContact(item, callerId, isAdmin);
+  return res.json({ success: true, item: sanitizeEventForPublic(item, callerId, isAllowedContact, isAdmin) });
 });
 
 // Author or Admin: Cancel an event
@@ -4979,7 +5075,8 @@ app.post('/api/events/:id/cancel', async (req: Request, res: Response) => {
   await persistDoc('audit_log', auditEntry.id, auditEntry);
 
   if (storageMode === 'disk') saveStore(store);
-  return res.json({ success: true, message: 'Event cancelled successfully', item: sanitizeEventForPublic(item, callerId) });
+  const isAllowedContact = canViewHostContact(item, callerId, isAdmin);
+  return res.json({ success: true, message: 'Event cancelled successfully', item: sanitizeEventForPublic(item, callerId, isAllowedContact, isAdmin) });
 });
 
 app.delete('/api/events/:id', async (req: Request, res: Response) => {
@@ -5401,8 +5498,9 @@ app.post('/api/events/:id/guest-register', async (req: Request, res: Response) =
   }
 
   // IP Rate limiting
-  const ip = req.ip || req.socket?.remoteAddress || '127.0.0.1';
+  const ip = getClientIp(req);
   const now = Date.now();
+  const past1h = now - 60 * 60 * 1000;
   const past24h = now - 24 * 60 * 60 * 1000;
 
   let ipRecord = guestIpRateMap.get(ip);
@@ -5412,13 +5510,19 @@ app.post('/api/events/:id/guest-register', async (req: Request, res: Response) =
   }
 
   ipRecord.totalTimestamps = ipRecord.totalTimestamps.filter(t => t >= past24h);
-  if (ipRecord.totalTimestamps.length >= 10) {
+  if (ipRecord.totalTimestamps.length >= 100) {
     return res.status(429).json({ error: 'Guest registration limit reached for today.' });
   }
 
   let eventTs = ipRecord.eventRegistrations.get(id) || [];
   eventTs = eventTs.filter(t => t >= past24h);
-  if (eventTs.length >= 3) {
+
+  const eventTs1h = eventTs.filter(t => t >= past1h);
+  if (eventTs1h.length >= 20) {
+    return res.status(429).json({ error: 'Guest registration limit reached for this event this hour.' });
+  }
+
+  if (eventTs.length >= 60) {
     return res.status(429).json({ error: 'Guest registration limit reached for this event today.' });
   }
 
@@ -6367,12 +6471,12 @@ app.get('/api/data/follows', (req: Request, res: Response) => {
    UNIVERSAL DATA LAYER WITH AUTHENTICATION & WHATSAPP VISIBILITY
    ========================================================================= */
 app.get('/api/data/:collection', (req: Request, res: Response) => {
-  const col = req.params.collection as keyof StoreData;
-  if (col === 'event_guests' || col === 'event_questions') {
-    return res.status(403).json({ error: 'Access denied.' });
+  const col = req.params.collection as string;
+  if (!isAllowedDataCollection(col)) {
+    return res.status(404).json({ error: 'Not found' });
   }
-  if (!store[col]) {
-    return res.status(404).json({ error: `Collection ${col} not found` });
+  if (!store[col as keyof StoreData]) {
+    return res.status(404).json({ error: 'Not found' });
   }
 
   // Enforce privacy on collections if called via generic endpoint
@@ -6383,7 +6487,7 @@ app.get('/api/data/:collection', (req: Request, res: Response) => {
     }
   }
 
-  let items = [...store[col]];
+  let items = [...(store[col as keyof StoreData] || [])];
   const eqQuery = req.query.eq as string;
   if (eqQuery) {
     try {
@@ -6400,8 +6504,6 @@ app.get('/api/data/:collection', (req: Request, res: Response) => {
   }
 
   // EVENTS VISIBILITY & FILTERING:
-  // Apply exactly the same visibility rules as GET /api/events:
-  // The public sees only approved/published events; an author also sees their own pending ones; admins see everything.
   if (col === 'events') {
     const isAdmin = checkAdmin(req);
     const callerId = resolveAuthUserId(req);
@@ -6418,10 +6520,13 @@ app.get('/api/data/:collection', (req: Request, res: Response) => {
   const sliced = items.slice(0, limit);
 
   // EVENTS SANITIZATION:
-  // Never return raw cover_image data URL from any list or detail route.
-  // Return only the /api/event-image/:id path.
   if (col === 'events') {
-    const safeEvents = sliced.map(ev => sanitizeEventForPublic(ev));
+    const isAdmin = checkAdmin(req);
+    const authUserId = resolveAuthUserId(req);
+    const safeEvents = sliced.map(ev => {
+      const isAllowed = canViewHostContact(ev, authUserId, isAdmin);
+      return sanitizeEventForPublic(ev, authUserId, isAllowed, isAdmin);
+    });
     return res.json(safeEvents);
   }
 
@@ -6482,11 +6587,11 @@ app.get('/api/data/:collection', (req: Request, res: Response) => {
 
 // Profile & Data Creation (Protected / Strict Validation / Session Required)
 app.post('/api/data/:collection', async (req: Request, res: Response) => {
-  const col = req.params.collection as keyof StoreData;
-  if (col === 'event_guests' || col === 'event_questions') {
-    return res.status(403).json({ error: 'Access denied.' });
+  const col = req.params.collection as string;
+  if (!isAllowedDataCollection(col)) {
+    return res.status(404).json({ error: 'Not found' });
   }
-  if (!store[col]) {
+  if (!store[col as keyof StoreData]) {
     return res.status(404).json({ error: `Collection ${col} not found` });
   }
 
@@ -6708,12 +6813,13 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
 
 // Update Record (Ownership / Auth Check for All Collections)
 app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
-  const col = req.params.collection as keyof StoreData;
+  const col = req.params.collection as string;
   const id = req.params.id;
-  if (col === 'event_guests' || col === 'event_questions') {
-    return res.status(403).json({ error: 'Access denied.' });
+  if (!isAllowedDataCollection(col)) {
+    return res.status(404).json({ error: 'Not found' });
   }
-  if (!store[col]) {
+  const colKey = col as keyof StoreData;
+  if (!store[colKey]) {
     return res.status(404).json({ error: `Collection ${col} not found` });
   }
 
@@ -6724,12 +6830,12 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  const index = store[col].findIndex((item: any) => item.id === id);
+  const index = (store[colKey] as any[]).findIndex((item: any) => item.id === id);
   if (index === -1) {
     return res.status(404).json({ error: 'Item not found' });
   }
 
-  const existing = store[col][index];
+  const existing = (store[colKey] as any[])[index];
 
   const myProfile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
   const myProfileId = myProfile?.id;
@@ -6887,25 +6993,35 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
     }
   }
 
-  store[col][index] = { ...existing, ...patch };
-  await persistDoc(col, id, store[col][index]);
+  (store[colKey] as any[])[index] = { ...existing, ...patch };
+  await persistDoc(col, id, (store[colKey] as any[])[index]);
   if (col === 'profiles') {
-    return res.json(sanitizePublicProfile(store[col][index], authUserId, isAdmin));
+    return res.json(sanitizePublicProfile((store[colKey] as any[])[index], authUserId, isAdmin));
   }
   if (col === 'events') {
-    return res.json(sanitizeEventForPublic(store[col][index]));
+    return res.json(sanitizeEventForPublic((store[colKey] as any[])[index]));
   }
-  return res.json(store[col][index]);
+  return res.json((store[colKey] as any[])[index]);
+});
+
+// Replace/Put Record
+app.put(['/api/data/:collection', '/api/data/:collection/:id'], async (req: Request, res: Response) => {
+  const col = req.params.collection as string;
+  if (!isAllowedDataCollection(col)) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  return res.status(404).json({ error: 'Not found' });
 });
 
 // Delete Record (Ownership / Auth Check for All Collections)
 app.delete('/api/data/:collection/:id', async (req: Request, res: Response) => {
-  const col = req.params.collection as keyof StoreData;
+  const col = req.params.collection as string;
   const id = req.params.id;
-  if (col === 'event_guests' || col === 'event_questions') {
-    return res.status(403).json({ error: 'Access denied.' });
+  if (!isAllowedDataCollection(col)) {
+    return res.status(404).json({ error: 'Not found' });
   }
-  if (!store[col]) {
+  const colKey = col as keyof StoreData;
+  if (!store[colKey]) {
     return res.status(404).json({ error: `Collection ${col} not found` });
   }
 
@@ -6916,7 +7032,7 @@ app.delete('/api/data/:collection/:id', async (req: Request, res: Response) => {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
-  const existing = store[col].find((item: any) => item.id === id);
+  const existing = (store[colKey] as any[]).find((item: any) => item.id === id);
   if (!existing) {
     return res.json({ success: true, message: 'Item already not present' });
   }
@@ -6956,7 +7072,7 @@ app.delete('/api/data/:collection/:id', async (req: Request, res: Response) => {
     }
   }
 
-  store[col] = store[col].filter((item: any) => item.id !== id);
+  (store as any)[colKey] = (store[colKey] as any[]).filter((item: any) => item.id !== id);
   await removeDoc(col, id);
   return res.json({ success: true });
 });

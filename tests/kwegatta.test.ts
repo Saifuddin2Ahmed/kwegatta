@@ -246,14 +246,14 @@ describe('Member-Submitted Events & Approval Permissions', () => {
   });
 });
 
-describe('Service Worker & Cache-Control Configuration (PWA v1.5.0)', () => {
-  it('public/sw.js specifies CACHE_NAME as kwegatta-1.5.0 and handles cache strategies correctly', async () => {
+describe('Service Worker & Cache-Control Configuration (PWA v1.5.1)', () => {
+  it('public/sw.js specifies CACHE_NAME as kwegatta-1.5.1 and handles cache strategies correctly', async () => {
     const fs = await import('fs');
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.5.0
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.0'");
+    // 1. Cache name includes version kwegatta-1.5.1
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.1'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -1310,13 +1310,13 @@ describe('Release 1.5.0 Features', () => {
       });
       expect(g3Res.status).toBe(200);
 
-      // 6. 4th registration from same IP for one event -> 429
+      // 6. Guest Four registration from same IP (accepted under new limits: 20/hr) -> 200
       const g4Res = await fetch(`${baseUrl}/api/events/${testEventId}/guest-register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: 'Guest Four', email: 'guest4@example.com', agree: true })
       });
-      expect(g4Res.status).toBe(429);
+      expect(g4Res.status).toBe(200);
 
       // 7. Cancel with wrong token -> 400
       const wrongCancel = await fetch(`${baseUrl}/api/events/${testEventId}/guest-cancel`, {
@@ -1361,6 +1361,170 @@ describe('Release 1.5.0 Features', () => {
       expect(malformedRes.status).toBe(400);
       const data = await malformedRes.json();
       expect(data).toEqual({ error: 'Invalid request body.' });
+    });
+  });
+
+  describe('Release 1.5.1 Features', () => {
+    it('PART 1: anonymous GET of audit_log, reports, admin_emails, migrations, event_guests and an unknown name each return 404; profiles, posts, events and team still return 200', async () => {
+      const collections404 = ['audit_log', 'reports', 'admin_emails', 'migrations', 'event_guests', 'event_questions', 'pinned_announcement', 'unknown_collection_xyz'];
+      for (const col of collections404) {
+        const res = await fetch(`${baseUrl}/api/data/${col}`);
+        expect(res.status).toBe(404);
+        const data = await res.json();
+        expect(data).toEqual({ error: 'Not found' });
+      }
+
+      const collections200 = ['profiles', 'posts', 'events', 'team'];
+      for (const col of collections200) {
+        const res = await fetch(`${baseUrl}/api/data/${col}`);
+        expect(res.status).toBe(200);
+      }
+    });
+
+    it('PART 2: forged left-most X-Forwarded-For value does not change bucket; 21st registration in an hour from one IP is rejected while a different IP is accepted', async () => {
+      // Create dedicated event for Part 2 IP rate-limiting
+      const evRes = await fetch(`${baseUrl}/api/events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-member-150'
+        },
+        body: JSON.stringify({
+          kind: 'event',
+          title: 'IP Rate Limit Event 151',
+          description: 'Testing guest rate limits by IP.',
+          start_date: '2026-12-05',
+          start_time: '12:00',
+          timezone: 'Africa/Kampala',
+          format: 'in_person',
+          location: 'Kampala Tech Hub'
+        })
+      });
+      const evData = await evRes.json();
+      const part2EvId = evData.item.id;
+
+      const reqHeaders = {
+        'Content-Type': 'application/json',
+        'X-Forwarded-For': '9.9.9.9, 203.0.113.195'
+      };
+
+      // Register 20 guests from 203.0.113.195 (with forged left-most 9.9.9.9)
+      for (let i = 1; i <= 20; i++) {
+        const res = await fetch(`${baseUrl}/api/events/${part2EvId}/guest-register`, {
+          method: 'POST',
+          headers: reqHeaders,
+          body: JSON.stringify({
+            name: `Limit Guest ${i}`,
+            email: `limitguest${i}_${Date.now()}@example.com`,
+            agree: true
+          })
+        });
+        expect(res.status).toBe(200);
+      }
+
+      // 21st registration from same IP (even with forged left-most header 7.7.7.7) -> 429
+      const res21 = await fetch(`${baseUrl}/api/events/${part2EvId}/guest-register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': '7.7.7.7, 203.0.113.195'
+        },
+        body: JSON.stringify({
+          name: 'Limit Guest 21',
+          email: `limitguest21_${Date.now()}@example.com`,
+          agree: true
+        })
+      });
+      expect(res21.status).toBe(429);
+
+      // A different IP (198.51.100.42) is still accepted -> 200
+      const resDiffIp = await fetch(`${baseUrl}/api/events/${part2EvId}/guest-register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': '8.8.8.8, 198.51.100.42'
+        },
+        body: JSON.stringify({
+          name: 'Diff IP Guest',
+          email: `diffip_${Date.now()}@example.com`,
+          agree: true
+        })
+      });
+      expect(resDiffIp.status).toBe(200);
+    });
+
+    it('PART 3: anonymous caller receives no internal or attendee fields; RSVPed member receives attendee_ids; author receives hidden_reason', async () => {
+      // Create dedicated event for Part 3 privacy & sanitization
+      const evRes = await fetch(`${baseUrl}/api/events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-member-150'
+        },
+        body: JSON.stringify({
+          kind: 'event',
+          title: 'Privacy Sanitizer Test Event 151',
+          description: 'Testing event field sanitization.',
+          start_date: '2026-12-06',
+          start_time: '14:00',
+          timezone: 'Africa/Kampala',
+          format: 'in_person',
+          location: 'Kampala Lab'
+        })
+      });
+      const evData = await evRes.json();
+      const part3EvId = evData.item.id;
+
+      // 1. Anonymous GET /api/events/:id
+      const anonRes = await fetch(`${baseUrl}/api/events/${part3EvId}`);
+      expect(anonRes.status).toBe(200);
+      const anonData = await anonRes.json();
+      expect(anonData.attendee_ids).toBeUndefined();
+      expect(anonData.attendees).toBeUndefined();
+      expect(anonData.hidden_reason).toBeUndefined();
+      expect(anonData.report_count).toBeUndefined();
+      expect(anonData.under_review).toBeUndefined();
+      expect(anonData.reviewed_by_admin).toBeUndefined();
+      expect(anonData.approved_by).toBeUndefined();
+      expect(anonData.rejection_reason).toBeUndefined();
+      expect(anonData.events_blocked).toBeUndefined();
+      expect(typeof anonData.attendee_count).toBe('number');
+      expect(anonData.i_am_going).toBe(false);
+
+      // 2. RSVPed member GET
+      await fetch(`${baseUrl}/api/events/${part3EvId}/rsvp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-member-b'
+        },
+        body: JSON.stringify({ going: true })
+      });
+
+      const rsvpRes = await fetch(`${baseUrl}/api/events/${part3EvId}`, {
+        headers: { Authorization: 'Bearer test-member-b' }
+      });
+      expect(rsvpRes.status).toBe(200);
+      const rsvpData = await rsvpRes.json();
+      expect(Array.isArray(rsvpData.attendee_ids)).toBe(true);
+      expect(rsvpData.hidden_reason).toBeUndefined();
+
+      // 3. Author GET receives hidden_reason when event is hidden
+      await fetch(`${baseUrl}/api/admin/events/${part3EvId}/hide`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-admin'
+        },
+        body: JSON.stringify({ reason: 'Spam or scam' })
+      });
+
+      const authorRes = await fetch(`${baseUrl}/api/events/${part3EvId}`, {
+        headers: { Authorization: 'Bearer test-member-150' }
+      });
+      expect(authorRes.status).toBe(200);
+      const authorData = await authorRes.json();
+      expect(authorData.hidden_reason).toBeDefined();
     });
   });
 });
