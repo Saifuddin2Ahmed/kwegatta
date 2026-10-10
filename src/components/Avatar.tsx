@@ -3,7 +3,7 @@ import { Profile } from '../types';
 import { getInitials } from '../utils';
 
 interface AvatarProps {
-  profile: Profile | null | undefined;
+  profile: Partial<Profile> | null | undefined;
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | number;
   className?: string;
   alt?: string;

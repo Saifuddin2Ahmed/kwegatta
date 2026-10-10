@@ -228,4 +228,181 @@ export async function processEventCoverImage(file: File): Promise<string> {
   });
 }
 
+/**
+ * Format event datetime according to viewer's timezone and event's timezone using Intl.DateTimeFormat.
+ * Example: "Sat 14 Nov, 2:00 PM · your time · Africa/Kampala 2:00 PM"
+ */
+export function formatEventDateTime(
+  startsAt?: string,
+  endsAt?: string,
+  eventTimezone?: string,
+  legacyText?: string
+): {
+  display: string;
+  isLegacy: boolean;
+} {
+  if (!startsAt) {
+    return {
+      display: legacyText || 'Date TBA',
+      isLegacy: true
+    };
+  }
+
+  const startDate = new Date(startsAt);
+  if (isNaN(startDate.getTime())) {
+    return {
+      display: legacyText || 'Date TBA',
+      isLegacy: true
+    };
+  }
+
+  const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const eventTz = eventTimezone || 'Africa/Kampala';
+
+  const userFormatter = new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: userTimezone
+  });
+  const userTimeStr = userFormatter.format(startDate);
+
+  try {
+    const eventFormatter = new Intl.DateTimeFormat(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: eventTz
+    });
+    const eventTimeStr = eventFormatter.format(startDate);
+
+    if (userTimezone === eventTz) {
+      return {
+        display: `${userTimeStr} · ${eventTz}`,
+        isLegacy: false
+      };
+    }
+
+    return {
+      display: `${userTimeStr} · your time · ${eventTz} ${eventTimeStr}`,
+      isLegacy: false
+    };
+  } catch {
+    return {
+      display: `${userTimeStr}`,
+      isLegacy: false
+    };
+  }
+}
+
+/**
+ * Generates an RFC 5545 compliant .ics calendar file content.
+ */
+export function generateIcsFile(event: {
+  id: string;
+  title: string;
+  description: string;
+  location?: string;
+  starts_at?: string;
+  ends_at?: string;
+  timezone?: string;
+}): string {
+  const formatIcsDate = (isoStr?: string): string => {
+    if (!isoStr) return '';
+    const date = new Date(isoStr);
+    return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  };
+
+  const dtStart = formatIcsDate(event.starts_at);
+  const dtEnd = formatIcsDate(event.ends_at);
+  const now = formatIcsDate(new Date().toISOString());
+
+  const escapeIcs = (str?: string) => (str || '').replace(/[\\;,\n]/g, match => {
+    if (match === '\n') return '\\n';
+    return '\\' + match;
+  });
+
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Kwegatta//Event//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'BEGIN:VEVENT',
+    `UID:kwegatta-${event.id}@kwegatta.ai.studio`,
+    `DTSTAMP:${now}`,
+    dtStart ? `DTSTART:${dtStart}` : '',
+    dtEnd ? `DTEND:${dtEnd}` : '',
+    `SUMMARY:${escapeIcs(event.title)}`,
+    `DESCRIPTION:${escapeIcs(event.description)}`,
+    event.location ? `LOCATION:${escapeIcs(event.location)}` : '',
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].filter(Boolean);
+
+  return lines.join('\r\n');
+}
+
+/**
+ * Triggers a browser download of an .ics calendar file.
+ */
+export function downloadIcsFile(event: {
+  id: string;
+  title: string;
+  description: string;
+  location?: string;
+  starts_at?: string;
+  ends_at?: string;
+  timezone?: string;
+}): void {
+  const icsData = generateIcsFile(event);
+  const blob = new Blob([icsData], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${(event.title || 'event').toLowerCase().replace(/[^a-z0-9]+/g, '-')}.ics`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Generates a prefilled Google Calendar web URL.
+ */
+export function generateGoogleCalendarUrl(event: {
+  title: string;
+  description: string;
+  location?: string;
+  starts_at?: string;
+  ends_at?: string;
+  timezone?: string;
+}): string {
+  const formatGCalDate = (isoStr?: string): string => {
+    if (!isoStr) return '';
+    const date = new Date(isoStr);
+    return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  };
+
+  const dates = event.starts_at && event.ends_at
+    ? `${formatGCalDate(event.starts_at)}/${formatGCalDate(event.ends_at)}`
+    : '';
+
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: event.title,
+    details: event.description,
+    location: event.location || '',
+    ctz: event.timezone || 'Africa/Kampala'
+  });
+
+  if (dates) {
+    params.set('dates', dates);
+  }
+
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+
 

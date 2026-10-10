@@ -79,7 +79,23 @@ You have the unconditional right to be forgotten:
 
 ---
 
-## 6. Honest Limitations & Current Scope
+## 6. Event Moderation, Reports & Visibility (v1.4.0)
+
+With direct member publishing enabled, Kwegatta balances immediate expression with community safety and privacy:
+
+### Confidential Event Reports
+* **Reporting**: Any signed-in member can report an event if it contains spam, scams, offensive material, or represents a false gathering.
+* **Strict Confidentiality**: Report logs, reporter identities, and report notes are **strictly confidential**. They are never exposed publicly, and the event author is **never** told who reported their event or the specific reporter details.
+* **Auto-Moderation Safeguard**: When an event receives 3 or more reports from distinct verified members, it is automatically hidden from public event listings until a platform administrator reviews and either restores or removes it.
+
+### What Event Authors Can See
+* **Own Submissions**: Authors can view and edit their own events at any time, including when an event is flagged as "Under review" or "Time needs updating".
+* **Attendees**: Authors and signed-in members can see the profile names, photos, and roles of members who have RSVP'd to their event ("Who's going").
+* **Visitor Privacy Boundary**: Anonymous (signed-out) visitors can see only the aggregate attendee count (for example, "14 going"). Individual attendee identities and online meeting join links are concealed from signed-out visitors.
+
+---
+
+## 7. Honest Limitations & Current Scope
 
 Because Kwegatta was launched as an open-source initiative for **Hacktoberfest 2026 Hack Day Kampala x MUBS**:
 * **WhatsApp Handover**: When you press Connect, conversation handover takes place externally on WhatsApp (`wa.me`). Messages exchanged on WhatsApp are end-to-end encrypted by WhatsApp and do not pass through Kwegatta servers.
@@ -87,7 +103,8 @@ Because Kwegatta was launched as an open-source initiative for **Hacktoberfest 2
 
 ---
 
-## 7. Contact Us
+## 8. Contact Us
 
 For privacy inquiries or data removal requests:
 * Email: **`privacy@kwegatta.org`** / **`saifuddin.ai.dev@gmail.com`**
+

@@ -83,6 +83,7 @@ export interface Profile {
   hidden?: boolean;
   suspended?: boolean;
   is_organiser?: boolean;
+  events_blocked?: boolean;
   account_uid?: string;
   email?: string;
 }
@@ -166,14 +167,38 @@ export type OpportunityType = 'Grant' | 'Hackathon' | 'Job' | 'Training' | 'Call
 
 export type EventStatus = 'pending' | 'published' | 'rejected';
 
+export type EventFormat = 'in_person' | 'online' | 'hybrid';
+
+export type EventPhase = 'upcoming' | 'live' | 'past';
+
+export interface EventReport {
+  reporter_id: string;
+  reason: 'Not a real event' | 'Spam or scam' | 'Offensive' | 'Other' | string;
+  note?: string;
+  created_at: string;
+}
+
 export interface EventOpportunityItem {
   id: string;
   kind: 'event' | 'opportunity';
   title: string;
   description: string;
   // For Event:
-  datetime?: string; // date and time
-  location?: string; // place or online link
+  datetime?: string; // legacy date and time text (e.g. "Sat, Nov 14 • 2:00 PM EAT")
+  starts_at?: string; // ISO 8601 UTC timestamp
+  ends_at?: string; // ISO 8601 UTC timestamp
+  timezone?: string; // IANA timezone name (e.g. "Africa/Kampala")
+  format?: EventFormat; // 'in_person' | 'online' | 'hybrid'
+  location?: string; // physical place for in_person or hybrid
+  join_link?: string; // https join link for online or hybrid (visible to signed-in only)
+  time_needs_update?: boolean; // true for legacy items without real timestamps
+  phase?: EventPhase; // dynamically computed on server read: 'upcoming' | 'live' | 'past'
+  is_cancelled?: boolean; // cancelled by author or admin
+  reports?: EventReport[]; // moderation reports (never public)
+  report_count?: number; // total reports count
+  hidden_by_moderation?: boolean; // true when 3+ distinct reports
+  under_review?: boolean; // true while under moderation review
+  reviewed_by_admin?: boolean;
   cover_image?: string; // optional cover image
   registration_link?: string; // optional registration link
   // For Opportunity:

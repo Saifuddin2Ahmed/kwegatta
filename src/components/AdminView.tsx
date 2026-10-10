@@ -70,7 +70,13 @@ import {
   updateTeamMember,
   uploadTeamMemberPhoto,
   reorderTeamMembers,
-  deleteTeamMember
+  deleteTeamMember,
+  hideEvent,
+  restoreEvent,
+  blockEventAuthor,
+  unblockEventAuthor,
+  deleteEventAdmin,
+  fetchAdminEvents
 } from '../services/api';
 import { auth } from '../services/firebase';
 import { CoverImageUploader } from './EventsView';
@@ -191,6 +197,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [oppLink, setOppLink] = useState('');
   const [eventPublished, setEventPublished] = useState(true);
   const [viewingAttendeesEvent, setViewingAttendeesEvent] = useState<any | null>(null);
+  const [adminEventFilter, setAdminEventFilter] = useState<'all' | 'reported' | 'hidden' | 'cancelled'>('all');
 
   // Review & Approval State
   const [rejectingEvent, setRejectingEvent] = useState<any | null>(null);
@@ -276,7 +283,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         fetch('/api/admin/posts', { headers }),
         fetch('/api/admin/audit-log', { headers }),
         fetch('/api/admin/reports', { headers }),
-        fetch('/api/events', { headers }),
+        fetch('/api/admin/events', { headers }),
         fetch('/api/admin/admins', { headers }).catch(() => null),
         fetchPinnedAnnouncement(),
         fetchTeam().catch(() => [])
@@ -548,6 +555,51 @@ export const AdminView: React.FC<AdminViewProps> = ({
       onRefreshGlobalData();
     } catch (err: any) {
       onToast('Failed to delete: ' + err.message);
+    }
+  };
+
+  const handleHideEvent = async (id: string) => {
+    try {
+      await hideEvent(id);
+      onToast('Event hidden from public lists');
+      fetchAdminData();
+      onRefreshGlobalData();
+    } catch (err: any) {
+      onToast(err.message || 'Failed to hide event');
+    }
+  };
+
+  const handleRestoreEvent = async (id: string) => {
+    try {
+      await restoreEvent(id);
+      onToast('Event restored to public lists');
+      fetchAdminData();
+      onRefreshGlobalData();
+    } catch (err: any) {
+      onToast(err.message || 'Failed to restore event');
+    }
+  };
+
+  const handleBlockAuthor = async (id: string, authorName: string) => {
+    if (!confirm(`Block ${authorName} from creating events?`)) return;
+    try {
+      await blockEventAuthor(id);
+      onToast(`Blocked ${authorName} from creating events`);
+      fetchAdminData();
+      onRefreshGlobalData();
+    } catch (err: any) {
+      onToast(err.message || 'Failed to block author');
+    }
+  };
+
+  const handleUnblockAuthor = async (id: string, authorName: string) => {
+    try {
+      await unblockEventAuthor(id);
+      onToast(`Unblocked ${authorName} from creating events`);
+      fetchAdminData();
+      onRefreshGlobalData();
+    } catch (err: any) {
+      onToast(err.message || 'Failed to unblock author');
     }
   };
 
@@ -1015,122 +1067,172 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
       {/* TAB: EVENTS & OPPORTUNITIES */}
       {activeTab === 'events' && (() => {
-        const pendingEvents = (adminEvents || []).filter((e: any) => e.status === 'pending');
+        const filteredAdminEvents = (adminEvents || []).filter((e: any) => {
+          if (adminEventFilter === 'reported') return (e.report_count > 0 || (Array.isArray(e.reports) && e.reports.length > 0));
+          if (adminEventFilter === 'hidden') return Boolean(e.hidden_by_moderation);
+          if (adminEventFilter === 'cancelled') return Boolean(e.is_cancelled);
+          return true;
+        });
+
         return (
           <div className="space-y-6">
-            {/* 1. Awaiting Approval List at top of Events Tab with Counter Badge */}
-            <div className="kw-card overflow-hidden border-amber-500/40">
-              <div className="p-4 border-b border-[var(--card-border)] bg-amber-500/10 flex items-center justify-between">
+            {/* Events Moderation List with Filters (Part 5) */}
+            <div className="kw-card overflow-hidden">
+              <div className="p-4 border-b border-[var(--card-border)] bg-[var(--bg-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-amber-400" />
-                  <h4 className="font-bold text-sm text-[var(--fg)]">Awaiting approval</h4>
-                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/25 text-amber-300 border border-amber-500/40">
-                    {pendingEvents.length}
+                  <Calendar className="w-4 h-4 text-[var(--gold-text)]" />
+                  <h4 className="font-bold text-sm text-[var(--fg)]">Events Moderation</h4>
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    {adminEvents.length} total
                   </span>
                 </div>
-                <span className="text-xs text-[var(--fg-muted)]">
-                  {pendingEvents.length === 1 ? '1 submission awaiting review' : `${pendingEvents.length} submissions awaiting review`}
-                </span>
+
+                {/* Filters: All, Reported, Hidden, Cancelled (Part 5) */}
+                <div className="inline-flex rounded-lg border border-[var(--card-border)] bg-[var(--card)] p-0.5">
+                  {(['all', 'reported', 'hidden', 'cancelled'] as const).map(f => {
+                    const count = f === 'all'
+                      ? adminEvents.length
+                      : f === 'reported'
+                      ? adminEvents.filter((e: any) => (e.report_count > 0 || (Array.isArray(e.reports) && e.reports.length > 0))).length
+                      : f === 'hidden'
+                      ? adminEvents.filter((e: any) => e.hidden_by_moderation).length
+                      : adminEvents.filter((e: any) => e.is_cancelled).length;
+                    return (
+                      <button
+                        key={f}
+                        type="button"
+                        onClick={() => setAdminEventFilter(f)}
+                        className={`px-3 py-1 text-xs rounded-md font-medium capitalize transition-all ${
+                          adminEventFilter === f
+                            ? 'bg-[var(--gold)] text-[#090D16] font-bold'
+                            : 'text-[var(--fg-muted)] hover:text-[var(--fg)]'
+                        }`}
+                      >
+                        {f} ({count})
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              {pendingEvents.length === 0 ? (
-                <div className="p-6 text-center text-xs text-[var(--fg-muted)] flex items-center justify-center gap-2">
-                  <CheckCircle className="w-4 h-4 text-emerald-400" />
-                  <span>No pending submissions awaiting approval. All caught up!</span>
+              {filteredAdminEvents.length === 0 ? (
+                <div className="p-8 text-center text-xs text-[var(--fg-muted)]">
+                  No events match the "{adminEventFilter}" filter.
                 </div>
               ) : (
                 <div className="divide-y divide-[var(--card-border)]">
-                  {pendingEvents.map(item => (
-                    <div key={item.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-[var(--bg-subtle)]">
-                      <div className="space-y-1.5 min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[13px] font-bold uppercase ${
-                              item.kind === 'event'
-                                ? 'bg-amber-500/15 text-[var(--gold-text)]'
-                                : 'bg-emerald-500/15 text-emerald-400'
-                            }`}
-                          >
-                            {item.kind === 'event' ? 'Event' : item.opportunity_type || 'Opportunity'}
-                          </span>
-                          <span className="px-2 py-0.5 rounded text-[13px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                            Pending Approval
-                          </span>
-                          <span className="text-[13px] text-[var(--fg-muted)]">
-                            {item.datetime || `Deadline: ${item.deadline}`}
-                          </span>
-                        </div>
-                        <h4 className="text-sm font-bold text-[var(--fg)]">{item.title}</h4>
-                        <p className="text-xs text-[var(--fg-muted)] line-clamp-2">{item.description}</p>
-                        <div className="flex flex-wrap items-center gap-2 text-[13px] text-[var(--fg-muted)]">
-                          <span>
-                            Submitted by <strong className="text-[var(--gold-text)]">{item.author_name || item.author_id}</strong>
-                            {item.author_is_organiser && (
-                              <span className="ml-1 px-1.5 py-0.2 rounded text-[13px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">
-                                Organiser
+                  {filteredAdminEvents.map(item => {
+                    const authorProfile = members.find((m: any) => m.id === item.author_id || m.account_uid === item.author_id);
+                    const isAuthorBlocked = Boolean(authorProfile?.events_blocked);
+                    const reportCount = item.report_count ?? (Array.isArray(item.reports) ? item.reports.length : 0);
+                    const reasonsList = Array.isArray(item.reports) && item.reports.length > 0
+                      ? Array.from(new Set(item.reports.map((r: any) => r.reason))).join(', ')
+                      : 'None';
+                    const createdStr = item.created_at ? new Date(item.created_at).toLocaleString() : 'Unknown';
+
+                    return (
+                      <div key={item.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:bg-[var(--bg-subtle)]">
+                        <div className="space-y-1.5 min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[13px] font-bold uppercase ${
+                                item.kind === 'event'
+                                  ? 'bg-amber-500/15 text-[var(--gold-text)]'
+                                  : 'bg-emerald-500/15 text-emerald-400'
+                              }`}
+                            >
+                              {item.kind === 'event' ? 'Event' : item.opportunity_type || 'Opportunity'}
+                            </span>
+
+                            {item.hidden_by_moderation && (
+                              <span className="px-2 py-0.5 rounded text-[13px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                                Hidden (Under review)
                               </span>
                             )}
-                          </span>
-                          {item.location && <span>• 📍 {item.location}</span>}
-                          {item.link && <span>• 🔗 {item.link}</span>}
-                        </div>
-                        {item.cover_image && (
-                          <div className="flex items-center gap-2 pt-1.5">
-                            <div className="w-24 aspect-[16/9] rounded-lg overflow-hidden bg-black/10 border border-[var(--card-border)] flex-shrink-0">
-                              <img
-                                src={item.cover_image}
-                                alt={item.title}
-                                className="w-full h-full object-cover"
-                              />
-                            </div>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  await updateEvent(item.id, { cover_image: '' });
-                                  onToast('Cover image removed');
-                                  fetchAdminData();
-                                  onRefreshGlobalData();
-                                } catch (e: any) {
-                                  onToast('Failed to remove cover image: ' + e.message);
-                                }
-                              }}
-                              className="kw-btn kw-btn-ghost text-xs py-1 px-2 text-[var(--danger)] hover:bg-[var(--danger-subtle)]"
-                            >
-                              Remove cover
-                            </button>
-                          </div>
-                        )}
-                      </div>
 
-                      <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
-                        <button
-                          onClick={() => handleApproveEvent(item)}
-                          className="kw-btn kw-btn-gold text-xs py-1.5 px-3 font-bold flex items-center gap-1.5"
-                          title="Approve immediately"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                          <span>Approve</span>
-                        </button>
-                        <button
-                          onClick={() => handleEditAndApproveClick(item)}
-                          className="kw-btn text-xs py-1.5 px-3 font-medium flex items-center gap-1.5"
-                          title="Edit details and approve"
-                        >
-                          <Settings className="w-3.5 h-3.5 text-[var(--gold-text)]" />
-                          <span>Edit & approve</span>
-                        </button>
-                        <button
-                          onClick={() => handleOpenRejectModal(item)}
-                          className="kw-btn kw-btn-danger text-xs py-1.5 px-3 font-medium flex items-center gap-1.5"
-                          title="Reject with short reason"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                          <span>Reject</span>
-                        </button>
+                            {item.is_cancelled && (
+                              <span className="px-2 py-0.5 rounded text-[13px] font-bold bg-zinc-700/60 text-zinc-300 border border-zinc-600">
+                                Cancelled
+                              </span>
+                            )}
+
+                            {reportCount > 0 && (
+                              <span className="px-2 py-0.5 rounded text-[13px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                {reportCount} {reportCount === 1 ? 'Report' : 'Reports'}
+                              </span>
+                            )}
+
+                            <span className="text-[13px] text-[var(--fg-muted)]">
+                              Created: {createdStr}
+                            </span>
+                          </div>
+
+                          <h4 className="text-sm font-bold text-[var(--fg)]">{item.title}</h4>
+                          <p className="text-xs text-[var(--fg-muted)] line-clamp-2">{item.description}</p>
+
+                          <div className="flex flex-wrap items-center gap-3 text-[13px] text-[var(--fg-muted)] pt-1">
+                            <span>
+                              Author: <strong className="text-[var(--gold-text)]">{item.author_name || item.author_id}</strong>
+                              {isAuthorBlocked && (
+                                <span className="ml-1 text-rose-400 font-bold">(Blocked from creating events)</span>
+                              )}
+                            </span>
+                            {reportCount > 0 && (
+                              <span>• Reasons: <strong className="text-rose-300">{reasonsList}</strong></span>
+                            )}
+                            <span>• {item.attendee_ids?.length || 0} RSVPs</span>
+                          </div>
+                        </div>
+
+                        {/* Actions: Hide, Restore, Delete, Block/Unblock author (Part 5) */}
+                        <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+                          {item.hidden_by_moderation ? (
+                            <button
+                              onClick={() => handleRestoreEvent(item.id)}
+                              className="kw-btn text-xs py-1.5 px-3 font-semibold text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10"
+                              title="Restore event to public lists"
+                            >
+                              Restore
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleHideEvent(item.id)}
+                              className="kw-btn text-xs py-1.5 px-3 font-semibold text-amber-400 border border-amber-500/40 hover:bg-amber-500/10"
+                              title="Hide event from public lists"
+                            >
+                              Hide
+                            </button>
+                          )}
+
+                          {isAuthorBlocked ? (
+                            <button
+                              onClick={() => handleUnblockAuthor(item.id, item.author_name || 'Author')}
+                              className="kw-btn text-xs py-1.5 px-2.5 font-semibold text-blue-400 border border-blue-500/40 hover:bg-blue-500/10"
+                              title="Unblock author"
+                            >
+                              Unblock author
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleBlockAuthor(item.id, item.author_name || 'Author')}
+                              className="kw-btn text-xs py-1.5 px-2.5 font-semibold text-rose-400 border border-rose-500/40 hover:bg-rose-500/10"
+                              title="Block author from creating events"
+                            >
+                              Block author
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => handleDeleteEvent(item.id, item.title)}
+                            className="kw-btn kw-btn-danger text-xs py-1.5 px-2.5"
+                            title="Delete event"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

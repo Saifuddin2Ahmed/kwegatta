@@ -66,8 +66,8 @@ app.use(async (req: Request, _res: Response, next: () => void) => {
     } catch (err: any) {
       // Token expired, malformed, or dev domain
     }
-  } else if (token && (!adminAuth || process.env.NODE_ENV === 'test' || token.startsWith('test-'))) {
-    // In test environment or local mode without adminAuth, support mock test tokens
+  } else if (token && (process.env.NODE_ENV === 'test' || process.env.VITEST)) {
+    // In test environment, support mock test tokens
     (req as any).authUserId = token;
     (req as any).authUser = {
       uid: token,
@@ -1022,7 +1022,7 @@ function saveStore(storeData: StoreData) {
   }
 }
 
-let store: StoreData = loadStore();
+export let store: StoreData = loadStore();
 
 /* =========================================================================
    FIRESTORE PERSISTENCE HELPERS & SNAPSHOT REAL-TIME LISTENERS
@@ -1339,9 +1339,16 @@ async function initStorage(): Promise<void> {
       adminAuth = getAdminAuth(fbApp);
       console.log(`✅ [Firebase Admin] Auth initialized successfully for project "${FIREBASE_PROJECT_ID}"`);
     } catch (authInitErr: any) {
-      console.warn(`[Firebase Admin] Auth initialization warning:`, authInitErr?.message || authInitErr);
+      if (!isTestEnv()) {
+        console.error('ERROR: [Firebase Admin] adminAuth failed to initialise at startup outside of tests:', authInitErr?.message || authInitErr);
+      } else {
+        console.warn(`[Firebase Admin] Auth initialization warning:`, authInitErr?.message || authInitErr);
+      }
     }
   } catch (err: any) {
+    if (!isTestEnv()) {
+      console.error('ERROR: [Firebase Admin] adminAuth failed to initialise at startup outside of tests:', err?.message || err);
+    }
     if (isProduction) {
       console.error('FATAL: Could not initialize firebase-admin with projectId "kwegatta" in production:');
       console.error(err?.message || err);
@@ -1354,6 +1361,10 @@ async function initStorage(): Promise<void> {
       store = loadStore();
       return;
     }
+  }
+
+  if (!adminAuth && !isTestEnv()) {
+    console.error('ERROR: [Firebase Admin] adminAuth is unavailable outside of tests. Every request with a token will be treated as unauthenticated.');
   }
 
   try {
@@ -1391,6 +1402,7 @@ async function initStorage(): Promise<void> {
     await runSaifuddinProfileMigrationV2();
     await runSaifuddinProfileMigrationV3();
     await cleanupTestEvents();
+    await publishExistingPendingEvents();
   } catch (mErr: any) {
     console.warn('[Migration/Cleanup] Notice during migrations or cleanup:', mErr?.message || mErr);
   }
@@ -1870,9 +1882,46 @@ export async function cleanupTestEvents(): Promise<number> {
   return removedCount;
 }
 
-// Execute initial disk cleanup on startup if not yet applied
+/* =========================================================================
+   ONE-TIME PENDING EVENTS PUBLISH MIGRATION (Part 4 Release 1.4.0)
+   Publishes existing pending events, except any whose author no longer exists.
+   ========================================================================= */
+export const PUBLISH_PENDING_EVENTS_FLAG = 'publish_pending_events_v1';
+
+export async function publishExistingPendingEvents(): Promise<number> {
+  if (store.migrations && store.migrations[PUBLISH_PENDING_EVENTS_FLAG]?.completed) {
+    return 0;
+  }
+
+  let publishedCount = 0;
+  for (const ev of store.events || []) {
+    if (ev.status === 'pending' || ev.published === false) {
+      const authorExists = store.profiles.some((p: any) => p.id === ev.author_id || p.account_uid === ev.author_id);
+      if (authorExists) {
+        ev.status = 'published';
+        ev.published = true;
+        publishedCount++;
+        if (storageMode === 'firestore' && firestoreDb) {
+          await persistDoc('events', ev.id, ev);
+        }
+      }
+    }
+  }
+
+  if (!store.migrations) store.migrations = {};
+  store.migrations[PUBLISH_PENDING_EVENTS_FLAG] = {
+    completed: true,
+    published_count: publishedCount
+  };
+
+  if (storageMode === 'disk') saveStore(store);
+  return publishedCount;
+}
+
+// Execute initial disk cleanup and pending event publishing on startup if not yet applied
 if (!isTestEnv()) {
   cleanupTestEvents().catch(() => {});
+  publishExistingPendingEvents().catch(() => {});
 }
 
 /* =========================================================================
@@ -3633,12 +3682,6 @@ export async function handleEventImageUpload(req: Request, res: Response) {
 
   if (targetEvent) {
     targetEvent.cover_image = dataUrl;
-    // If the event was already approved and the caller is not an admin or trusted organiser,
-    // set it back to pending so the new image is reviewed.
-    if ((targetEvent.published || targetEvent.status === 'published' || targetEvent.status === 'approved') && !isAdmin && !isOrganiser) {
-      targetEvent.status = 'pending';
-      targetEvent.published = false;
-    }
     await persistDoc('events', targetEvent.id, targetEvent);
     if (storageMode === 'disk') saveStore(store);
   }
@@ -4013,6 +4056,16 @@ app.post('/api/admin/members/:id/unsuspend', async (req: Request, res: Response)
 });
 
 // Events & Opportunities Endpoints
+export type EventFormat = 'in_person' | 'online' | 'hybrid';
+export type EventPhase = 'upcoming' | 'live' | 'past';
+
+export interface EventReport {
+  reporter_id: string;
+  reason: string;
+  note?: string;
+  created_at: string;
+}
+
 export function canApproveEvent(isAdmin: boolean): boolean {
   return Boolean(isAdmin);
 }
@@ -4027,6 +4080,139 @@ export function canEditEvent(
   return callerId === itemAuthorId;
 }
 
+export function computeEventPhase(item: any, nowMs: number = Date.now()): EventPhase {
+  if (item?.is_cancelled) {
+    return 'past';
+  }
+  if (!item?.starts_at || !item?.ends_at) {
+    // Existing events that only have the old text field treat as upcoming until someone sets real times
+    return 'upcoming';
+  }
+  const startMs = new Date(item.starts_at).getTime();
+  const endMs = new Date(item.ends_at).getTime();
+  if (isNaN(startMs) || isNaN(endMs)) {
+    return 'upcoming';
+  }
+  if (nowMs < startMs) {
+    return 'upcoming';
+  }
+  if (nowMs >= startMs && nowMs <= endMs) {
+    return 'live';
+  }
+  return 'past';
+}
+
+export function validateEventTimesAndFormat(
+  raw: any,
+  isUpdate = false,
+  existingItem?: any
+): {
+  valid: boolean;
+  error?: string;
+  starts_at?: string;
+  ends_at?: string;
+  timezone?: string;
+  format?: EventFormat;
+  location?: string;
+  join_link?: string;
+  time_needs_update?: boolean;
+} {
+  if (raw.kind === 'opportunity') {
+    return { valid: true };
+  }
+
+  // Handle format: 'in_person' | 'online' | 'hybrid'
+  let format: EventFormat = raw.format || existingItem?.format || 'in_person';
+  if (!['in_person', 'online', 'hybrid'].includes(format)) {
+    return { valid: false, error: 'Event format must be in_person, online, or hybrid.' };
+  }
+
+  // Handle timezone
+  let timezone = raw.timezone || existingItem?.timezone || 'Africa/Kampala';
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: timezone });
+  } catch {
+    timezone = 'Africa/Kampala';
+  }
+
+  // Handle location and join_link
+  let location = raw.location !== undefined ? sanitizeText(raw.location, 200) : existingItem?.location;
+  let join_link = raw.join_link !== undefined ? sanitizeHttpsUrl(raw.join_link) : existingItem?.join_link;
+
+  if (format === 'in_person' || format === 'hybrid') {
+    if (!location || !location.trim()) {
+      return { valid: false, error: 'A location is required for in-person and hybrid events.' };
+    }
+  }
+
+  if (format === 'online' || format === 'hybrid') {
+    if (!join_link) {
+      return { valid: false, error: 'A valid https:// join link is required for online and hybrid events.' };
+    }
+  }
+
+  // Handle timestamps
+  let starts_at = raw.starts_at || (raw.start_date && raw.start_time ? new Date(`${raw.start_date}T${raw.start_time}`).toISOString() : undefined);
+  let ends_at = raw.ends_at || (raw.end_date && raw.end_time ? new Date(`${raw.end_date}T${raw.end_time}`).toISOString() : undefined);
+
+  if (!starts_at && existingItem?.starts_at) {
+    starts_at = existingItem.starts_at;
+  }
+  if (!ends_at && existingItem?.ends_at) {
+    ends_at = existingItem.ends_at;
+  }
+
+  // If no starts_at is provided, check if legacy text field exists
+  if (!starts_at) {
+    if (raw.datetime || existingItem?.datetime) {
+      return {
+        valid: true,
+        timezone,
+        format,
+        location,
+        join_link,
+        time_needs_update: true
+      };
+    }
+    return { valid: false, error: 'Start date and start time are required.' };
+  }
+
+  const startDate = new Date(starts_at);
+  if (isNaN(startDate.getTime())) {
+    return { valid: false, error: 'Invalid start date or time.' };
+  }
+
+  // Start cannot be in the past when creating
+  if (!isUpdate && startDate.getTime() < Date.now() - 5 * 60 * 1000) {
+    return { valid: false, error: 'Start time cannot be in the past.' };
+  }
+
+  // If member leaves the end empty, set it to start + 2 hours
+  if (!ends_at) {
+    ends_at = new Date(startDate.getTime() + 2 * 60 * 60 * 1000).toISOString();
+  }
+
+  const endDate = new Date(ends_at);
+  if (isNaN(endDate.getTime())) {
+    return { valid: false, error: 'Invalid end date or time.' };
+  }
+
+  if (endDate.getTime() <= startDate.getTime()) {
+    return { valid: false, error: 'End time must be after start time.' };
+  }
+
+  return {
+    valid: true,
+    starts_at: startDate.toISOString(),
+    ends_at: endDate.toISOString(),
+    timezone,
+    format,
+    location,
+    join_link,
+    time_needs_update: false
+  };
+}
+
 export function filterEventsForCaller(
   events: any[],
   callerId: string | null | undefined,
@@ -4035,6 +4221,15 @@ export function filterEventsForCaller(
 ): any[] {
   if (isAdmin) return Array.isArray(events) ? [...events] : [];
   return (events || []).filter((item: any) => {
+    // Auto-hidden by moderation (3+ distinct reports)
+    if (item.hidden_by_moderation) {
+      const isAuthor = Boolean(
+        (callerId && item.author_id === callerId) ||
+        (callerAltId && item.author_id === callerAltId)
+      );
+      return isAuthor; // Visible ONLY to author and admins (admins checked above)
+    }
+
     // Pending or rejected submissions are visible ONLY to their author and admins
     if (item.status === 'pending' || item.status === 'rejected') {
       const isAuthor = Boolean(
@@ -4047,11 +4242,26 @@ export function filterEventsForCaller(
   });
 }
 
-export function sanitizeEventForPublic(item: any): any {
+export function sanitizeEventForPublic(item: any, callerId?: string | null): any {
   if (!item) return item;
+  const phase = computeEventPhase(item);
+  const isPast = phase === 'past';
+  const hasRealTimes = Boolean(item.starts_at && item.ends_at);
+
+  // Join link: shown only to signed-in members, and hidden when event is past
+  const joinLink = (!callerId || isPast) ? undefined : item.join_link;
+
+  // Reports: never public and never show reporter identity to anyone except admin in admin routes
+  const { reports, ...rest } = item;
+
   return {
-    ...item,
-    cover_image: item.cover_image ? `/api/event-image/${item.id}` : undefined
+    ...rest,
+    phase,
+    time_needs_update: !hasRealTimes && item.kind === 'event',
+    join_link: joinLink,
+    cover_image: item.cover_image ? `/api/event-image/${item.id}` : undefined,
+    report_count: Array.isArray(reports) ? reports.length : (item.report_count || 0),
+    under_review: Boolean(item.under_review || (item.hidden_by_moderation && !item.reviewed_by_admin))
   };
 }
 
@@ -4067,25 +4277,39 @@ app.get('/api/events', (req: Request, res: Response) => {
     list = filterEventsForCaller(list, callerProfileId || callerId, false);
   }
 
-  // Sort: upcoming first (by datetime or deadline asc), past items at the end
+  // Sort:
+  // Live items on top, then upcoming soonest first (starts_at or datetime asc),
+  // past items at the end (most recent first)
   const now = Date.now();
   list.sort((a: any, b: any) => {
-    const timeA = new Date(a.datetime || a.deadline || a.created_at).getTime();
-    const timeB = new Date(b.datetime || b.deadline || b.created_at).getTime();
-    const isPastA = timeA < now;
-    const isPastB = timeB < now;
+    const phaseA = computeEventPhase(a, now);
+    const phaseB = computeEventPhase(b, now);
 
-    if (isPastA && !isPastB) return 1;
+    // Live events on top
+    if (phaseA === 'live' && phaseB !== 'live') return -1;
+    if (phaseA !== 'live' && phaseB === 'live') return 1;
+
+    // Upcoming before past
+    const isPastA = phaseA === 'past';
+    const isPastB = phaseB === 'past';
     if (!isPastA && isPastB) return -1;
-    if (!isPastA && !isPastB) return timeA - timeB; // upcoming sooner first
-    return timeB - timeA; // past most recent first
+    if (isPastA && !isPastB) return 1;
+
+    const timeA = new Date(a.starts_at || a.datetime || a.deadline || a.created_at).getTime();
+    const timeB = new Date(b.starts_at || b.datetime || b.deadline || b.created_at).getTime();
+
+    if (!isPastA) {
+      // Upcoming: soonest first
+      return timeA - timeB;
+    } else {
+      // Past: most recent first
+      const endTimeA = new Date(a.ends_at || a.starts_at || a.datetime || a.created_at).getTime();
+      const endTimeB = new Date(b.ends_at || b.starts_at || b.datetime || b.created_at).getTime();
+      return endTimeB - endTimeA;
+    }
   });
 
-  const sanitizedList = list.map((ev: any) => ({
-    ...ev,
-    cover_image: ev.cover_image ? `/api/event-image/${ev.id}` : undefined
-  }));
-
+  const sanitizedList = list.map((ev: any) => sanitizeEventForPublic(ev, callerId));
   return res.json(sanitizedList);
 });
 
@@ -4103,26 +4327,33 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
 
   const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
 
+  // Auto-hidden by moderation: visible ONLY to author and admins
+  if (item.hidden_by_moderation && !isAdmin && !isAuthor) {
+    return res.status(404).json({ error: 'Event under review or unpublished' });
+  }
+
   // Pending, unpublished, or rejected items are visible ONLY to their author and admins
   if (!isAdmin && !isAuthor && (item.published === false || item.status === 'pending' || item.status === 'rejected')) {
     return res.status(404).json({ error: 'Event not found or unpublished' });
   }
 
-  // Resolve attendee profiles: names and photos only, never emails or phone numbers
   const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
-  const attendeeProfiles = store.profiles
-    .filter((p: any) => attendeeIds.includes(p.id) && !p.hidden && !p.suspended)
-    .map((p: any) => ({
-      id: p.id,
-      name: p.name,
-      avatar: `/api/avatar/${p.id}`,
-      role: p.role,
-      headline: p.headline
-    }));
 
-  // Compute "People you should meet there" for signed-in caller
+  // Signed-out visitors see everything except the join link and the list of who is going; they see only the count.
+  let attendeeProfiles: any[] = [];
   let peopleToMeet: Array<{ profile: any; reason: string; score: number }> = [];
+
   if (callerId) {
+    attendeeProfiles = store.profiles
+      .filter((p: any) => attendeeIds.includes(p.id) && !p.hidden && !p.suspended)
+      .map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        avatar: `/api/avatar/${p.id}`,
+        role: p.role,
+        headline: p.headline
+      }));
+
     if (callerProfile) {
       const otherAttendees = store.profiles.filter(
         (p: any) => attendeeIds.includes(p.id) && p.id !== callerProfile.id && !p.hidden && !p.suspended
@@ -4169,11 +4400,13 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
     store.profiles.some((p: any) => (p.account_uid === callerId || p.id === callerId) && attendeeIds.includes(p.id))
   ));
 
+  const sanitized = sanitizeEventForPublic(item, callerId);
+
   return res.json({
-    ...item,
-    cover_image: item.cover_image ? `/api/event-image/${item.id}` : undefined,
-    attendees: attendeeProfiles,
-    people_to_meet: peopleToMeet,
+    ...sanitized,
+    attendees: callerId ? attendeeProfiles : undefined,
+    attendee_count: attendeeIds.length,
+    people_to_meet: callerId ? peopleToMeet : undefined,
     is_attending: isAttending
   });
 });
@@ -4188,6 +4421,15 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
   const item = (store.events || []).find((e: any) => e.id === id);
   if (!item) {
     return res.status(404).json({ error: 'Event or Opportunity not found' });
+  }
+
+  // Part 3: Past events: RSVP is closed on the server (reject with 409)
+  const phase = computeEventPhase(item);
+  if (phase === 'past') {
+    return res.status(409).json({ error: 'RSVP is closed because this event has ended.' });
+  }
+  if (item.is_cancelled) {
+    return res.status(409).json({ error: 'RSVP is closed because this event was cancelled.' });
   }
 
   // Find caller's profile ID
@@ -4226,7 +4468,18 @@ app.post('/api/events', async (req: Request, res: Response) => {
   const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
 
   if (!isAdmin && !callerId) {
-    return res.status(401).json({ error: 'Please sign in to suggest an event or opportunity.' });
+    return res.status(401).json({ error: 'Please sign in to create an event.' });
+  }
+
+  // Part 4: Profile completion check
+  if (!isAdmin) {
+    if (!callerProfile || !callerProfile.name || !callerProfile.headline) {
+      return res.status(400).json({ error: 'Please complete your profile before creating an event.' });
+    }
+    // Part 5: Blocked member check
+    if (callerProfile.events_blocked) {
+      return res.status(403).json({ error: "You can't create events right now" });
+    }
   }
 
   const raw = req.body || {};
@@ -4236,6 +4489,12 @@ app.post('/api/events', async (req: Request, res: Response) => {
 
   if (!title || !description) {
     return res.status(400).json({ error: 'Title and description are required.' });
+  }
+
+  // Validate times, format, and locations for events
+  const timeValidation = validateEventTimesAndFormat(raw, false);
+  if (!timeValidation.valid) {
+    return res.status(400).json({ error: timeValidation.error });
   }
 
   // Links must be https
@@ -4259,28 +4518,31 @@ app.post('/api/events', async (req: Request, res: Response) => {
   const authorName = isAdmin ? adminInfo.adminName : (callerProfile?.name || 'Member');
   const isOrganiser = Boolean(callerProfile?.is_organiser);
 
-  // Limits for non-admin: max 3 pending submissions, max 5 a week
+  // Part 4: Limits enforced on server
+  // at most 3 events created per member per 24 hours, and at most 10 upcoming events per member at once.
   if (!isAdmin) {
-    const pendingCount = (store.events || []).filter((e: any) =>
-      (e.author_id === authorId || e.author_id === callerId) && e.status === 'pending'
+    const past24h = Date.now() - 24 * 60 * 60 * 1000;
+    const createdLast24h = (store.events || []).filter((e: any) =>
+      (e.author_id === authorId || e.author_id === callerId) &&
+      new Date(e.created_at).getTime() >= past24h
     ).length;
-    if (pendingCount >= 3) {
-      return res.status(400).json({ error: 'Limit reached: You have 3 pending submissions awaiting approval.' });
+    if (createdLast24h >= 3) {
+      return res.status(400).json({ error: 'Creation limit reached: At most 3 events created per member per 24 hours.' });
     }
 
-    const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    const weekCount = (store.events || []).filter((e: any) =>
+    const activeUpcoming = (store.events || []).filter((e: any) =>
       (e.author_id === authorId || e.author_id === callerId) &&
-      new Date(e.created_at).getTime() > oneWeekAgo
+      !e.is_cancelled &&
+      computeEventPhase(e) !== 'past'
     ).length;
-    if (weekCount >= 5) {
-      return res.status(400).json({ error: 'Limit reached: Maximum 5 submissions per week.' });
+    if (activeUpcoming >= 10) {
+      return res.status(400).json({ error: 'Creation limit reached: At most 10 upcoming events active at once.' });
     }
   }
 
-  // Organiser or admin items are published at once; others are pending approval
-  const status = (isAdmin || isOrganiser) ? 'published' : 'pending';
-  const published = status === 'published';
+  // Direct publishing immediately (no admin approval step)
+  const status = 'published';
+  const published = true;
 
   const item: any = {
     id: (kind === 'event' ? 'event-' : 'opp-') + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
@@ -4288,7 +4550,13 @@ app.post('/api/events', async (req: Request, res: Response) => {
     title,
     description,
     datetime: raw.datetime ? sanitizeText(raw.datetime, 60) : undefined,
-    location: raw.location ? sanitizeText(raw.location, 200) : undefined,
+    starts_at: timeValidation.starts_at,
+    ends_at: timeValidation.ends_at,
+    timezone: timeValidation.timezone,
+    format: timeValidation.format || (raw.format ? sanitizeText(raw.format, 20) : 'in_person'),
+    location: timeValidation.location || (raw.location ? sanitizeText(raw.location, 200) : undefined),
+    join_link: timeValidation.join_link,
+    time_needs_update: Boolean(timeValidation.time_needs_update),
     cover_image: raw.cover_image ? validateAndSanitizeEventCoverImage(raw.cover_image) : undefined,
     registration_link,
     opportunity_type: raw.opportunity_type ? sanitizeText(raw.opportunity_type, 50) : undefined,
@@ -4299,7 +4567,10 @@ app.post('/api/events', async (req: Request, res: Response) => {
     author_is_organiser: isOrganiser,
     status,
     published,
+    is_cancelled: false,
     attendee_ids: [],
+    reports: [],
+    report_count: 0,
     created_at: new Date().toISOString(),
     created_by: authorName
   };
@@ -4308,60 +4579,42 @@ app.post('/api/events', async (req: Request, res: Response) => {
   store.events.unshift(item);
   await persistDoc('events', item.id, item);
 
-  // If published (admin or trusted organiser), broadcast notification to members
-  if (item.published) {
-    const notifBody = kind === 'event'
-      ? `📅 New Event: ${item.title}`
-      : `💡 New Opportunity (${item.opportunity_type || 'General'}): ${item.title}`;
+  // Broadcast notification to community members
+  const notifBody = kind === 'event'
+    ? `📅 New Event: ${item.title}`
+    : `💡 New Opportunity (${item.opportunity_type || 'General'}): ${item.title}`;
 
-    const newNotifs: Array<{ id: string; data: any }> = [];
-    for (const p of store.profiles) {
-      if (p.hidden || p.suspended || p.id === authorId) continue;
-      const notif = {
-        id: 'notif-ev-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-        to_id: p.id,
-        from_id: 'organiser',
-        type: 'digest',
-        body: notifBody,
-        read: false,
-        created_at: new Date().toISOString()
-      };
-      store.notifications.unshift(notif);
-      newNotifs.push({ id: notif.id, data: notif });
-    }
-    if (newNotifs.length > 0) {
-      await batchPersistDocs('notifications', newNotifs);
-    }
-  } else {
-    // Notify admins of new pending submission awaiting approval
-    const adminEmails = getAdminEmailsList();
-    for (const p of store.profiles) {
-      if (p.email && adminEmails.includes(p.email.toLowerCase())) {
-        store.notifications.unshift({
-          id: 'notif-pending-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-          to_id: p.id,
-          from_id: 'system',
-          type: 'system',
-          body: `📋 New event submission awaiting approval: "${item.title}" by ${authorName}`,
-          read: false,
-          created_at: new Date().toISOString()
-        });
-      }
-    }
+  const newNotifs: Array<{ id: string; data: any }> = [];
+  for (const p of store.profiles) {
+    if (p.hidden || p.suspended || p.id === authorId) continue;
+    const notif = {
+      id: 'notif-ev-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      to_id: p.id,
+      from_id: 'organiser',
+      type: 'digest',
+      body: notifBody,
+      read: false,
+      created_at: new Date().toISOString()
+    };
+    store.notifications.unshift(notif);
+    newNotifs.push({ id: notif.id, data: notif });
+  }
+  if (newNotifs.length > 0) {
+    await batchPersistDocs('notifications', newNotifs);
   }
 
   const auditEntry = {
     id: 'audit-' + Date.now(),
     timestamp: new Date().toISOString(),
-    action: isAdmin ? 'CREATE_EVENT' : 'SUBMIT_EVENT',
-    details: `${isAdmin ? 'Created' : 'Submitted'} ${kind}: "${item.title}" (${status})`,
+    action: 'CREATE_EVENT',
+    details: `Created ${kind}: "${item.title}" (${status})`,
     admin: isAdmin ? adminInfo.adminName : authorName
   };
   store.audit_log.unshift(auditEntry);
   await persistDoc('audit_log', auditEntry.id, auditEntry);
 
   if (storageMode === 'disk') saveStore(store);
-  return res.json({ success: true, item: sanitizeEventForPublic(item) });
+  return res.json({ success: true, item: sanitizeEventForPublic(item, callerId) });
 });
 
 app.patch('/api/events/:id', async (req: Request, res: Response) => {
@@ -4377,18 +4630,26 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Event or Opportunity not found' });
   }
 
-  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
   if (!canEditEvent(callerProfileId || callerId, item.author_id, isAdmin)) {
     return res.status(403).json({ error: 'Forbidden: You can only edit your own submissions.' });
   }
 
   const raw = req.body || {};
-  const wasUnpublished = item.published === false;
 
-  const dateChanged = raw.datetime !== undefined && raw.datetime !== item.datetime;
-  const placeChanged = raw.location !== undefined && raw.location !== item.location;
-  const linkChanged = (raw.link !== undefined && raw.link !== item.link) ||
-                      (raw.registration_link !== undefined && raw.registration_link !== item.registration_link);
+  // If times/format are provided, validate them
+  if (raw.starts_at || raw.ends_at || raw.format || raw.timezone || raw.location || raw.join_link) {
+    const timeValidation = validateEventTimesAndFormat(raw, true, item);
+    if (!timeValidation.valid) {
+      return res.status(400).json({ error: timeValidation.error });
+    }
+    if (timeValidation.starts_at) item.starts_at = timeValidation.starts_at;
+    if (timeValidation.ends_at) item.ends_at = timeValidation.ends_at;
+    if (timeValidation.timezone) item.timezone = timeValidation.timezone;
+    if (timeValidation.format) item.format = timeValidation.format;
+    if (timeValidation.location) item.location = timeValidation.location;
+    if (timeValidation.join_link) item.join_link = timeValidation.join_link;
+    if (timeValidation.time_needs_update !== undefined) item.time_needs_update = timeValidation.time_needs_update;
+  }
 
   if (raw.title !== undefined) item.title = sanitizeText(raw.title, 150);
   if (raw.description !== undefined) item.description = sanitizeText(raw.description, 2000);
@@ -4402,57 +4663,14 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
   if (raw.deadline !== undefined) item.deadline = sanitizeText(raw.deadline, 60);
   if (raw.link !== undefined) item.link = sanitizeHttpsUrl(raw.link);
 
+  // Author can cancel event
+  if (raw.is_cancelled !== undefined) {
+    item.is_cancelled = Boolean(raw.is_cancelled);
+  }
+
   if (isAdmin && raw.published !== undefined) {
     item.published = Boolean(raw.published);
     if (item.published) item.status = 'published';
-  }
-
-  // Requirement 5: Editing date, place or link of an approved item by a non-organiser sends it back to "pending"
-  if (!isAdmin && !callerProfile?.is_organiser && item.status === 'published' && (dateChanged || placeChanged || linkChanged)) {
-    item.status = 'pending';
-    item.published = false;
-
-    // Notify admins of re-submission
-    const adminEmails = getAdminEmailsList();
-    for (const p of store.profiles) {
-      if (p.email && adminEmails.includes(p.email.toLowerCase())) {
-        store.notifications.unshift({
-          id: 'notif-pending-edit-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-          to_id: p.id,
-          from_id: 'system',
-          type: 'system',
-          body: `📋 Event details updated, awaiting re-approval: "${item.title}" by ${item.author_name || 'Member'}`,
-          read: false,
-          created_at: new Date().toISOString()
-        });
-      }
-    }
-  }
-
-  // If newly published, broadcast one notification
-  if (wasUnpublished && item.published) {
-    const notifBody = item.kind === 'event'
-      ? `📅 New Event: ${item.title}`
-      : `💡 New Opportunity (${item.opportunity_type || 'General'}): ${item.title}`;
-
-    const newNotifs: Array<{ id: string; data: any }> = [];
-    for (const p of store.profiles) {
-      if (p.hidden || p.suspended || p.id === item.author_id) continue;
-      const notif = {
-        id: 'notif-ev-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-        to_id: p.id,
-        from_id: 'organiser',
-        type: 'digest',
-        body: notifBody,
-        read: false,
-        created_at: new Date().toISOString()
-      };
-      store.notifications.unshift(notif);
-      newNotifs.push({ id: notif.id, data: notif });
-    }
-    if (newNotifs.length > 0) {
-      await batchPersistDocs('notifications', newNotifs);
-    }
   }
 
   await persistDoc('events', item.id, item);
@@ -4460,15 +4678,50 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
   const auditEntry = {
     id: 'audit-' + Date.now(),
     timestamp: new Date().toISOString(),
-    action: 'UPDATE_EVENT',
-    details: `Updated ${item.kind}: "${item.title}" (${item.status || (item.published ? 'Published' : 'Unpublished')})`,
+    action: item.is_cancelled ? 'CANCEL_EVENT' : 'UPDATE_EVENT',
+    details: `${item.is_cancelled ? 'Cancelled' : 'Updated'} ${item.kind}: "${item.title}"`,
     admin: isAdmin ? adminInfo.adminName : (item.author_name || 'Member')
   };
   store.audit_log.unshift(auditEntry);
   await persistDoc('audit_log', auditEntry.id, auditEntry);
 
   if (storageMode === 'disk') saveStore(store);
-  return res.json({ success: true, item: sanitizeEventForPublic(item) });
+  return res.json({ success: true, item: sanitizeEventForPublic(item, callerId) });
+});
+
+// Author or Admin: Cancel an event
+app.post('/api/events/:id/cancel', async (req: Request, res: Response) => {
+  const adminInfo = resolveAdminInfo(req);
+  const isAdmin = adminInfo.isAdmin;
+  const callerId = resolveAuthUserId(req);
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
+
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) {
+    return res.status(404).json({ error: 'Event or Opportunity not found' });
+  }
+
+  if (!canEditEvent(callerProfileId || callerId, item.author_id, isAdmin)) {
+    return res.status(403).json({ error: 'Forbidden: You can only cancel your own events.' });
+  }
+
+  item.is_cancelled = true;
+  await persistDoc('events', item.id, item);
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'CANCEL_EVENT',
+    details: `Cancelled ${item.kind}: "${item.title}"`,
+    admin: isAdmin ? adminInfo.adminName : (item.author_name || 'Member')
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true, message: 'Event cancelled successfully', item: sanitizeEventForPublic(item, callerId) });
 });
 
 app.delete('/api/events/:id', async (req: Request, res: Response) => {
@@ -4484,7 +4737,6 @@ app.delete('/api/events/:id', async (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Event or Opportunity not found' });
   }
 
-  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
   if (!canEditEvent(callerProfileId || callerId, item.author_id, isAdmin)) {
     return res.status(403).json({ error: 'Forbidden: You can only delete your own submissions.' });
   }
@@ -4506,7 +4758,212 @@ app.delete('/api/events/:id', async (req: Request, res: Response) => {
   return res.json({ success: true, message: 'Event or Opportunity deleted' });
 });
 
-// Admin Review: Approve pending event/opportunity
+// Part 5: Report an event for moderation
+app.post('/api/events/:id/report', async (req: Request, res: Response) => {
+  const callerId = resolveAuthUserId(req);
+  if (!callerId) {
+    return res.status(401).json({ error: 'Please sign in to report an event.' });
+  }
+
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) {
+    return res.status(404).json({ error: 'Event not found.' });
+  }
+
+  const callerProfile = store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId);
+  const reporterId = callerProfile?.id || callerId;
+
+  const rawReason = req.body?.reason;
+  const allowedReasons = ['Not a real event', 'Spam or scam', 'Offensive', 'Other'];
+  if (!rawReason || !allowedReasons.includes(rawReason)) {
+    return res.status(400).json({ error: 'Invalid reason. Must be one of: ' + allowedReasons.join(', ') });
+  }
+
+  const note = req.body?.note ? sanitizeText(req.body.note, 500) : undefined;
+
+  if (!Array.isArray(item.reports)) {
+    item.reports = [];
+  }
+
+  // One report per member per event
+  const alreadyReported = item.reports.some((r: any) => r.reporter_id === reporterId);
+  if (alreadyReported) {
+    return res.status(400).json({ error: 'You have already reported this event.' });
+  }
+
+  const report = {
+    reporter_id: reporterId,
+    reason: rawReason,
+    note,
+    created_at: new Date().toISOString()
+  };
+  item.reports.push(report);
+  item.report_count = item.reports.length;
+
+  // Auto-hide check: 3 or more reports from different members hides event from public lists
+  const distinctReporters = new Set(item.reports.map((r: any) => r.reporter_id)).size;
+  if (distinctReporters >= 3 && !item.reviewed_by_admin) {
+    item.hidden_by_moderation = true;
+    item.under_review = true;
+  }
+
+  await persistDoc('events', item.id, item);
+  if (storageMode === 'disk') saveStore(store);
+
+  return res.json({
+    success: true,
+    message: 'Report submitted successfully.',
+    report_count: item.report_count,
+    hidden_by_moderation: Boolean(item.hidden_by_moderation)
+  });
+});
+
+// Part 5: Admin moderation routes
+app.get('/api/admin/events', (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+  return res.json(store.events || []);
+});
+
+app.post('/api/admin/events/:id/hide', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) return res.status(404).json({ error: 'Event not found' });
+
+  item.hidden_by_moderation = true;
+  item.reviewed_by_admin = true;
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'HIDE_EVENT',
+    details: `Admin hid event "${item.title}" (${id})`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+  await persistDoc('events', item.id, item);
+  if (storageMode === 'disk') saveStore(store);
+
+  return res.json({ success: true, message: 'Event hidden', item });
+});
+
+app.post('/api/admin/events/:id/restore', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) return res.status(404).json({ error: 'Event not found' });
+
+  item.hidden_by_moderation = false;
+  item.reviewed_by_admin = true;
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'RESTORE_EVENT',
+    details: `Admin restored event "${item.title}" (${id})`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+  await persistDoc('events', item.id, item);
+  if (storageMode === 'disk') saveStore(store);
+
+  return res.json({ success: true, message: 'Event restored', item });
+});
+
+app.delete('/api/admin/events/:id', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) return res.status(404).json({ error: 'Event not found' });
+
+  store.events = (store.events || []).filter((e: any) => e.id !== id);
+  await removeDoc('events', id);
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'DELETE_EVENT_ADMIN',
+    details: `Admin deleted event "${item.title}" (${id})`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+  if (storageMode === 'disk') saveStore(store);
+
+  return res.json({ success: true, message: 'Event deleted' });
+});
+
+app.post('/api/admin/events/:id/block-author', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) return res.status(404).json({ error: 'Event not found' });
+
+  const authorProfile = store.profiles.find((p: any) => p.id === item.author_id || p.account_uid === item.author_id);
+  if (!authorProfile) {
+    return res.status(404).json({ error: 'Author profile not found' });
+  }
+
+  authorProfile.events_blocked = true;
+  await persistDoc('profiles', authorProfile.id, authorProfile);
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'BLOCK_EVENT_AUTHOR',
+    details: `Admin blocked author ${authorProfile.name} (${authorProfile.id}) from creating events`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+  if (storageMode === 'disk') saveStore(store);
+
+  return res.json({ success: true, message: `Author ${authorProfile.name} blocked from creating events` });
+});
+
+app.post('/api/admin/events/:id/unblock-author', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) return res.status(404).json({ error: 'Event not found' });
+
+  const authorProfile = store.profiles.find((p: any) => p.id === item.author_id || p.account_uid === item.author_id);
+  if (!authorProfile) {
+    return res.status(404).json({ error: 'Author profile not found' });
+  }
+
+  authorProfile.events_blocked = false;
+  await persistDoc('profiles', authorProfile.id, authorProfile);
+
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'UNBLOCK_EVENT_AUTHOR',
+    details: `Admin unblocked author ${authorProfile.name} (${authorProfile.id}) from creating events`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+  if (storageMode === 'disk') saveStore(store);
+
+  return res.json({ success: true, message: `Author ${authorProfile.name} unblocked from creating events` });
+});
+
+// Admin Review: Approve event/opportunity (alias)
 app.post('/api/admin/events/:id/approve', async (req: Request, res: Response) => {
   const admin = verifyAdmin(req, res);
   if (!admin) return;
@@ -4515,80 +4972,18 @@ app.post('/api/admin/events/:id/approve', async (req: Request, res: Response) =>
   const item = (store.events || []).find((e: any) => e.id === id);
   if (!item) return res.status(404).json({ error: 'Event or Opportunity not found' });
 
-  // Optional edits while approving
-  const raw = req.body || {};
-  if (raw.title !== undefined) item.title = sanitizeText(raw.title, 150);
-  if (raw.description !== undefined) item.description = sanitizeText(raw.description, 2000);
-  if (raw.datetime !== undefined) item.datetime = sanitizeText(raw.datetime, 60);
-  if (raw.location !== undefined) item.location = sanitizeText(raw.location, 200);
-  if (raw.cover_image !== undefined) {
-    item.cover_image = raw.cover_image ? validateAndSanitizeEventCoverImage(raw.cover_image) : undefined;
-  }
-  if (raw.registration_link !== undefined) item.registration_link = sanitizeHttpsUrl(raw.registration_link);
-  if (raw.opportunity_type !== undefined) item.opportunity_type = sanitizeText(raw.opportunity_type, 50);
-  if (raw.deadline !== undefined) item.deadline = sanitizeText(raw.deadline, 60);
-  if (raw.link !== undefined) item.link = sanitizeHttpsUrl(raw.link);
-
   item.status = 'published';
   item.published = true;
+  item.hidden_by_moderation = false;
   item.approved_by = admin.adminName;
   item.approved_at = new Date().toISOString();
-
-  // Author gets a notification: approved (with the link)
-  if (item.author_id) {
-    const notif = {
-      id: 'notif-appr-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-      to_id: item.author_id,
-      from_id: 'organiser',
-      type: 'digest',
-      body: `🎉 Your event "${item.title}" was approved! Check it out: /?tab=events&id=${item.id}`,
-      read: false,
-      created_at: new Date().toISOString()
-    };
-    store.notifications.unshift(notif);
-    await persistDoc('notifications', notif.id, notif);
-  }
-
-  // Broadcast notification to community members
-  const notifBody = item.kind === 'event'
-    ? `📅 New Event: ${item.title}`
-    : `💡 New Opportunity (${item.opportunity_type || 'General'}): ${item.title}`;
-
-  const newNotifs: Array<{ id: string; data: any }> = [];
-  for (const p of store.profiles) {
-    if (p.hidden || p.suspended || p.id === item.author_id) continue;
-    const notif = {
-      id: 'notif-ev-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-      to_id: p.id,
-      from_id: 'organiser',
-      type: 'digest',
-      body: notifBody,
-      read: false,
-      created_at: new Date().toISOString()
-    };
-    store.notifications.unshift(notif);
-    newNotifs.push({ id: notif.id, data: notif });
-  }
-  if (newNotifs.length > 0) {
-    await batchPersistDocs('notifications', newNotifs);
-  }
-
-  const auditEntry = {
-    id: 'audit-' + Date.now(),
-    timestamp: new Date().toISOString(),
-    action: 'APPROVE_EVENT',
-    details: `Approved ${item.kind}: "${item.title}" (Author: ${item.author_name || item.author_id})`,
-    admin: admin.adminName
-  };
-  store.audit_log.unshift(auditEntry);
-  await persistDoc('audit_log', auditEntry.id, auditEntry);
 
   await persistDoc('events', item.id, item);
   if (storageMode === 'disk') saveStore(store);
   return res.json({ success: true, item: sanitizeEventForPublic(item) });
 });
 
-// Admin Review: Reject pending event/opportunity with short reason
+// Admin Review: Reject event/opportunity (alias)
 app.post('/api/admin/events/:id/reject', async (req: Request, res: Response) => {
   const admin = verifyAdmin(req, res);
   if (!admin) return;
@@ -4597,38 +4992,11 @@ app.post('/api/admin/events/:id/reject', async (req: Request, res: Response) => 
   const item = (store.events || []).find((e: any) => e.id === id);
   if (!item) return res.status(404).json({ error: 'Event or Opportunity not found' });
 
-  const reason = sanitizeText(req.body?.reason, 300) || 'Does not align with community guidelines';
-
   item.status = 'rejected';
   item.published = false;
-  item.rejection_reason = reason;
+  item.rejection_reason = sanitizeText(req.body?.reason, 300) || 'Guidelines violation';
   item.rejected_by = admin.adminName;
   item.rejected_at = new Date().toISOString();
-
-  // Author gets a notification: rejected (with the reason)
-  if (item.author_id) {
-    const notif = {
-      id: 'notif-rej-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-      to_id: item.author_id,
-      from_id: 'organiser',
-      type: 'digest',
-      body: `⚠️ Your event submission "${item.title}" was not approved: ${reason}`,
-      read: false,
-      created_at: new Date().toISOString()
-    };
-    store.notifications.unshift(notif);
-    await persistDoc('notifications', notif.id, notif);
-  }
-
-  const auditEntry = {
-    id: 'audit-' + Date.now(),
-    timestamp: new Date().toISOString(),
-    action: 'REJECT_EVENT',
-    details: `Rejected ${item.kind}: "${item.title}" Reason: "${reason}"`,
-    admin: admin.adminName
-  };
-  store.audit_log.unshift(auditEntry);
-  await persistDoc('audit_log', auditEntry.id, auditEntry);
 
   await persistDoc('events', item.id, item);
   if (storageMode === 'disk') saveStore(store);

@@ -4,6 +4,39 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-10-10
+
+### Security Fix (Auth Middleware)
+- Hardened server authentication middleware in `server.ts`: removed `!adminAuth` and `token.startsWith('test-')` bypass conditions outside test environments (`NODE_ENV === 'test' || VITEST`).
+- In production, if `adminAuth` is unavailable, all requests bearing unverified tokens are strictly treated as unauthenticated (401), logging a clear error at startup.
+
+### Real Event Times & Timezones
+- Replaced free-text datetime fields with ISO 8601 UTC timestamps (`starts_at` and `ends_at`) and IANA timezone tracking (defaulting to creator's browser timezone).
+- Added structured form fields for start date, start time, end date, end time, and timezone. Enforced that end time is after start time (defaulting to start + 2 hours if omitted), and start time cannot be in the past when creating.
+- Introduced format selection (`in_person`, `online`, `hybrid`) with strict location and HTTPS join link validation.
+- Viewer time conversion implemented via `Intl.DateTimeFormat` displaying localized viewer time with event origin timezone annotation. Legacy text events remain visible with "Time needs updating" notification.
+
+### Automatic Event Lifecycles
+- Dynamic server-side phase calculation at read time (`upcoming`, `live`, `past`) from timestamps without scheduled cron jobs.
+- Events view separated into "Upcoming" (soonest first with "Live now" badge) and "Past" (most recent first) tabs with clean one-sentence, one-button empty states.
+- Past events automatically close RSVPs with HTTP 409, replace the RSVP button with "Event ended", and conceal online meeting join links.
+
+### Direct Member Publishing (Luma-style)
+- Any authenticated member with a completed profile can publish events immediately without pre-approval. Renamed "Suggest an event" to "Create event" across navigation and UI.
+- Enforced server rate limits: maximum 3 created events per member per 24 hours and at most 10 active upcoming events per member at once.
+- Full author controls to edit details or cancel their event (marking it "Cancelled" and closing RSVPs while preserving the page).
+
+### Post-Publication Moderation & Admin Dashboard
+- Added confidential "Report event" feature for signed-in members with structured categories (Not a real event, Spam or scam, Offensive, Other) and optional notes.
+- Automatic moderation: events with 3 or more reports from distinct members are hidden from public listings automatically until administrator review (marked "Under review" for authors and admins).
+- Admin dashboard Events tab equipped with filters (All, Reported, Hidden, Cancelled), author details, creation timestamps, report counts, and reasons.
+- Admin actions: Hide, Restore, Delete, and Block/Unblock author from creating events, with complete audit logging.
+
+### Event Page, ICS & Calendar Sharing
+- Dedicated permalink page at `#/events/<id>` showing full cover image, host card, date/time, format, attendee counts, RSVP actions, and moderation reporting.
+- Native sharing and "Add to calendar" integrations: prefilled Google Calendar link and RFC 5545 `.ics` file generation and download in the browser.
+- Privacy boundary: signed-out visitors see only aggregate attendee counts without individual profile lists or meeting links.
+
 ---
 
 ## [1.3.3] - 2026-10-09

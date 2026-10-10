@@ -21,9 +21,13 @@ import {
   sanitizeCustomLinks,
   runSaifuddinProfileMigration,
   SAIFUDDIN_PROFILE_MIGRATION_FLAG,
-  SAIFUDDIN_PROFILE_MIGRATION_V3_FLAG
+  SAIFUDDIN_PROFILE_MIGRATION_V3_FLAG,
+  store
 } from '../server';
 import { validatePasswordStrength } from '../src/services/firebase';
+
+let server: any;
+let baseUrl: string;
 
 describe('Admin Accounts & Security', () => {
   it('parses ADMIN_EMAILS environment variable correctly', () => {
@@ -240,14 +244,14 @@ describe('Member-Submitted Events & Approval Permissions', () => {
   });
 });
 
-describe('Service Worker & Cache-Control Configuration (PWA v1.3.3)', () => {
-  it('public/sw.js specifies CACHE_NAME as kwegatta-1.3.3 and handles cache strategies correctly', async () => {
+describe('Service Worker & Cache-Control Configuration (PWA v1.4.0)', () => {
+  it('public/sw.js specifies CACHE_NAME as kwegatta-1.4.0 and handles cache strategies correctly', async () => {
     const fs = await import('fs');
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.3.3
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.3.3'");
+    // 1. Cache name includes version kwegatta-1.4.0
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.4.0'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -337,9 +341,6 @@ describe('One-Time Saifuddin Profile Migration', () => {
 });
 
 describe('Privacy and Access Isolation (v1.3.1)', () => {
-  let server: any;
-  let baseUrl: string;
-
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
     process.stdout.write(`\n[Test Suite] Active storageMode: ${getStorageMode()}\n`);
@@ -350,11 +351,37 @@ describe('Privacy and Access Isolation (v1.3.1)', () => {
         resolve();
       });
     });
+
+    // Populate completed profiles for test callers
+    const testCallerUids = [
+      'test-user-unapproved-author',
+      'test-author-pending-part2',
+      'test-member-a',
+      'test-member-b',
+      'test-member-a-author',
+      'test-user-random-viewer',
+      'test-reporter-1',
+      'test-reporter-2',
+      'test-reporter-3',
+      'test-blocked-member'
+    ];
+    for (const uid of testCallerUids) {
+      if (!store.profiles.some((p: any) => p.account_uid === uid || p.id === uid)) {
+        store.profiles.push({
+          id: uid,
+          account_uid: uid,
+          name: `Test Member ${uid}`,
+          headline: 'Kampala Builder and Developer',
+          role: 'Developer',
+          needs: 'Teammates for Hackathon',
+          offers: 'TypeScript and React',
+          events_blocked: uid === 'test-blocked-member',
+          created_at: new Date().toISOString()
+        } as any);
+      }
+    }
   });
 
-  afterAll(() => {
-    if (server) server.close();
-  });
 
   it('runs against isolated in-memory store only and throws if test resolves storageMode to firestore', () => {
     expect(getStorageMode()).toBe('memory');
@@ -378,6 +405,24 @@ describe('Privacy and Access Isolation (v1.3.1)', () => {
 
     const resFollows = await fetch(`${baseUrl}/api/data/follows`);
     expect(resFollows.status).toBe(401);
+  });
+
+  it('NODE_ENV "production" with adminAuth unavailable, "Bearer test-anything" on GET /api/data/notifications returns 401', async () => {
+    const origNodeEnv = process.env.NODE_ENV;
+    const origVitest = process.env.VITEST;
+    process.env.NODE_ENV = 'production';
+    delete process.env.VITEST;
+    try {
+      const res = await fetch(`${baseUrl}/api/data/notifications`, {
+        headers: { Authorization: 'Bearer test-anything' }
+      });
+      expect(res.status).toBe(401);
+    } finally {
+      process.env.NODE_ENV = origNodeEnv;
+      if (origVitest !== undefined) {
+        process.env.VITEST = origVitest;
+      }
+    }
   });
 
   it('member A cannot see member B notifications or matches', async () => {
@@ -461,26 +506,21 @@ describe('Privacy and Access Isolation (v1.3.1)', () => {
   it("an unapproved event's image is not served to the public", async () => {
     const validPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
-    // Submit an event as a regular user (not admin/organiser) -> status is 'pending', published is false
-    const postRes = await fetch(`${baseUrl}/api/events`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer test-user-unapproved-author'
-      },
-      body: JSON.stringify({
-        kind: 'event',
-        title: 'Unapproved Test Community Hack',
-        description: 'Testing cover image access control before approval.',
-        datetime: 'Sat, Nov 14 • 2:00 PM EAT',
-        location: 'Kampala',
-        cover_image: validPng
-      })
-    });
-    expect(postRes.status).toBe(200);
-    const eventData = await postRes.json();
-    const eventId = eventData.item.id;
-    expect(eventData.item.status).toBe('pending');
+    // In v1.4.0, member submissions publish directly. Seed an unapproved / pending event
+    const eventId = 'test-unapproved-event-1';
+    store.events.unshift({
+      id: eventId,
+      kind: 'event',
+      title: 'Unapproved Test Community Hack',
+      description: 'Testing cover image access control before approval.',
+      datetime: 'Sat, Nov 14 • 2:00 PM EAT',
+      location: 'Kampala',
+      cover_image: validPng,
+      author_id: 'deleted-author-id',
+      status: 'pending',
+      published: false,
+      attendee_ids: []
+    } as any);
 
     // Public / anonymous request to /api/event-image/:id returns 404
     const publicRes = await fetch(`${baseUrl}/api/event-image/${eventId}`);
@@ -496,26 +536,21 @@ describe('Privacy and Access Isolation (v1.3.1)', () => {
   it('unapproved events are not public on generic /api/data/events and raw data URLs are never returned', async () => {
     const validPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 
-    // 1. Submit a pending event as a regular user
-    const postRes = await fetch(`${baseUrl}/api/events`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer test-author-pending-part2'
-      },
-      body: JSON.stringify({
-        kind: 'event',
-        title: 'Hidden Pending Hackathon Part 2',
-        description: 'Should not be seen by anonymous users on /api/data/events',
-        datetime: 'Sat, Nov 21 • 3:00 PM EAT',
-        location: 'Kampala',
-        cover_image: validPng
-      })
-    });
-    expect(postRes.status).toBe(200);
-    const postData = await postRes.json();
-    const eventId = postData.item.id;
-    expect(postData.item.status).toBe('pending');
+    // 1. Seed an unapproved pending event
+    const eventId = 'test-unapproved-event-2';
+    store.events.unshift({
+      id: eventId,
+      kind: 'event',
+      title: 'Hidden Pending Hackathon Part 2',
+      description: 'Should not be seen by anonymous users on /api/data/events',
+      datetime: 'Sat, Nov 21 • 3:00 PM EAT',
+      location: 'Kampala',
+      cover_image: validPng,
+      author_id: 'test-author-pending-part2',
+      status: 'pending',
+      published: false,
+      attendee_ids: []
+    } as any);
 
     // 2. Anonymous caller GET /api/data/events
     const anonRes = await fetch(`${baseUrl}/api/data/events`);
@@ -672,6 +707,164 @@ describe('Quality Assurance & Safety Guarantees (v1.3.1)', () => {
     const { MIN_MEMBERS_FOR_STATS } = await import('../src/utils');
     expect(MIN_MEMBERS_FOR_STATS).toBe(25);
   });
+});
+
+describe('Post-Publication Moderation & Admin Event Controls (v1.4.0)', () => {
+  it('non-admin cannot hide/delete/block (401/403)', async () => {
+    // Non-admin cannot hide event
+    const hideRes = await fetch(`${baseUrl}/api/admin/events/sample-event/hide`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer test-member-a' }
+    });
+    expect([401, 403]).toContain(hideRes.status);
+
+    // Non-admin cannot delete event via admin route
+    const deleteRes = await fetch(`${baseUrl}/api/admin/events/sample-event`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer test-member-a' }
+    });
+    expect([401, 403]).toContain(deleteRes.status);
+
+    // Non-admin cannot block author
+    const blockRes = await fetch(`${baseUrl}/api/admin/events/sample-event/block-author`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer test-member-a' }
+    });
+    expect([401, 403]).toContain(blockRes.status);
+  });
+
+  it('a blocked member cannot create', async () => {
+    const res = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-blocked-member'
+      },
+      body: JSON.stringify({
+        kind: 'event',
+        title: 'Event by Blocked Author',
+        description: 'Should be rejected with 403.',
+        datetime: 'Mon, Dec 15 • 10:00 AM EAT',
+        location: 'Kampala'
+      })
+    });
+    expect(res.status).toBe(403);
+    const data = await res.json();
+    expect(data.error).toBe("You can't create events right now");
+  });
+
+  it('the third distinct report hides the event and the same member reporting twice counts once', async () => {
+    // 1. Author creates a published event
+    const createRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-member-a'
+      },
+      body: JSON.stringify({
+        kind: 'event',
+        title: 'Moderation Showcase Event',
+        description: 'Will be reported by community members for testing auto-hide.',
+        datetime: 'Fri, Dec 19 • 4:00 PM EAT',
+        location: 'Kololo, Kampala'
+      })
+    });
+    expect(createRes.status).toBe(200);
+    const createData = await createRes.json();
+    const eventId = createData.item.id;
+    expect(createData.item.status).toBe('published');
+
+    // 2. Member 1 reports the event
+    const report1 = await fetch(`${baseUrl}/api/events/${eventId}/report`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-reporter-1'
+      },
+      body: JSON.stringify({
+        reason: 'Spam or scam',
+        note: 'Looks like spam'
+      })
+    });
+    expect(report1.status).toBe(200);
+    const rep1Data = await report1.json();
+    expect(rep1Data.hidden_by_moderation).toBe(false);
+    expect(rep1Data.report_count).toBe(1);
+
+    // 3. Same member reporting twice counts once (rejected with 400)
+    const reportDuplicate = await fetch(`${baseUrl}/api/events/${eventId}/report`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-reporter-1'
+      },
+      body: JSON.stringify({
+        reason: 'Spam or scam',
+        note: 'Reporting a second time'
+      })
+    });
+    expect(reportDuplicate.status).toBe(400);
+    const dupData = await reportDuplicate.json();
+    expect(dupData.error).toContain('already reported');
+
+    // 4. Member 2 reports the event
+    const report2 = await fetch(`${baseUrl}/api/events/${eventId}/report`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-reporter-2'
+      },
+      body: JSON.stringify({
+        reason: 'Not a real event'
+      })
+    });
+    expect(report2.status).toBe(200);
+    const rep2Data = await report2.json();
+    expect(rep2Data.hidden_by_moderation).toBe(false);
+    expect(rep2Data.report_count).toBe(2);
+
+    // Event is still visible publicly with 2 reports
+    const listResBefore = await fetch(`${baseUrl}/api/events`);
+    expect(listResBefore.status).toBe(200);
+    const listBefore = await listResBefore.json();
+    expect(listBefore.some((e: any) => e.id === eventId)).toBe(true);
+
+    // 5. The third distinct report hides the event automatically
+    const report3 = await fetch(`${baseUrl}/api/events/${eventId}/report`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-reporter-3'
+      },
+      body: JSON.stringify({
+        reason: 'Offensive'
+      })
+    });
+    expect(report3.status).toBe(200);
+    const rep3Data = await report3.json();
+    expect(rep3Data.hidden_by_moderation).toBe(true);
+    expect(rep3Data.report_count).toBe(3);
+
+    // Public list hides the event
+    const listResAfter = await fetch(`${baseUrl}/api/events`);
+    expect(listResAfter.status).toBe(200);
+    const listAfter = await listResAfter.json();
+    expect(listAfter.some((e: any) => e.id === eventId)).toBe(false);
+
+    // The author still sees it, marked "under_review"
+    const authorListRes = await fetch(`${baseUrl}/api/events`, {
+      headers: { Authorization: 'Bearer test-member-a' }
+    });
+    expect(authorListRes.status).toBe(200);
+    const authorList = await authorListRes.json();
+    const myItem = authorList.find((e: any) => e.id === eventId);
+    expect(myItem).toBeDefined();
+    expect(myItem.under_review).toBe(true);
+  });
+});
+
+afterAll(() => {
+  if (server) server.close();
 });
 
 

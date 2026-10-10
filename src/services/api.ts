@@ -1257,6 +1257,93 @@ export async function sendEventAttendeeUpdate(id: string, message: string): Prom
   return data;
 }
 
+export async function reportEvent(id: string, reason: string, note?: string): Promise<{ success: boolean; message: string; report_count?: number }> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(id)}/report`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ reason, note })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to report event');
+  return data;
+}
+
+export async function cancelEvent(id: string): Promise<{ success: boolean; message: string }> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(id)}/cancel`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to cancel event');
+  return data;
+}
+
+export async function hideEvent(id: string): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/events/${encodeURIComponent(id)}/hide`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to hide event');
+  return data;
+}
+
+export async function restoreEvent(id: string): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/events/${encodeURIComponent(id)}/restore`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to restore event');
+  return data;
+}
+
+export async function blockEventAuthor(id: string): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/events/${encodeURIComponent(id)}/block-author`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to block author');
+  return data;
+}
+
+export async function unblockEventAuthor(id: string): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/events/${encodeURIComponent(id)}/unblock-author`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to unblock author');
+  return data;
+}
+
+export async function deleteEventAdmin(id: string): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/events/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders()
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to delete event');
+  return data;
+}
+
+export async function fetchAdminEvents(): Promise<any[]> {
+  await getFreshAuthToken();
+  const res = await fetch('/api/admin/events', {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) return [];
+  return await res.json();
+}
+
 // ============================================================================
 // TEAM MANAGEMENT API CLIENT
 // ============================================================================
