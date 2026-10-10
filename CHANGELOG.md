@@ -4,6 +4,15 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-10-10
+
+### Fixed (Timezone Wall-Clock Conversion & DST Handling)
+- Fixed event start/end ISO timestamp generation in `EventsView.tsx`: replaced browser-local `new Date(`${date}T${time}`)` conversion with `zonedTimeToUtcIso(date, time, timeZone)`, converting entered wall-clock date and time in the selected IANA timezone to UTC ISO 8601 timestamps using native `Intl.DateTimeFormat`.
+- Correctly handles daylight-saving time (DST) transitions across all IANA time zones without external date libraries.
+- Added matching fallback conversion on the server in `validateEventTimesAndFormat` for `start_date` and `start_time` inputs using the event's specified timezone.
+- Fixed event editing: the edit modal displays stored UTC timestamps back in the event's own IANA timezone rather than the viewer browser's timezone using `utcToZonedParts`.
+- Upgraded PWA service worker cache name to `kwegatta-1.4.1`.
+
 ## [1.4.0] - 2026-10-10
 
 ### Security Fix (Auth Middleware)

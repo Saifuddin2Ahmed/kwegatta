@@ -4102,6 +4102,58 @@ export function computeEventPhase(item: any, nowMs: number = Date.now()): EventP
   return 'past';
 }
 
+/**
+ * Converts entered wall-clock date and time in the selected IANA timezone to UTC ISO 8601 string.
+ * Uses Intl.DateTimeFormat to determine the target zone's exact UTC offset at that moment (no date library),
+ * handling daylight-saving transitions correctly.
+ */
+export function zonedTimeToUtcIso(date: string, time: string, timeZone: string): string {
+  if (!date || !time) return '';
+  const [y, m, d] = date.split('-').map(Number);
+  const [hr, min, sec = 0] = time.split(':').map(Number);
+  const targetLocalMs = Date.UTC(y, m - 1, d, hr, min, sec);
+
+  let safeTz = timeZone || 'Africa/Kampala';
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: safeTz });
+  } catch {
+    safeTz = 'Africa/Kampala';
+  }
+
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: safeTz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23'
+  });
+
+  const getLocalMs = (utcMs: number): number => {
+    const parts = formatter.formatToParts(new Date(utcMs));
+    const p: Record<string, number> = {};
+    for (const part of parts) {
+      if (part.type !== 'literal') {
+        p[part.type] = Number(part.value);
+      }
+    }
+    const h = p.hour === 24 ? 0 : p.hour;
+    return Date.UTC(p.year, p.month - 1, p.day, h, p.minute, p.second);
+  };
+
+  // Step 1: Initial offset approximation
+  let offset = getLocalMs(targetLocalMs) - targetLocalMs;
+  let utcMs = targetLocalMs - offset;
+
+  // Step 2: Refine offset at the estimated UTC instant (handles DST transitions)
+  offset = getLocalMs(utcMs) - utcMs;
+  utcMs = targetLocalMs - offset;
+
+  return new Date(utcMs).toISOString();
+}
+
 export function validateEventTimesAndFormat(
   raw: any,
   isUpdate = false,
@@ -4152,8 +4204,8 @@ export function validateEventTimesAndFormat(
   }
 
   // Handle timestamps
-  let starts_at = raw.starts_at || (raw.start_date && raw.start_time ? new Date(`${raw.start_date}T${raw.start_time}`).toISOString() : undefined);
-  let ends_at = raw.ends_at || (raw.end_date && raw.end_time ? new Date(`${raw.end_date}T${raw.end_time}`).toISOString() : undefined);
+  let starts_at = raw.starts_at || (raw.start_date && raw.start_time ? zonedTimeToUtcIso(raw.start_date, raw.start_time, timezone) : undefined);
+  let ends_at = raw.ends_at || (raw.end_date && raw.end_time ? zonedTimeToUtcIso(raw.end_date, raw.end_time, timezone) : undefined);
 
   if (!starts_at && existingItem?.starts_at) {
     starts_at = existingItem.starts_at;

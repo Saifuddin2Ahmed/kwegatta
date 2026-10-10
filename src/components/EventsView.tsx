@@ -28,7 +28,9 @@ import {
   processEventCoverImage,
   formatEventDateTime,
   generateGoogleCalendarUrl,
-  downloadIcsFile
+  downloadIcsFile,
+  zonedTimeToUtcIso,
+  utcToZonedParts
 } from '../utils';
 import {
   fetchEvents,
@@ -350,23 +352,24 @@ export const EventsView: React.FC<EventsViewProps> = ({
     setFormFormat(item.format || 'in_person');
     setFormLocation(item.location || '');
     setFormJoinLink(item.join_link || '');
+    const tz = item.timezone || 'Africa/Kampala';
+    setFormTimezone(tz);
     if (item.starts_at) {
-      const s = new Date(item.starts_at);
-      setFormStartDate(s.toISOString().slice(0, 10));
-      setFormStartTime(s.toTimeString().slice(0, 5));
+      const { date, time } = utcToZonedParts(item.starts_at, tz);
+      setFormStartDate(date);
+      setFormStartTime(time);
     } else {
       setFormStartDate('');
       setFormStartTime('');
     }
     if (item.ends_at) {
-      const en = new Date(item.ends_at);
-      setFormEndDate(en.toISOString().slice(0, 10));
-      setFormEndTime(en.toTimeString().slice(0, 5));
+      const { date, time } = utcToZonedParts(item.ends_at, tz);
+      setFormEndDate(date);
+      setFormEndTime(time);
     } else {
       setFormEndDate('');
       setFormEndTime('');
     }
-    setFormTimezone(item.timezone || 'Africa/Kampala');
     setFormCoverImage(item.cover_image || '');
     setFormRegLink(item.registration_link || '');
     setFormOppType(item.opportunity_type || 'Hackathon');
@@ -411,7 +414,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
         onToast('Start date and start time are required.');
         return;
       }
-      const startIso = new Date(`${formStartDate}T${formStartTime}`).toISOString();
+      const tz = formTimezone || 'Africa/Kampala';
+      const startIso = zonedTimeToUtcIso(formStartDate, formStartTime, tz);
       const startDate = new Date(startIso);
       if (startDate.getTime() < Date.now() - 5 * 60 * 1000) {
         onToast('Start time cannot be in the past.');
@@ -420,7 +424,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
       let endIso: string | undefined;
       if (formEndDate && formEndTime) {
-        endIso = new Date(`${formEndDate}T${formEndTime}`).toISOString();
+        endIso = zonedTimeToUtcIso(formEndDate, formEndTime, tz);
         if (new Date(endIso).getTime() <= startDate.getTime()) {
           onToast('End time must be after start time.');
           return;
@@ -487,12 +491,13 @@ export const EventsView: React.FC<EventsViewProps> = ({
     };
 
     if (editingItem.kind === 'event') {
+      const tz = formTimezone || editingItem.timezone || 'Africa/Kampala';
       if (formStartDate && formStartTime) {
-        const startIso = new Date(`${formStartDate}T${formStartTime}`).toISOString();
+        const startIso = zonedTimeToUtcIso(formStartDate, formStartTime, tz);
         patch.starts_at = startIso;
         let endIso: string;
         if (formEndDate && formEndTime) {
-          endIso = new Date(`${formEndDate}T${formEndTime}`).toISOString();
+          endIso = zonedTimeToUtcIso(formEndDate, formEndTime, tz);
           if (new Date(endIso).getTime() <= new Date(startIso).getTime()) {
             onToast('End time must be after start time.');
             return;

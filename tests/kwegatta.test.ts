@@ -244,14 +244,14 @@ describe('Member-Submitted Events & Approval Permissions', () => {
   });
 });
 
-describe('Service Worker & Cache-Control Configuration (PWA v1.4.0)', () => {
-  it('public/sw.js specifies CACHE_NAME as kwegatta-1.4.0 and handles cache strategies correctly', async () => {
+describe('Service Worker & Cache-Control Configuration (PWA v1.4.1)', () => {
+  it('public/sw.js specifies CACHE_NAME as kwegatta-1.4.1 and handles cache strategies correctly', async () => {
     const fs = await import('fs');
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.4.0
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.4.0'");
+    // 1. Cache name includes version kwegatta-1.4.1
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.4.1'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -860,6 +860,49 @@ describe('Post-Publication Moderation & Admin Event Controls (v1.4.0)', () => {
     const myItem = authorList.find((e: any) => e.id === eventId);
     expect(myItem).toBeDefined();
     expect(myItem.under_review).toBe(true);
+  });
+});
+
+describe('Timezone Conversion & DST Handling (v1.4.1)', () => {
+  it('converts 14:00 on 2026-11-14 in Africa/Lagos to 2026-11-14T13:00:00.000Z', async () => {
+    const { zonedTimeToUtcIso } = await import('../src/utils');
+    expect(zonedTimeToUtcIso('2026-11-14', '14:00', 'Africa/Lagos')).toBe('2026-11-14T13:00:00.000Z');
+  });
+
+  it('converts 14:00 on 2026-11-14 in Africa/Kampala to 2026-11-14T11:00:00.000Z', async () => {
+    const { zonedTimeToUtcIso } = await import('../src/utils');
+    expect(zonedTimeToUtcIso('2026-11-14', '14:00', 'Africa/Kampala')).toBe('2026-11-14T11:00:00.000Z');
+  });
+
+  it('converts 09:00 on 2026-07-01 in Europe/London to 2026-07-01T08:00:00.000Z', async () => {
+    const { zonedTimeToUtcIso } = await import('../src/utils');
+    expect(zonedTimeToUtcIso('2026-07-01', '09:00', 'Europe/London')).toBe('2026-07-01T08:00:00.000Z');
+  });
+
+  it('converts 09:00 on 2026-12-01 in Europe/London to 2026-12-01T09:00:00.000Z', async () => {
+    const { zonedTimeToUtcIso } = await import('../src/utils');
+    expect(zonedTimeToUtcIso('2026-12-01', '09:00', 'Europe/London')).toBe('2026-12-01T09:00:00.000Z');
+  });
+
+  it('server validateEventTimesAndFormat correctly converts start_date/start_time fallback using provided timezone', async () => {
+    const { validateEventTimesAndFormat } = await import('../server');
+    const res = validateEventTimesAndFormat({
+      kind: 'event',
+      start_date: '2026-11-14',
+      start_time: '14:00',
+      timezone: 'Africa/Lagos',
+      format: 'in_person',
+      location: 'Lagos Tech Hub'
+    });
+    expect(res.valid).toBe(true);
+    expect(res.starts_at).toBe('2026-11-14T13:00:00.000Z');
+  });
+
+  it('utcToZonedParts converts stored UTC time back to event timezone for editing', async () => {
+    const { utcToZonedParts } = await import('../src/utils');
+    const parts = utcToZonedParts('2026-11-14T11:00:00.000Z', 'Africa/Kampala');
+    expect(parts.date).toBe('2026-11-14');
+    expect(parts.time).toBe('14:00');
   });
 });
 

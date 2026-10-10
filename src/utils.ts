@@ -404,5 +404,100 @@ export function generateGoogleCalendarUrl(event: {
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
+/**
+ * Converts entered wall-clock date and time in the selected IANA timezone to UTC ISO 8601 string.
+ * Uses Intl.DateTimeFormat to determine the target zone's exact UTC offset at that moment (no date library),
+ * handling daylight-saving transitions correctly.
+ */
+export function zonedTimeToUtcIso(date: string, time: string, timeZone: string): string {
+  if (!date || !time) return '';
+  const [y, m, d] = date.split('-').map(Number);
+  const [hr, min, sec = 0] = time.split(':').map(Number);
+  const targetLocalMs = Date.UTC(y, m - 1, d, hr, min, sec);
 
+  let safeTz = timeZone || 'Africa/Kampala';
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: safeTz });
+  } catch {
+    safeTz = 'Africa/Kampala';
+  }
 
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: safeTz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23'
+  });
+
+  const getLocalMs = (utcMs: number): number => {
+    const parts = formatter.formatToParts(new Date(utcMs));
+    const p: Record<string, number> = {};
+    for (const part of parts) {
+      if (part.type !== 'literal') {
+        p[part.type] = Number(part.value);
+      }
+    }
+    const h = p.hour === 24 ? 0 : p.hour;
+    return Date.UTC(p.year, p.month - 1, p.day, h, p.minute, p.second);
+  };
+
+  // Step 1: Initial offset approximation
+  let offset = getLocalMs(targetLocalMs) - targetLocalMs;
+  let utcMs = targetLocalMs - offset;
+
+  // Step 2: Refine offset at the estimated UTC instant (handles DST transitions)
+  offset = getLocalMs(utcMs) - utcMs;
+  utcMs = targetLocalMs - offset;
+
+  return new Date(utcMs).toISOString();
+}
+
+/**
+ * Extracts wall-clock date (YYYY-MM-DD) and time (HH:MM) from a UTC ISO string in a specified IANA time zone.
+ */
+export function utcToZonedParts(
+  isoUtcStr: string,
+  timeZone: string
+): { date: string; time: string } {
+  const d = new Date(isoUtcStr);
+  if (isNaN(d.getTime())) return { date: '', time: '' };
+
+  let safeTz = timeZone || 'Africa/Kampala';
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: safeTz });
+  } catch {
+    safeTz = 'Africa/Kampala';
+  }
+
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: safeTz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  });
+
+  const parts = formatter.formatToParts(d);
+  const p: Record<string, string> = {};
+  for (const part of parts) {
+    if (part.type !== 'literal') {
+      p[part.type] = part.value;
+    }
+  }
+
+  const hour = (p.hour === '24' ? '00' : p.hour).padStart(2, '0');
+  const minute = p.minute.padStart(2, '0');
+  const month = p.month.padStart(2, '0');
+  const day = p.day.padStart(2, '0');
+
+  return {
+    date: `${p.year}-${month}-${day}`,
+    time: `${hour}:${minute}`
+  };
+}
