@@ -1056,10 +1056,15 @@ export async function fetchEvents(): Promise<any[]> {
   }
 }
 
-export async function fetchEventById(id: string): Promise<any | null> {
+export async function fetchEventById(id: string, guestToken?: string): Promise<any | null> {
   try {
     await getFreshAuthToken();
-    const res = await fetch(`/api/events/${encodeURIComponent(id)}`, { headers: getAuthHeaders() });
+    const headers = getAuthHeaders();
+    if (guestToken) {
+      headers['x-guest-token'] = guestToken;
+    }
+    const query = guestToken ? `?g=${encodeURIComponent(guestToken)}` : '';
+    const res = await fetch(`/api/events/${encodeURIComponent(id)}${query}`, { headers });
     if (!res.ok) return null;
     return await res.json();
   } catch (err) {

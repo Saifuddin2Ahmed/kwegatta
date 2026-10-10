@@ -4664,7 +4664,7 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
     store.profiles.some((p: any) => (p.account_uid === callerId || p.id === callerId) && attendeeIds.includes(p.id))
   ));
 
-  const guestToken = typeof req.query.g === 'string' ? req.query.g : undefined;
+  const guestToken = (typeof req.query.g === 'string' ? req.query.g : undefined) || (typeof req.headers['x-guest-token'] === 'string' ? (req.headers['x-guest-token'] as string) : undefined);
   const isAllowedContact = canViewHostContact(item, callerId, isAdmin, guestToken);
   const sanitized = sanitizeEventForPublic(item, callerId, isAllowedContact, isAdmin);
 

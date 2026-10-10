@@ -84,6 +84,7 @@ export interface Profile {
   suspended?: boolean;
   is_organiser?: boolean;
   events_blocked?: boolean;
+  is_admin?: boolean;
   account_uid?: string;
   email?: string;
 }
@@ -224,6 +225,7 @@ export interface EventOpportunityItem {
   last_update_sent_at?: string;
   published: boolean;
   attendee_ids: string[];
+  attendee_count?: number;
 }
 
 export interface EventQuestionReply {
@@ -238,10 +240,16 @@ export interface EventQuestionReply {
 export interface EventQuestion {
   id: string;
   event_id: string;
-  author_id: string;
-  author_name: string;
-  content: string; // plain text, 3 to 500 characters
-  reply?: EventQuestionReply; // one level of replies only
+  author_id?: string;
+  author_name?: string;
+  asker_id?: string;
+  asker_name?: string;
+  content?: string;
+  question_text?: string;
+  reply?: EventQuestionReply;
+  reply_text?: string;
+  replier_name?: string;
+  replied_by_admin?: boolean;
   created_at: string;
 }
 

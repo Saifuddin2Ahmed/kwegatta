@@ -170,7 +170,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<EventOpportunityItem | null>(null);
 
-  // Form Fields (Part 2 & Part 4)
+  // Form Fields (Part 1, Part 2 & Part 4)
   const [formKind, setFormKind] = useState<'event' | 'opportunity'>('event');
   const [formTitle, setFormTitle] = useState('');
   const [formDescription, setFormDescription] = useState('');
@@ -197,7 +197,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [formLink, setFormLink] = useState('');
   const [formSubmitting, setFormSubmitting] = useState(false);
 
-  // Questions State (Part 2)
+  // Questions State (Part 3)
   const [questions, setQuestions] = useState<EventQuestion[]>([]);
   const [newQuestion, setNewQuestion] = useState('');
   const [replyingQid, setReplyingQid] = useState<string | null>(null);
@@ -220,12 +220,25 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [updateMessage, setUpdateMessage] = useState('');
   const [sendingUpdate, setSendingUpdate] = useState(false);
 
-  // Safety Report Modal State (Part 5)
+  // Safety Report Modal State
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [reportingItem, setReportingItem] = useState<EventOpportunityItem | null>(null);
   const [reportReason, setReportReason] = useState<string>('Not a real event');
   const [reportDetails, setReportDetails] = useState('');
   const [submittingReport, setSubmittingReport] = useState(false);
+
+  // Helper to extract guest token from URL or localStorage
+  const getGuestToken = (eventId: string) => {
+    try {
+      const hash = window.location.hash;
+      const match = hash.match(/[?&]g=([^&]+)/);
+      if (match && match[1]) return decodeURIComponent(match[1]);
+    } catch {}
+    try {
+      return localStorage.getItem(`kw_guest_${eventId}`) || undefined;
+    } catch {}
+    return undefined;
+  };
 
   // Load items list
   const loadEventsList = async () => {
@@ -251,17 +264,46 @@ export const EventsView: React.FC<EventsViewProps> = ({
     }
   }, [initialItemId]);
 
+  const loadQuestions = async (eventId: string) => {
+    try {
+      const qList = await fetchEventQuestions(eventId);
+      setQuestions(qList);
+    } catch (err) {
+      console.warn('Failed to load questions:', err);
+    }
+  };
+
+  const loadEventGuests = async (eventId: string) => {
+    try {
+      const gList = await fetchEventGuests(eventId);
+      setEventGuests(gList);
+    } catch (err) {
+      console.warn('Failed to load guests:', err);
+    }
+  };
+
   // Load detailed item when selected
   useEffect(() => {
     if (!selectedItemId) {
       setDetailedItem(null);
+      setQuestions([]);
+      setEventGuests([]);
       return;
     }
     setLoadingDetail(true);
-    fetchEventById(selectedItemId)
+    const guestToken = getGuestToken(selectedItemId);
+    fetchEventById(selectedItemId, guestToken)
       .then(res => {
         if (res) {
           setDetailedItem(res);
+          loadQuestions(selectedItemId);
+          if (
+            currentProfile?.is_admin ||
+            res.author_id === currentProfile?.id ||
+            res.author_id === currentProfile?.account_uid
+          ) {
+            loadEventGuests(selectedItemId);
+          }
         } else {
           onToast('Event or Opportunity not found');
           setSelectedItemId(null);
@@ -272,7 +314,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
         setSelectedItemId(null);
       })
       .finally(() => setLoadingDetail(false));
-  }, [selectedItemId]);
+  }, [selectedItemId, currentProfile]);
 
   const handleRsvp = async (itemId: string) => {
     if (!currentProfile) {
@@ -312,7 +354,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
         onToast(res.is_attending ? "You're attending! Matches updated." : 'RSVP updated.');
         if (selectedItemId === itemId) {
-          fetchEventById(itemId).then(fresh => {
+          const guestToken = getGuestToken(itemId);
+          fetchEventById(itemId, guestToken).then(fresh => {
             if (fresh) setDetailedItem(fresh);
           });
         }
@@ -357,6 +400,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
     }
     setFormCoverImage('');
     setFormRegLink('');
+    setFormContactPhone('');
+    setFormContactEmail('');
     setFormOppType('Hackathon');
     setFormDeadline('');
     setFormLink('');
@@ -389,6 +434,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
     setFormFormat(item.format || 'in_person');
     setFormLocation(item.location || '');
     setFormJoinLink(item.join_link || '');
+    setFormContactPhone(item.contact_phone || '');
+    setFormContactEmail(item.contact_email || '');
     const tz = item.timezone || 'Africa/Kampala';
     setFormTimezone(tz);
     if (item.starts_at) {
@@ -440,57 +487,58 @@ export const EventsView: React.FC<EventsViewProps> = ({
       return;
     }
 
+    // Contact phone/email validation (Part 1)
+    if (formContactPhone.trim()) {
+      const cleanPhone = formContactPhone.replace(/[\s-]/g, '');
+      if (!/^\+?[0-9]{7,15}$/.test(cleanPhone)) {
+        onToast('Phone number must be valid (7-15 digits with optional +).');
+        return;
+      }
+    }
+    if (formContactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formContactEmail.trim())) {
+      onToast('Email must be a valid email address.');
+      return;
+    }
+
     const payload: any = {
       kind: formKind,
       title: formTitle.trim(),
-      description: formDescription.trim()
+      description: formDescription.trim(),
+      contact_phone: formContactPhone.trim() || undefined,
+      contact_email: formContactEmail.trim() || undefined
     };
 
     if (formKind === 'event') {
       if (!formStartDate || !formStartTime) {
-        onToast('Start date and start time are required.');
+        onToast('Please specify a start date and time.');
         return;
       }
       const tz = formTimezone || 'Africa/Kampala';
       const startIso = zonedTimeToUtcIso(formStartDate, formStartTime, tz);
-      const startDate = new Date(startIso);
-      if (startDate.getTime() < Date.now() - 5 * 60 * 1000) {
-        onToast('Start time cannot be in the past.');
-        return;
-      }
+      payload.starts_at = startIso;
 
-      let endIso: string | undefined;
+      let endIso: string;
       if (formEndDate && formEndTime) {
         endIso = zonedTimeToUtcIso(formEndDate, formEndTime, tz);
-        if (new Date(endIso).getTime() <= startDate.getTime()) {
+        if (new Date(endIso).getTime() <= new Date(startIso).getTime()) {
           onToast('End time must be after start time.');
           return;
         }
       } else {
-        endIso = new Date(startDate.getTime() + 2 * 60 * 60 * 1000).toISOString();
+        endIso = new Date(new Date(startIso).getTime() + 2 * 60 * 60 * 1000).toISOString();
       }
-
-      if ((formFormat === 'in_person' || formFormat === 'hybrid') && !formLocation.trim()) {
-        onToast('A location is required for in-person and hybrid events.');
-        return;
-      }
-      if ((formFormat === 'online' || formFormat === 'hybrid') && (!formJoinLink || !formJoinLink.startsWith('https://'))) {
-        onToast('A valid https:// join link is required for online and hybrid events.');
-        return;
-      }
-
-      payload.starts_at = startIso;
       payload.ends_at = endIso;
-      payload.timezone = formTimezone || 'Africa/Kampala';
+
       payload.format = formFormat;
+      payload.timezone = formTimezone;
       payload.location = formLocation.trim();
       payload.join_link = formJoinLink.trim() || undefined;
-      if (formCoverImage.trim()) payload.cover_image = formCoverImage.trim();
-      if (formRegLink.trim()) payload.registration_link = formRegLink.trim();
+      payload.cover_image = formCoverImage.trim() || undefined;
+      payload.registration_link = formRegLink.trim() || undefined;
     } else {
       payload.opportunity_type = formOppType;
       payload.deadline = formDeadline.trim();
-      if (formLink.trim()) payload.link = formLink.trim();
+      payload.link = formLink.trim() || undefined;
     }
 
     setFormSubmitting(true);
@@ -522,9 +570,24 @@ export const EventsView: React.FC<EventsViewProps> = ({
       return;
     }
 
+    // Contact phone/email validation (Part 1)
+    if (formContactPhone.trim()) {
+      const cleanPhone = formContactPhone.replace(/[\s-]/g, '');
+      if (!/^\+?[0-9]{7,15}$/.test(cleanPhone)) {
+        onToast('Phone number must be valid (7-15 digits with optional +).');
+        return;
+      }
+    }
+    if (formContactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formContactEmail.trim())) {
+      onToast('Email must be a valid email address.');
+      return;
+    }
+
     const patch: any = {
       title: formTitle.trim(),
-      description: formDescription.trim()
+      description: formDescription.trim(),
+      contact_phone: formContactPhone.trim() || undefined,
+      contact_email: formContactEmail.trim() || undefined
     };
 
     if (editingItem.kind === 'event') {
@@ -584,7 +647,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
         onToast('Event cancelled.');
         loadEventsList();
         if (selectedItemId === itemId) {
-          fetchEventById(itemId).then(fresh => {
+          const guestToken = getGuestToken(itemId);
+          fetchEventById(itemId, guestToken).then(fresh => {
             if (fresh) setDetailedItem(fresh);
           });
         }
@@ -609,6 +673,140 @@ export const EventsView: React.FC<EventsViewProps> = ({
     }
   };
 
+  const handleAskQuestion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedItemId) return;
+    if (!newQuestion.trim()) {
+      onToast('Please enter a question.');
+      return;
+    }
+    if (newQuestion.trim().length < 3 || newQuestion.trim().length > 500) {
+      onToast('Question must be between 3 and 500 characters.');
+      return;
+    }
+    setSubmittingQuestion(true);
+    try {
+      await postEventQuestion(selectedItemId, newQuestion.trim());
+      setNewQuestion('');
+      onToast('Question submitted.');
+      loadQuestions(selectedItemId);
+    } catch (err: any) {
+      onToast(err?.message || 'Failed to post question');
+    } finally {
+      setSubmittingQuestion(false);
+    }
+  };
+
+  const handleReplyQuestion = async (qid: string, e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedItemId) return;
+    if (!replyContent.trim()) {
+      onToast('Please enter a reply.');
+      return;
+    }
+    setSubmittingReply(true);
+    try {
+      await replyEventQuestion(selectedItemId, qid, replyContent.trim());
+      setReplyingQid(null);
+      setReplyContent('');
+      onToast('Reply posted.');
+      loadQuestions(selectedItemId);
+    } catch (err: any) {
+      onToast(err?.message || 'Failed to post reply');
+    } finally {
+      setSubmittingReply(false);
+    }
+  };
+
+  const handleDeleteQuestion = async (qid: string) => {
+    if (!selectedItemId) return;
+    if (!confirm('Delete this question?')) return;
+    try {
+      await deleteEventQuestion(selectedItemId, qid);
+      onToast('Question deleted.');
+      loadQuestions(selectedItemId);
+    } catch (err: any) {
+      onToast(err?.message || 'Failed to delete question');
+    }
+  };
+
+  const handleRegisterGuest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedItemId) return;
+    if (!guestName.trim()) {
+      onToast('Please enter your full name.');
+      return;
+    }
+    if (!guestPhone.trim() && !guestEmail.trim()) {
+      onToast('Please add at least one way to reach you.');
+      return;
+    }
+    if (!guestAgree) {
+      onToast('You must agree to share contact details with the host.');
+      return;
+    }
+    setSubmittingGuest(true);
+    try {
+      const res = await registerEventGuest(selectedItemId, {
+        name: guestName.trim(),
+        phone: guestPhone.trim() || undefined,
+        email: guestEmail.trim() || undefined,
+        agree: guestAgree,
+        website: guestWebsite
+      });
+      if (res.token) {
+        try {
+          localStorage.setItem(`kw_guest_${selectedItemId}`, res.token);
+        } catch {}
+        setIsGuestModalOpen(false);
+        setGuestName('');
+        setGuestPhone('');
+        setGuestEmail('');
+        setGuestAgree(false);
+        setGuestWebsite('');
+        onToast("You're registered!");
+        fetchEventById(selectedItemId, res.token).then(fresh => {
+          if (fresh) setDetailedItem(fresh);
+        });
+      }
+    } catch (err: any) {
+      onToast(err?.message || 'Failed to register');
+    } finally {
+      setSubmittingGuest(false);
+    }
+  };
+
+  const handleCancelGuestRegistration = async () => {
+    if (!selectedItemId) return;
+    const token = getGuestToken(selectedItemId);
+    if (!token) return;
+    if (!confirm('Cancel your guest registration?')) return;
+    try {
+      await cancelEventGuest(selectedItemId, token);
+      try {
+        localStorage.removeItem(`kw_guest_${selectedItemId}`);
+      } catch {}
+      onToast('Registration cancelled.');
+      fetchEventById(selectedItemId).then(fresh => {
+        if (fresh) setDetailedItem(fresh);
+      });
+    } catch (err: any) {
+      onToast(err?.message || 'Failed to cancel registration');
+    }
+  };
+
+  const handleRemoveGuest = async (gid: string) => {
+    if (!selectedItemId) return;
+    if (!confirm('Remove this guest registration?')) return;
+    try {
+      await removeEventGuest(selectedItemId, gid);
+      onToast('Guest removed.');
+      loadEventGuests(selectedItemId);
+    } catch (err: any) {
+      onToast(err?.message || 'Failed to remove guest');
+    }
+  };
+
   const handleSendAttendeeUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!detailedItem) return;
@@ -622,7 +820,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
       onToast('Update sent to attendees via notification!');
       setIsUpdateModalOpen(false);
       setUpdateMessage('');
-      fetchEventById(detailedItem.id).then(fresh => {
+      const guestToken = getGuestToken(detailedItem.id);
+      fetchEventById(detailedItem.id, guestToken).then(fresh => {
         if (fresh) setDetailedItem(fresh);
       });
     } catch (err: any) {
@@ -656,7 +855,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
       setReportingItem(null);
       loadEventsList();
       if (selectedItemId === reportingItem.id) {
-        fetchEventById(reportingItem.id).then(fresh => {
+        const guestToken = getGuestToken(reportingItem.id);
+        fetchEventById(reportingItem.id, guestToken).then(fresh => {
           if (fresh) setDetailedItem(fresh);
         });
       }
@@ -667,11 +867,11 @@ export const EventsView: React.FC<EventsViewProps> = ({
     }
   };
 
-  // Group items into Upcoming and Past (Part 3)
+  // Group items into Upcoming and Past
   const upcomingItems = items.filter(it => it.phase !== 'past');
   const pastItems = items.filter(it => it.phase === 'past');
 
-  // Render Detailed Item View (Part 6)
+  // Render Detailed Item View
   if (selectedItemId && detailedItem) {
     const isEvent = detailedItem.kind === 'event';
     const isAuthor = Boolean(currentProfile && (detailedItem.author_id === currentProfile.id || detailedItem.author_id === currentProfile.account_uid));
@@ -714,6 +914,15 @@ export const EventsView: React.FC<EventsViewProps> = ({
             Share
           </button>
         </div>
+
+        {/* Hidden Moderator Banner (Part 5) */}
+        {isAuthor && detailedItem.hidden_by_moderation && (
+          <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs space-y-1">
+            <p className="font-bold">
+              This event is hidden by a moderator. Reason: {detailedItem.hidden_reason || 'Under review'}. Edit the event and it will be reviewed again.
+            </p>
+          </div>
+        )}
 
         {/* Hero Card */}
         <div className="kw-card p-6 sm:p-8 space-y-6">
@@ -776,7 +985,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
               {detailedItem.title}
             </h1>
 
-            {/* Host Attribution (Part 6) */}
+            {/* Host Attribution */}
             <div className="flex items-center gap-3 py-1">
               <div
                 onClick={() => detailedItem.author_id && onViewProfile(detailedItem.author_id)}
@@ -800,7 +1009,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
               </div>
             </div>
 
-            {/* Date, Time & Location (Part 2) */}
+            {/* Date, Time & Location */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 rounded-xl bg-[var(--bg)] border border-[var(--card-border)] text-xs">
               <div className="flex items-start gap-2.5">
                 <Calendar className="w-4 h-4 text-[var(--gold-text)] flex-shrink-0 mt-0.5" />
@@ -829,7 +1038,61 @@ export const EventsView: React.FC<EventsViewProps> = ({
               </div>
             </div>
 
-            {/* Join Link (Part 2: signed-in members only, hidden when past or cancelled) */}
+            {/* Contact the host (Part 2) */}
+            {(detailedItem.contact_phone || detailedItem.contact_email) ? (
+              <div className="kw-card p-4 space-y-3 border-[var(--gold)]/30">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-xs text-[var(--fg)] flex items-center gap-1.5">
+                    <Phone className="w-4 h-4 text-[var(--gold-text)]" />
+                    Contact the host
+                  </h4>
+                  {isAuthor && (
+                    <button
+                      onClick={e => openEditModal(detailedItem, e)}
+                      className="text-xs text-[var(--gold-text)] hover:underline flex items-center gap-1"
+                    >
+                      <Edit className="w-3 h-3" /> Edit
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {detailedItem.contact_phone && (
+                    <a
+                      href={`https://wa.me/${detailedItem.contact_phone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Hi, I'm registered for ${detailedItem.title} on Kwegatta.`)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="kw-btn px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 font-semibold flex items-center gap-1.5 hover:bg-emerald-500/20"
+                    >
+                      <Phone className="w-3.5 h-3.5" /> WhatsApp
+                    </a>
+                  )}
+                  {detailedItem.contact_email && (
+                    <a
+                      href={`mailto:${detailedItem.contact_email}?subject=${encodeURIComponent(detailedItem.title)}`}
+                      className="kw-btn px-3 py-1.5 rounded-lg border border-[var(--card-border)] bg-[var(--bg)] text-[var(--fg)] font-semibold flex items-center gap-1.5 hover:border-[var(--gold)]"
+                    >
+                      <Mail className="w-3.5 h-3.5 text-[var(--gold-text)]" /> Email
+                    </a>
+                  )}
+                </div>
+              </div>
+            ) : (!isPast && !isCancelled && !isAuthor) ? (
+              <p className="text-xs text-[var(--fg-muted)] italic">
+                Register to see the host's contact details.
+              </p>
+            ) : isAuthor ? (
+              <div className="flex items-center gap-2 text-xs text-[var(--fg-muted)]">
+                <span>No host contact details added yet.</span>
+                <button
+                  onClick={e => openEditModal(detailedItem, e)}
+                  className="text-[var(--gold-text)] hover:underline flex items-center gap-1 font-semibold"
+                >
+                  <Edit className="w-3 h-3" /> Edit
+                </button>
+              </div>
+            ) : null}
+
+            {/* Join Link (Part 2: signed-in members / guest token only) */}
             {detailedItem.join_link && !isPast && !isCancelled && (
               <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-3 text-xs">
                 <div className="flex items-center gap-2 text-emerald-300 font-semibold">
@@ -852,24 +1115,39 @@ export const EventsView: React.FC<EventsViewProps> = ({
               {detailedItem.description}
             </p>
 
-            {/* Action Bar (Part 3 & Part 6) */}
+            {/* Action Bar */}
             <div className="pt-4 border-t border-[var(--card-border)] flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-3">
-                {isEvent ? (
-                  isCancelled ? (
-                    <button
-                      disabled
-                      className="kw-btn px-6 py-2.5 text-xs font-bold rounded-lg bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
-                    >
-                      Cancelled
-                    </button>
-                  ) : isPast ? (
-                    <button
-                      disabled
-                      className="kw-btn px-6 py-2.5 text-xs font-bold rounded-lg bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
-                    >
-                      Event ended
-                    </button>
+                {currentProfile ? (
+                  isEvent ? (
+                    isCancelled ? (
+                      <button
+                        disabled
+                        className="kw-btn px-6 py-2.5 text-xs font-bold rounded-lg bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
+                      >
+                        Cancelled
+                      </button>
+                    ) : isPast ? (
+                      <button
+                        disabled
+                        className="kw-btn px-6 py-2.5 text-xs font-bold rounded-lg bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
+                      >
+                        Event ended
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleRsvp(detailedItem.id)}
+                        disabled={rsvpLoading}
+                        className={`kw-btn px-6 py-2.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2 ${
+                          isAttending
+                            ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/30'
+                            : 'kw-btn-gold'
+                        }`}
+                      >
+                        {isAttending ? <Check className="w-4 h-4" /> : null}
+                        {isAttending ? "I'm going (RSVP'd)" : "I'm going"}
+                      </button>
+                    )
                   ) : (
                     <button
                       onClick={() => handleRsvp(detailedItem.id)}
@@ -880,24 +1158,69 @@ export const EventsView: React.FC<EventsViewProps> = ({
                           : 'kw-btn-gold'
                       }`}
                     >
-                      {isAttending ? <Check className="w-4 h-4" /> : null}
-                      {isAttending ? "I'm going (RSVP'd)" : "I'm going"}
+                      {isAttending ? <Bookmark className="w-4 h-4 fill-current" /> : null}
+                      {isAttending ? 'Interested (Saved)' : 'Interested'}
                     </button>
                   )
-                ) : (
-                  <button
-                    onClick={() => handleRsvp(detailedItem.id)}
-                    disabled={rsvpLoading}
-                    className={`kw-btn px-6 py-2.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2 ${
-                      isAttending
-                        ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/30'
-                        : 'kw-btn-gold'
-                    }`}
-                  >
-                    {isAttending ? <Bookmark className="w-4 h-4 fill-current" /> : null}
-                    {isAttending ? 'Interested (Saved)' : 'Interested'}
-                  </button>
-                )}
+                ) : (!isPast && !isCancelled) ? (
+                  /* Signed-Out Register Button / Confirmation (Part 4) */
+                  (() => {
+                    const token = getGuestToken(detailedItem.id);
+                    const isRegisteredGuest = Boolean(token || detailedItem.guest_info);
+                    const activeToken = token || detailedItem.guest_info?.token;
+
+                    if (isRegisteredGuest) {
+                      return (
+                        <div className="kw-card p-4 space-y-3 border-emerald-500/40 bg-emerald-500/5">
+                          <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs">
+                            <Check className="w-4 h-4" />
+                            <span>You're registered</span>
+                          </div>
+                          <p className="text-xs text-[var(--fg-muted)]">
+                            Keep your private registration link to view event contact info:
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              readOnly
+                              value={`${window.location.origin}/#/events/${detailedItem.id}?g=${activeToken || ''}`}
+                              className="kw-input text-xs flex-1 bg-[var(--bg)]"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const link = `${window.location.origin}/#/events/${detailedItem.id}?g=${activeToken || ''}`;
+                                navigator.clipboard.writeText(link);
+                                onToast('Link copied to clipboard');
+                              }}
+                              className="kw-btn text-xs py-1.5 px-3 border border-[var(--card-border)] hover:border-[var(--gold)]"
+                            >
+                              Copy link
+                            </button>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleCancelGuestRegistration}
+                            className="text-xs text-rose-400 hover:underline cursor-pointer"
+                          >
+                            Cancel my registration
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => setIsGuestModalOpen(true)}
+                        className="kw-btn kw-btn-gold py-2.5 px-5 font-bold text-xs rounded-xl shadow-lg shadow-amber-500/10 flex items-center gap-2"
+                      >
+                        <UserPlus className="w-4 h-4" />
+                        Register
+                      </button>
+                    );
+                  })()
+                ) : null}
 
                 {/* Going Count */}
                 <span className="text-xs text-[var(--fg-muted)] flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--card-border)]">
@@ -905,7 +1228,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   <strong className="text-[var(--fg)]">{attendeeCount}</strong> going
                 </span>
 
-                {/* Add to Calendar (Part 6) */}
+                {/* Add to Calendar */}
                 {isEvent && !isPast && !isCancelled && (
                   <div className="flex items-center gap-1.5">
                     <a
@@ -930,7 +1253,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 )}
               </div>
 
-              {/* Right Side Controls: Author Edit/Cancel & Member Report (Part 4 & Part 5) */}
+              {/* Right Side Controls */}
               <div className="flex items-center gap-2">
                 {isAuthor && !isCancelled && (
                   <>
@@ -950,7 +1273,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   </>
                 )}
 
-                {/* Report Event Link (Part 5: signed-in members) */}
+                {/* Report Event Link */}
                 {currentProfile && (
                   <button
                     onClick={e => handleOpenReport(detailedItem, e)}
@@ -966,7 +1289,219 @@ export const EventsView: React.FC<EventsViewProps> = ({
           </div>
         </div>
 
-        {/* Who's Going Section (Part 6: signed-in members see full attendee list, signed-out see only count) */}
+        {/* Questions Section (Part 3) */}
+        <div className="kw-card p-6 space-y-4">
+          <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+            <h3 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">
+              <MessageSquare className="w-4 h-4 text-[var(--gold-text)]" />
+              Questions
+            </h3>
+            <span className="text-xs text-[var(--fg-muted)]">{questions.length}</span>
+          </div>
+
+          {/* Question form for signed-in members */}
+          {currentProfile && currentProfile.name && currentProfile.headline ? (
+            (!isCancelled && !isPast) ? (
+              <form onSubmit={handleAskQuestion} className="space-y-2">
+                <textarea
+                  value={newQuestion}
+                  onChange={e => setNewQuestion(e.target.value)}
+                  placeholder="Ask the host anything about this event..."
+                  rows={3}
+                  maxLength={500}
+                  className="kw-textarea text-xs"
+                />
+                <div className="flex items-center justify-between">
+                  <span className="text-[13px] text-[var(--fg-subtle)]">
+                    {newQuestion.length}/500 characters
+                  </span>
+                  <button
+                    type="submit"
+                    disabled={submittingQuestion || newQuestion.trim().length < 3}
+                    className="kw-btn kw-btn-gold text-xs py-1.5 px-3 font-bold flex items-center gap-1.5"
+                  >
+                    <Send className="w-3.5 h-3.5" /> Ask
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <p className="text-xs text-[var(--fg-muted)] italic">This event is closed for new questions.</p>
+            )
+          ) : !currentProfile ? (
+            <div className="p-3 rounded-lg bg-[var(--bg)] border border-[var(--card-border)] text-xs text-center text-[var(--fg-muted)]">
+              <span>Sign in to ask a question</span>
+              {onJoinClick && (
+                <button
+                  type="button"
+                  onClick={onJoinClick}
+                  className="ml-2 font-bold text-[var(--gold-text)] hover:underline cursor-pointer"
+                >
+                  Sign in
+                </button>
+              )}
+            </div>
+          ) : null}
+
+          {/* Questions List */}
+          {questions.length === 0 ? (
+            <p className="text-xs text-[var(--fg-muted)] italic text-center py-4">
+              No questions yet. Ask the host anything about this event.
+            </p>
+          ) : (
+            <div className="space-y-4 pt-2">
+              {questions.map(q => {
+                const askerId = q.asker_id || q.author_id;
+                const askerName = q.asker_name || q.author_name || 'Member';
+                const questionText = q.question_text || q.content || '';
+                const replyText = q.reply_text || q.reply?.content || '';
+                const replierName = q.replier_name || q.reply?.author_name || 'Host';
+                const repliedByAdmin = Boolean(q.replied_by_admin);
+
+                const canDelete = Boolean(
+                  (currentProfile && (askerId === currentProfile.id || askerId === currentProfile.account_uid)) ||
+                  isAuthor ||
+                  currentProfile?.is_admin
+                );
+                const canReply = Boolean((isAuthor || currentProfile?.is_admin) && !replyText);
+
+                return (
+                  <div key={q.id} className="p-3.5 rounded-xl bg-[var(--bg)] border border-[var(--card-border)] space-y-2">
+                    <div className="flex items-center justify-between text-[13px]">
+                      <span className="font-bold text-[var(--fg)]">{askerName}</span>
+                      <span className="text-[var(--fg-subtle)]">
+                        {q.created_at ? new Date(q.created_at).toLocaleDateString() : ''}
+                      </span>
+                    </div>
+                    <p className="text-xs text-[var(--fg)] whitespace-pre-wrap">{questionText}</p>
+
+                    {replyText && (
+                      <div className="ml-4 pl-3 border-l-2 border-[var(--gold)]/50 pt-1 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-xs text-[var(--fg)]">{replierName}</span>
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-[var(--gold)]/20 text-[var(--gold-text)]">
+                            {repliedByAdmin ? 'Moderator' : 'Host'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-[var(--fg-muted)] whitespace-pre-wrap">{replyText}</p>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-3 pt-1 text-[13px]">
+                      {canReply && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReplyingQid(replyingQid === q.id ? null : q.id);
+                            setReplyContent('');
+                          }}
+                          className="text-[var(--gold-text)] hover:underline font-semibold cursor-pointer"
+                        >
+                          Reply
+                        </button>
+                      )}
+                      {canDelete && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteQuestion(q.id)}
+                          className="text-rose-400 hover:underline font-semibold cursor-pointer"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+
+                    {replyingQid === q.id && (
+                      <form onSubmit={e => handleReplyQuestion(q.id, e)} className="mt-2 space-y-2 pl-4 border-l-2 border-[var(--gold)]">
+                        <textarea
+                          value={replyContent}
+                          onChange={e => setReplyContent(e.target.value)}
+                          placeholder="Write a response..."
+                          rows={2}
+                          className="kw-textarea text-xs"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="submit"
+                            disabled={submittingReply || !replyContent.trim()}
+                            className="kw-btn kw-btn-gold text-xs py-1 px-3 font-bold"
+                          >
+                            {submittingReply ? 'Sending...' : 'Send reply'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setReplyingQid(null)}
+                            className="kw-btn text-xs py-1 px-2 border border-[var(--card-border)]"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Guest registrations panel (Part 5: Author & Admin) */}
+        {(isAuthor || currentProfile?.is_admin) && (
+          <div className="kw-card p-6 space-y-4 border-[var(--gold)]/30">
+            <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+              <h3 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">
+                <Users className="w-4 h-4 text-[var(--gold-text)]" />
+                Guest registrations ({eventGuests.length})
+              </h3>
+            </div>
+
+            {eventGuests.length === 0 ? (
+              <p className="text-xs text-[var(--fg-muted)] italic">No guest registrations yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {eventGuests.map(g => (
+                  <div key={g.id} className="p-3 rounded-xl bg-[var(--bg)] border border-[var(--card-border)] flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="space-y-0.5">
+                      <p className="font-bold text-[var(--fg)]">{g.name}</p>
+                      <div className="flex flex-wrap items-center gap-3 text-[var(--fg-muted)] text-[13px]">
+                        {g.phone && (
+                          <a
+                            href={`https://wa.me/${g.phone.replace(/[^0-9]/g, '')}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:underline text-emerald-400 flex items-center gap-1"
+                          >
+                            <Phone className="w-3 h-3" /> {g.phone}
+                          </a>
+                        )}
+                        {g.email && (
+                          <a
+                            href={`mailto:${g.email}`}
+                            className="hover:underline text-[var(--gold-text)] flex items-center gap-1"
+                          >
+                            <Mail className="w-3 h-3" /> {g.email}
+                          </a>
+                        )}
+                        <span>
+                          {g.created_at ? new Date(g.created_at).toLocaleDateString() : ''}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveGuest(g.id)}
+                      className="kw-btn kw-btn-danger text-xs py-1 px-2.5"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Who's Going Section */}
         {currentProfile ? (
           <div className="kw-card p-6 space-y-4">
             <div className="flex items-center gap-2 border-b border-[var(--card-border)] pb-3">
@@ -1003,7 +1538,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
             <span>{attendeeCount} people are going to this event.</span>
             <button
               onClick={onJoinClick}
-              className="kw-btn kw-btn-gold text-xs py-1.5 px-3 font-semibold"
+              className="kw-btn kw-btn-gold text-xs py-1.5 px-3 font-semibold cursor-pointer"
             >
               Sign in to see attendees
             </button>
@@ -1013,7 +1548,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
     );
   }
 
-  // Render Events List Overview with Two Tabs: Upcoming and Past (Part 3)
+  // Render Events List Overview
   const currentTabItems = activeTab === 'upcoming' ? upcomingItems : pastItems;
 
   return (
@@ -1030,20 +1565,18 @@ export const EventsView: React.FC<EventsViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Create event Button (Part 4) */}
           <button
             onClick={openCreateModal}
-            className="kw-btn kw-btn-gold text-xs py-2 px-3.5 flex items-center gap-1.5 font-bold"
+            className="kw-btn kw-btn-gold text-xs py-2 px-3.5 flex items-center gap-1.5 font-bold cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Create event</span>
           </button>
 
-          {/* Two Tabs: Upcoming & Past (Part 3) */}
           <div className="inline-flex rounded-lg border border-[var(--card-border)] bg-[var(--card)] p-0.5">
             <button
               onClick={() => setActiveTab('upcoming')}
-              className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${
+              className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
                 activeTab === 'upcoming'
                   ? 'bg-[var(--gold)] text-[#090D16] font-bold'
                   : 'text-[var(--fg-muted)] hover:text-[var(--fg)]'
@@ -1053,7 +1586,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
             </button>
             <button
               onClick={() => setActiveTab('past')}
-              className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all ${
+              className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
                 activeTab === 'past'
                   ? 'bg-[var(--gold)] text-[#090D16] font-bold'
                   : 'text-[var(--fg-muted)] hover:text-[var(--fg)]'
@@ -1065,56 +1598,47 @@ export const EventsView: React.FC<EventsViewProps> = ({
         </div>
       </div>
 
+      {/* List items */}
       {loading ? (
-        <div className="space-y-4">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="kw-card p-6 space-y-4 animate-pulse">
-              <div className="h-4 bg-[var(--card-border)] rounded w-1/4"></div>
-              <div className="h-6 bg-[var(--card-border)] rounded w-3/4"></div>
-              <div className="h-3 bg-[var(--card-border)] rounded w-1/2"></div>
-            </div>
-          ))}
+        <div className="text-center py-12 text-xs text-[var(--fg-muted)]">
+          Loading events...
         </div>
       ) : currentTabItems.length === 0 ? (
-        /* Empty states: one sentence and one button (Part 3) */
-        <div className="kw-card p-12 text-center space-y-4 max-w-lg mx-auto">
-          <Calendar className="w-8 h-8 text-[var(--gold-text)] mx-auto opacity-70" />
-          {activeTab === 'upcoming' ? (
-            <>
-              <p className="text-sm text-[var(--fg)]">No upcoming events scheduled right now.</p>
-              <div>
-                <button
-                  onClick={openCreateModal}
-                  className="kw-btn kw-btn-gold text-xs py-2 px-4 font-semibold"
-                >
-                  Create event
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="text-sm text-[var(--fg)]">No past events to show yet.</p>
-              <div>
-                <button
-                  onClick={() => setActiveTab('upcoming')}
-                  className="kw-btn kw-btn-primary text-xs py-2 px-4 font-semibold"
-                >
-                  View upcoming
-                </button>
-              </div>
-            </>
+        <div className="kw-card p-8 text-center space-y-3">
+          <Calendar className="w-8 h-8 text-[var(--gold-text)] mx-auto opacity-60" />
+          <h3 className="font-bold text-sm text-[var(--fg)]">
+            No {activeTab} events found
+          </h3>
+          <p className="text-xs text-[var(--fg-muted)] max-w-sm mx-auto">
+            {activeTab === 'upcoming'
+              ? 'Be the first to organize a meetup or post an opportunity for Kampala builders.'
+              : 'Past events will appear here once ended.'}
+          </p>
+          {activeTab === 'upcoming' && (
+            <button
+              onClick={openCreateModal}
+              className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Create an event</span>
+            </button>
           )}
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {currentTabItems.map(item => {
             const isEvent = item.kind === 'event';
-            const isAttending = currentProfile && item.attendee_ids.includes(currentProfile.id);
-            const isAuthor = currentProfile && (item.author_id === currentProfile.id || item.author_id === currentProfile.account_uid);
+            const isAuthor = Boolean(currentProfile && (item.author_id === currentProfile.id || item.author_id === currentProfile.account_uid));
+            const isAttending = Array.isArray(item.attendee_ids) && Boolean(currentProfile && item.attendee_ids.includes(currentProfile.id));
             const isPast = item.phase === 'past';
             const isLive = item.phase === 'live';
             const isCancelled = Boolean(item.is_cancelled);
-            const timeInfo = formatEventDateTime(item.starts_at, item.ends_at, item.timezone, item.datetime);
+            const timeFormatted = formatEventDateTime(
+              item.starts_at,
+              item.ends_at,
+              item.timezone,
+              item.datetime
+            );
 
             return (
               <div
@@ -1123,14 +1647,13 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   setSelectedItemId(item.id);
                   window.location.hash = `#/events/${item.id}`;
                 }}
-                className="kw-card p-5 sm:p-6 hover:border-[var(--gold)] transition-all cursor-pointer space-y-4 group"
+                className="kw-card p-5 space-y-4 hover:border-[var(--gold)]/60 transition-all cursor-pointer flex flex-col justify-between group"
               >
-                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                  {/* Left Column: Details */}
-                  <div className="space-y-2 min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
                       <span
-                        className={`px-2 py-0.5 rounded text-[13px] font-bold uppercase tracking-wider ${
+                        className={`px-2 py-0.5 rounded-full text-[11px] font-bold tracking-wide uppercase ${
                           isEvent
                             ? 'bg-amber-500/15 text-[var(--gold-text)] border border-amber-500/30'
                             : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
@@ -1140,138 +1663,132 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       </span>
 
                       {isLive && (
-                        <span className="px-2 py-0.5 rounded text-[13px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse">
-                          ● Live now
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse">
+                          ● Live
                         </span>
                       )}
 
                       {isCancelled && (
-                        <span className="px-2 py-0.5 rounded text-[13px] font-bold bg-zinc-700/60 text-zinc-300 border border-zinc-600">
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-zinc-700/60 text-zinc-300 border border-zinc-600">
                           Cancelled
                         </span>
                       )}
-
-                      {item.under_review && (
-                        <span className="px-2 py-0.5 rounded text-[13px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                          Under review
-                        </span>
-                      )}
-
-                      <span className="flex items-center gap-1 text-[13px] text-[var(--fg-muted)]">
-                        <Calendar className="w-3 h-3 text-[var(--gold-text)]" />
-                        {timeInfo.display}
-                      </span>
-
-                      {item.format === 'online' ? (
-                        <span className="flex items-center gap-1 text-[13px] text-[var(--fg-muted)]">
-                          <Video className="w-3 h-3 text-[var(--gold-text)]" />
-                          Online
-                        </span>
-                      ) : item.location ? (
-                        <span className="flex items-center gap-1 text-[13px] text-[var(--fg-muted)]">
-                          <MapPin className="w-3 h-3 text-[var(--gold-text)]" />
-                          {item.location}
-                        </span>
-                      ) : null}
                     </div>
 
-                    <h3 className="text-base font-bold text-[var(--fg)] group-hover:text-[var(--gold-text)] transition-colors">
-                      {item.title}
-                    </h3>
-
-                    <p className="text-xs text-[var(--fg-muted)] line-clamp-2">
-                      {item.description}
-                    </p>
-
-                    <div className="flex flex-wrap items-center gap-3 text-[13px] text-[var(--fg-muted)] pt-1">
-                      {item.author_name && (
-                        <span>
-                          Hosted by <strong className="text-[var(--fg)]">{item.author_name}</strong>
-                        </span>
-                      )}
-                      <span>•</span>
-                      <span>
-                        <strong className="text-[var(--gold-text)]">{item.attendee_ids.length}</strong> {isEvent ? 'going' : 'interested'}
-                      </span>
-                    </div>
+                    <span className="text-[11px] text-[var(--fg-muted)] flex items-center gap-1">
+                      <Users className="w-3 h-3 text-[var(--gold-text)]" />
+                      <span>{item.attendee_count ?? (Array.isArray(item.attendee_ids) ? item.attendee_ids.length : 0)}</span>
+                    </span>
                   </div>
 
-                  {/* Right Column: Actions */}
-                  <div className="flex items-center gap-2 flex-shrink-0 self-end sm:self-center">
-                    {/* Author Controls */}
-                    {isAuthor && !isCancelled && (
-                      <button
-                        onClick={e => openEditModal(item, e)}
-                        className="p-1.5 rounded-lg border border-[var(--card-border)] hover:border-[var(--gold)] text-[var(--fg-muted)] hover:text-[var(--fg)]"
-                        title="Edit event"
-                      >
-                        <Edit className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                  <h3 className="font-bold text-sm text-[var(--fg)] group-hover:text-[var(--gold-text)] transition-colors line-clamp-2">
+                    {item.title}
+                  </h3>
 
-                    {currentProfile && (
-                      <button
-                        onClick={e => handleOpenReport(item, e)}
-                        className="p-1.5 rounded-lg border border-[var(--card-border)] hover:border-rose-500/40 text-[var(--fg-muted)] hover:text-rose-400"
-                        title="Report event"
-                      >
-                        <Flag className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                  <p className="text-xs text-[var(--fg-muted)] line-clamp-2">
+                    {item.description}
+                  </p>
+                </div>
 
-                    <button
-                      onClick={e => handleShare(item, e)}
-                      className="p-1.5 rounded-lg border border-[var(--card-border)] hover:border-[var(--gold)] text-[var(--fg-muted)] hover:text-[var(--fg)]"
-                      title="Share link"
-                    >
-                      <Share2 className="w-3.5 h-3.5" />
-                    </button>
+                <div className="pt-3 border-t border-[var(--card-border)] space-y-2 text-xs">
+                  <div className="flex items-center justify-between text-[var(--fg-muted)]">
+                    <span className="flex items-center gap-1.5 font-medium truncate">
+                      <Calendar className="w-3.5 h-3.5 text-[var(--gold-text)] flex-shrink-0" />
+                      <span className="truncate">{timeFormatted.display}</span>
+                    </span>
 
-                    {isEvent ? (
-                      isCancelled ? (
+                    <span className="flex items-center gap-1 text-[11px] flex-shrink-0">
+                      {isEvent ? (
+                        item.format === 'online' ? (
+                          <Video className="w-3 h-3 text-[var(--gold-text)]" />
+                        ) : (
+                          <MapPin className="w-3 h-3 text-[var(--gold-text)]" />
+                        )
+                      ) : null}
+                      <span>{isEvent ? (item.format === 'online' ? 'Online' : (item.location || 'Kampala')) : 'Opportunity'}</span>
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[11px] text-[var(--fg-subtle)] truncate">
+                      By {item.author_name || 'Community Member'}
+                    </span>
+
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {isAuthor && !isCancelled && (
                         <button
-                          disabled
-                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
+                          onClick={e => openEditModal(item, e)}
+                          className="p-1.5 rounded-lg border border-[var(--card-border)] hover:border-[var(--gold)] text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
+                          title="Edit event"
                         >
-                          Cancelled
+                          <Edit className="w-3.5 h-3.5" />
                         </button>
-                      ) : isPast ? (
+                      )}
+
+                      {currentProfile && (
                         <button
-                          disabled
-                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
+                          onClick={e => handleOpenReport(item, e)}
+                          className="p-1.5 rounded-lg border border-[var(--card-border)] hover:border-rose-500/40 text-[var(--fg-muted)] hover:text-rose-400 cursor-pointer"
+                          title="Report event"
                         >
-                          Event ended
+                          <Flag className="w-3.5 h-3.5" />
                         </button>
+                      )}
+
+                      <button
+                        onClick={e => handleShare(item, e)}
+                        className="p-1.5 rounded-lg border border-[var(--card-border)] hover:border-[var(--gold)] text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
+                        title="Share link"
+                      >
+                        <Share2 className="w-3.5 h-3.5" />
+                      </button>
+
+                      {isEvent ? (
+                        isCancelled ? (
+                          <button
+                            disabled
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
+                          >
+                            Cancelled
+                          </button>
+                        ) : isPast ? (
+                          <button
+                            disabled
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
+                          >
+                            Event ended
+                          </button>
+                        ) : (
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              handleRsvp(item.id);
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                              isAttending
+                                ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40'
+                                : 'kw-btn-gold'
+                            }`}
+                          >
+                            {isAttending ? "I'm going ✓" : "I'm going"}
+                          </button>
+                        )
                       ) : (
                         <button
                           onClick={e => {
                             e.stopPropagation();
                             handleRsvp(item.id);
                           }}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                             isAttending
                               ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40'
                               : 'kw-btn-gold'
                           }`}
                         >
-                          {isAttending ? "I'm going ✓" : "I'm going"}
+                          {isAttending ? 'Interested ✓' : 'Interested'}
                         </button>
-                      )
-                    ) : (
-                      <button
-                        onClick={e => {
-                          e.stopPropagation();
-                          handleRsvp(item.id);
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                          isAttending
-                            ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40'
-                            : 'kw-btn-gold'
-                        }`}
-                      >
-                        {isAttending ? 'Interested ✓' : 'Interested'}
-                      </button>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1280,7 +1797,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
         </div>
       )}
 
-      {/* CREATE EVENT MODAL (Part 2 & Part 4) */}
+      {/* CREATE EVENT MODAL */}
       {isCreateModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4">
           <div className="kw-card max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto border-[var(--gold)]/40 animate-in fade-in zoom-in-95 duration-150">
@@ -1293,21 +1810,20 @@ export const EventsView: React.FC<EventsViewProps> = ({
               </div>
               <button
                 onClick={() => setIsCreateModalOpen(false)}
-                className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)]"
+                className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <form onSubmit={handleCreateSubmit} className="space-y-4 text-xs">
-              {/* Kind selector */}
               <div>
                 <label className="font-semibold text-[var(--fg)] block mb-1">What are you creating? *</label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setFormKind('event')}
-                    className={`py-2 px-3 rounded-lg border text-xs font-bold transition-colors ${
+                    className={`py-2 px-3 rounded-lg border text-xs font-bold transition-colors cursor-pointer ${
                       formKind === 'event'
                         ? 'border-[var(--gold)] bg-[var(--gold)] text-[#090D16]'
                         : 'border-[var(--card-border)] bg-[var(--bg)] text-[var(--fg-muted)]'
@@ -1318,7 +1834,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   <button
                     type="button"
                     onClick={() => setFormKind('opportunity')}
-                    className={`py-2 px-3 rounded-lg border text-xs font-bold transition-colors ${
+                    className={`py-2 px-3 rounded-lg border text-xs font-bold transition-colors cursor-pointer ${
                       formKind === 'opportunity'
                         ? 'border-[var(--gold)] bg-[var(--gold)] text-[#090D16]'
                         : 'border-[var(--card-border)] bg-[var(--bg)] text-[var(--fg-muted)]'
@@ -1355,7 +1871,6 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
               {formKind === 'event' ? (
                 <>
-                  {/* Event Format (Part 2) */}
                   <div>
                     <label className="font-semibold text-[var(--fg)] block mb-1">Format *</label>
                     <div className="grid grid-cols-3 gap-2">
@@ -1364,7 +1879,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                           key={fmt}
                           type="button"
                           onClick={() => setFormFormat(fmt)}
-                          className={`py-2 px-2 rounded-lg border text-xs font-semibold capitalize transition-colors ${
+                          className={`py-2 px-2 rounded-lg border text-xs font-semibold capitalize transition-colors cursor-pointer ${
                             formFormat === fmt
                               ? 'border-[var(--gold)] bg-[var(--gold)] text-[#090D16]'
                               : 'border-[var(--card-border)] bg-[var(--bg)] text-[var(--fg-muted)]'
@@ -1376,7 +1891,6 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Dates & Times (Part 2) */}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="font-semibold text-[var(--fg)] block mb-1">Start Date *</label>
@@ -1432,11 +1946,10 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       className="kw-input text-xs"
                     />
                     <p className="text-[13px] text-[var(--fg-subtle)] mt-0.5">
-                      Defaults to your browser timezone. Viewers see time converted to their local timezone.
+                      Defaults to your browser timezone.
                     </p>
                   </div>
 
-                  {/* Location (for in_person / hybrid) */}
                   {(formFormat === 'in_person' || formFormat === 'hybrid') && (
                     <div>
                       <label className="font-semibold text-[var(--fg)] block mb-1">Location *</label>
@@ -1451,7 +1964,6 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     </div>
                   )}
 
-                  {/* Join Link (for online / hybrid) */}
                   {(formFormat === 'online' || formFormat === 'hybrid') && (
                     <div>
                       <label className="font-semibold text-[var(--fg)] block mb-1">Join link (https://) *</label>
@@ -1468,6 +1980,45 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       </p>
                     </div>
                   )}
+
+                  {/* Contact for attendees (Part 1) */}
+                  <div className="space-y-3 pt-2 border-t border-[var(--card-border)]">
+                    <div>
+                      <h4 className="font-bold text-xs text-[var(--fg)]">Contact for attendees (optional)</h4>
+                      <p className="text-[13px] text-[var(--fg-muted)]">Only people registered for this event can see this.</p>
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="font-semibold text-[var(--fg)]">WhatsApp or phone</label>
+                        {currentProfile?.whatsapp && (
+                          <button
+                            type="button"
+                            onClick={() => setFormContactPhone(currentProfile.whatsapp || '')}
+                            className="text-[13px] text-[var(--gold-text)] hover:underline cursor-pointer"
+                          >
+                            Use my profile WhatsApp
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="tel"
+                        value={formContactPhone}
+                        onChange={e => setFormContactPhone(e.target.value)}
+                        placeholder="+256700000000"
+                        className="kw-input text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-semibold text-[var(--fg)] block mb-1">Email</label>
+                      <input
+                        type="email"
+                        value={formContactEmail}
+                        onChange={e => setFormContactEmail(e.target.value)}
+                        placeholder="host@example.com"
+                        className="kw-input text-xs"
+                      />
+                    </div>
+                  </div>
 
                   <div>
                     <label className="font-semibold text-[var(--fg)] block mb-1">Registration link (optional)</label>
@@ -1531,14 +2082,14 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 <button
                   type="submit"
                   disabled={formSubmitting}
-                  className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold flex-1"
+                  className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold flex-1 cursor-pointer"
                 >
                   {formSubmitting ? 'Creating...' : 'Create & Publish Event'}
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsCreateModalOpen(false)}
-                  className="kw-btn text-xs py-2 px-3 border border-[var(--card-border)]"
+                  className="kw-btn text-xs py-2 px-3 border border-[var(--card-border)] cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -1556,7 +2107,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
               <h3 className="font-bold text-sm text-[var(--fg)]">Edit Event Details</h3>
               <button
                 onClick={() => setIsEditModalOpen(false)}
-                className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)]"
+                className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1659,6 +2210,45 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     />
                   </div>
 
+                  {/* Contact for attendees (Part 1) */}
+                  <div className="space-y-3 pt-2 border-t border-[var(--card-border)]">
+                    <div>
+                      <h4 className="font-bold text-xs text-[var(--fg)]">Contact for attendees (optional)</h4>
+                      <p className="text-[13px] text-[var(--fg-muted)]">Only people registered for this event can see this.</p>
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="font-semibold text-[var(--fg)]">WhatsApp or phone</label>
+                        {currentProfile?.whatsapp && (
+                          <button
+                            type="button"
+                            onClick={() => setFormContactPhone(currentProfile.whatsapp || '')}
+                            className="text-[13px] text-[var(--gold-text)] hover:underline cursor-pointer"
+                          >
+                            Use my profile WhatsApp
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="tel"
+                        value={formContactPhone}
+                        onChange={e => setFormContactPhone(e.target.value)}
+                        placeholder="+256700000000"
+                        className="kw-input text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-semibold text-[var(--fg)] block mb-1">Email</label>
+                      <input
+                        type="email"
+                        value={formContactEmail}
+                        onChange={e => setFormContactEmail(e.target.value)}
+                        placeholder="host@example.com"
+                        className="kw-input text-xs"
+                      />
+                    </div>
+                  </div>
+
                   <CoverImageUploader
                     value={formCoverImage}
                     onChange={setFormCoverImage}
@@ -1671,14 +2261,14 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 <button
                   type="submit"
                   disabled={formSubmitting}
-                  className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold flex-1"
+                  className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold flex-1 cursor-pointer"
                 >
                   {formSubmitting ? 'Saving...' : 'Save Changes'}
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsEditModalOpen(false)}
-                  className="kw-btn text-xs py-2 px-3 border border-[var(--card-border)]"
+                  className="kw-btn text-xs py-2 px-3 border border-[var(--card-border)] cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -1688,7 +2278,116 @@ export const EventsView: React.FC<EventsViewProps> = ({
         </div>
       )}
 
-      {/* REPORT MODAL (Part 5) */}
+      {/* GUEST REGISTRATION MODAL (Part 4) */}
+      {isGuestModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4">
+          <div className="kw-card max-w-md w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto border-[var(--gold)]/40 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+              <div>
+                <h3 className="font-bold text-sm text-[var(--fg)]">Register for event</h3>
+                <p className="text-xs text-[var(--fg-muted)]">No account needed.</p>
+              </div>
+              <button
+                onClick={() => setIsGuestModalOpen(false)}
+                className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleRegisterGuest} className="space-y-4 text-xs">
+              {/* Honeypot hidden input */}
+              <input
+                type="text"
+                name="website"
+                value={guestWebsite}
+                onChange={e => setGuestWebsite(e.target.value)}
+                style={{ display: 'none' }}
+                tabIndex={-1}
+                autoComplete="off"
+              />
+
+              <div>
+                <label className="font-semibold text-[var(--fg)] block mb-1">Full name *</label>
+                <input
+                  type="text"
+                  value={guestName}
+                  onChange={e => setGuestName(e.target.value)}
+                  placeholder="Your name"
+                  required
+                  className="kw-input text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-[var(--fg)] block mb-1">WhatsApp or phone</label>
+                <input
+                  type="tel"
+                  value={guestPhone}
+                  onChange={e => setGuestPhone(e.target.value)}
+                  placeholder="+256700000000"
+                  className="kw-input text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-[var(--fg)] block mb-1">Email</label>
+                <input
+                  type="email"
+                  value={guestEmail}
+                  onChange={e => setGuestEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="kw-input text-xs"
+                />
+              </div>
+
+              <p className="text-[13px] text-[var(--fg-subtle)] italic">
+                Add at least one way to reach you.
+              </p>
+
+              <label className="flex items-start gap-2 cursor-pointer text-xs text-[var(--fg-muted)]">
+                <input
+                  type="checkbox"
+                  checked={guestAgree}
+                  onChange={e => setGuestAgree(e.target.checked)}
+                  required
+                  className="mt-0.5"
+                />
+                <span>I agree that the host can see these details to manage this event.</span>
+              </label>
+
+              <div className="space-y-2 pt-2 border-t border-[var(--card-border)]">
+                <button
+                  type="submit"
+                  disabled={submittingGuest}
+                  className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold w-full cursor-pointer"
+                >
+                  {submittingGuest ? 'Registering...' : 'Register'}
+                </button>
+                <div className="flex items-center justify-between text-[13px] pt-1">
+                  {onJoinClick && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsGuestModalOpen(false);
+                        onJoinClick();
+                      }}
+                      className="text-[var(--gold-text)] hover:underline cursor-pointer font-semibold"
+                    >
+                      Have an account? Sign in
+                    </button>
+                  )}
+                  <a href="#/privacy" className="text-[var(--fg-muted)] hover:underline">
+                    Privacy Policy
+                  </a>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* REPORT MODAL */}
       {isReportModalOpen && reportingItem && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4">
           <div className="kw-card max-w-md w-full p-6 space-y-4 border-rose-500/40 animate-in fade-in zoom-in-95 duration-150">
@@ -1699,7 +2398,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
               </div>
               <button
                 onClick={() => setIsReportModalOpen(false)}
-                className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)]"
+                className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1739,14 +2438,14 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 <button
                   type="submit"
                   disabled={submittingReport}
-                  className="kw-btn kw-btn-danger text-xs py-2 px-4 font-bold flex-1"
+                  className="kw-btn kw-btn-danger text-xs py-2 px-4 font-bold flex-1 cursor-pointer"
                 >
                   {submittingReport ? 'Submitting...' : 'Submit Report'}
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsReportModalOpen(false)}
-                  className="kw-btn text-xs py-2 px-3 border border-[var(--card-border)]"
+                  className="kw-btn text-xs py-2 px-3 border border-[var(--card-border)] cursor-pointer"
                 >
                   Cancel
                 </button>
