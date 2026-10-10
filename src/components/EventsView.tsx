@@ -466,7 +466,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
         loadEventsList();
       }
     } catch (err: any) {
-      onToast(err.message || 'Failed to create event');
+      onToast(err?.message || 'Could not save the event. Please try again.');
     } finally {
       setFormSubmitting(false);
     }
@@ -532,7 +532,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
         }
       }
     } catch (err: any) {
-      onToast(err.message || 'Failed to update item');
+      onToast(err?.message || 'Could not save the event. Please try again.');
     } finally {
       setFormSubmitting(false);
     }
@@ -1496,7 +1496,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   disabled={formSubmitting}
                   className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold flex-1"
                 >
-                  {formSubmitting ? 'Publishing...' : 'Create & Publish Event'}
+                  {formSubmitting ? 'Creating...' : 'Create & Publish Event'}
                 </button>
                 <button
                   type="button"

@@ -4,6 +4,23 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-10-10
+
+### Fixed (Root Fix for Firestore Event Persistence & Error Propagation)
+- **Fix 1: Never send undefined to Firestore**:
+  - Configured Firestore with `firestoreDb.settings({ ignoreUndefinedProperties: true })` immediately following instance initialization.
+  - Implemented recursive `stripUndefined` helper to deeply strip `undefined` properties from objects and arrays across all write paths (set, batch) while strictly preserving `null`, `false`, `0`, and `''`.
+- **Fix 2: Never leave a request hanging**:
+  - Implemented `asyncHandler` wrapper ensuring all rejected promises from async route handlers are forwarded to Express `next(err)`.
+  - Added final Express error handling middleware logging route errors and returning HTTP 500 JSON (`{ error: 'Something went wrong. Please try again.' }`) without leaking internal stack traces.
+- **Fix 3: Do not keep an event that was not saved**:
+  - Reordered `POST /api/events` to persist to storage via `persistDoc` before adding items to in-memory `store.events`. If persistence fails, the event is rejected with 500 JSON and left out of memory.
+  - Applied identical ordering to event notification broadcasts.
+- **Fix 4: Show the member what happened**:
+  - Updated create and edit forms in `EventsView.tsx` and `api.ts` to handle non-JSON responses and network failures gracefully, displaying `"Could not save the event. Please try again."` and safely re-enabling the submission button.
+  - Submit button shows `"Creating..."` and remains disabled while the request is in flight.
+- Upgraded service worker cache name to `kwegatta-1.4.2`.
+
 ## [1.4.1] - 2026-10-10
 
 ### Fixed (Timezone Wall-Clock Conversion & DST Handling)

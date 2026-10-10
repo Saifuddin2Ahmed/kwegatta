@@ -501,3 +501,32 @@ export function utcToZonedParts(
     time: `${hour}:${minute}`
   };
 }
+
+/**
+ * Recursively strips undefined values from objects and arrays,
+ * leaving null, false, 0, and '' untouched.
+ */
+export function stripUndefined<T>(value: T): T {
+  if (value === undefined) {
+    return undefined as any;
+  }
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  if (value instanceof Date) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== undefined)
+      .map((item) => stripUndefined(item)) as any;
+  }
+  const result: Record<string, any> = {};
+  for (const [key, val] of Object.entries(value)) {
+    if (val !== undefined) {
+      result[key] = stripUndefined(val);
+    }
+  }
+  return result as T;
+}
+

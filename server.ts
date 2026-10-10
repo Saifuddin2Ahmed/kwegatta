@@ -14,6 +14,57 @@ const __dirname = path.dirname(__filename);
 export const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
+/**
+ * Express async handler wrapper: passes any rejected promise or thrown error to next(err).
+ */
+export function asyncHandler(fn: any) {
+  if (typeof fn !== 'function') return fn;
+  if (fn.length === 4) return fn;
+  return (req: Request, res: Response, next: express.NextFunction) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
+
+// Automatically wrap every handler registered on app.get/post/patch/put/delete
+const httpMethods = ['get', 'post', 'patch', 'put', 'delete'] as const;
+for (const method of httpMethods) {
+  const originalMethod = (app as any)[method].bind(app);
+  (app as any)[method] = (path: any, ...handlers: any[]) => {
+    const wrappedHandlers = handlers.map((h: any) =>
+      typeof h === 'function' && h.length <= 3 ? asyncHandler(h) : h
+    );
+    return originalMethod(path, ...wrappedHandlers);
+  };
+}
+
+/**
+ * Recursively strips undefined values from objects and arrays,
+ * leaving null, false, 0, and '' untouched.
+ */
+export function stripUndefined<T>(value: T): T {
+  if (value === undefined) {
+    return undefined as any;
+  }
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  if (value instanceof Date) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== undefined)
+      .map((item) => stripUndefined(item)) as any;
+  }
+  const result: Record<string, any> = {};
+  for (const [key, val] of Object.entries(value)) {
+    if (val !== undefined) {
+      result[key] = stripUndefined(val);
+    }
+  }
+  return result as T;
+}
+
 // Security: Disable X-Powered-By header to prevent fingerprinting
 app.disable('x-powered-by');
 
@@ -1030,14 +1081,30 @@ export let store: StoreData = loadStore();
    Snapshot listeners keep memory synchronized with Firestore across all instances.
    ========================================================================= */
 
+export type StorageWriter = (collectionName: string, id: string, docData: any) => Promise<void> | void;
+let testStorageWriter: StorageWriter | null = null;
+
+export function setTestStorageWriter(writer: StorageWriter | null): void {
+  if (isTestEnv()) {
+    testStorageWriter = writer;
+  }
+}
+
 async function persistDoc(collectionName: string, id: string, docData: any): Promise<void> {
   assertStorageModeForTest(storageMode);
+  const cleanData = stripUndefined(docData);
+
+  if (isTestEnv() && testStorageWriter) {
+    await testStorageWriter(collectionName, id, cleanData);
+    return;
+  }
+
   if (storageMode === 'firestore' && firestoreDb) {
     if (isTestEnv()) {
       throw new Error('FATAL GUARD VIOLATION: persistDoc cannot write to Firestore in test environment!');
     }
     try {
-      await firestoreDb.collection(collectionName).doc(id).set(docData);
+      await firestoreDb.collection(collectionName).doc(id).set(cleanData);
     } catch (err: any) {
       console.error(`[Firestore] Failed to write document ${id} to ${collectionName}:`, err?.message || err);
       throw err;
@@ -1066,6 +1133,12 @@ async function removeDoc(collectionName: string, id: string): Promise<void> {
 
 async function batchPersistDocs(collectionName: string, items: Array<{ id: string; data: any }>): Promise<void> {
   assertStorageModeForTest(storageMode);
+  if (isTestEnv() && testStorageWriter) {
+    for (const item of items) {
+      await testStorageWriter(collectionName, item.id, stripUndefined(item.data));
+    }
+    return;
+  }
   if (storageMode === 'firestore' && firestoreDb) {
     if (isTestEnv()) {
       throw new Error('FATAL GUARD VIOLATION: batchPersistDocs cannot write to Firestore in test environment!');
@@ -1076,7 +1149,7 @@ async function batchPersistDocs(collectionName: string, items: Array<{ id: strin
       const chunk = items.slice(i, i + BATCH_SIZE);
       for (const item of chunk) {
         const ref = firestoreDb.collection(collectionName).doc(item.id);
-        batch.set(ref, item.data);
+        batch.set(ref, stripUndefined(item.data));
       }
       await batch.commit();
     }
@@ -1335,6 +1408,7 @@ async function initStorage(): Promise<void> {
       fbApp = getApps()[0]!;
     }
     firestoreDb = getFirestore(fbApp);
+    firestoreDb.settings({ ignoreUndefinedProperties: true });
     try {
       adminAuth = getAdminAuth(fbApp);
       console.log(`✅ [Firebase Admin] Auth initialized successfully for project "${FIREBASE_PROJECT_ID}"`);
@@ -4627,9 +4701,16 @@ app.post('/api/events', async (req: Request, res: Response) => {
     created_by: authorName
   };
 
+  // FIX 3: Add to store.events only AFTER persistDoc succeeds
+  try {
+    await persistDoc('events', item.id, item);
+  } catch (err: any) {
+    console.error(`[Create Event] Failed to save event ${item.id} to storage:`, err?.message || err);
+    return res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+
   if (!store.events) store.events = [];
   store.events.unshift(item);
-  await persistDoc('events', item.id, item);
 
   // Broadcast notification to community members
   const notifBody = kind === 'event'
@@ -4637,6 +4718,7 @@ app.post('/api/events', async (req: Request, res: Response) => {
     : `💡 New Opportunity (${item.opportunity_type || 'General'}): ${item.title}`;
 
   const newNotifs: Array<{ id: string; data: any }> = [];
+  const notifItems: any[] = [];
   for (const p of store.profiles) {
     if (p.hidden || p.suspended || p.id === authorId) continue;
     const notif = {
@@ -4648,11 +4730,18 @@ app.post('/api/events', async (req: Request, res: Response) => {
       read: false,
       created_at: new Date().toISOString()
     };
-    store.notifications.unshift(notif);
+    notifItems.push(notif);
     newNotifs.push({ id: notif.id, data: notif });
   }
   if (newNotifs.length > 0) {
-    await batchPersistDocs('notifications', newNotifs);
+    try {
+      await batchPersistDocs('notifications', newNotifs);
+      for (const n of notifItems) {
+        store.notifications.unshift(n);
+      }
+    } catch (notifErr: any) {
+      console.error('[Create Event] Failed to persist notifications:', notifErr?.message || notifErr);
+    }
   }
 
   const auditEntry = {
@@ -4662,8 +4751,12 @@ app.post('/api/events', async (req: Request, res: Response) => {
     details: `Created ${kind}: "${item.title}" (${status})`,
     admin: isAdmin ? adminInfo.adminName : authorName
   };
-  store.audit_log.unshift(auditEntry);
-  await persistDoc('audit_log', auditEntry.id, auditEntry);
+  try {
+    await persistDoc('audit_log', auditEntry.id, auditEntry);
+    store.audit_log.unshift(auditEntry);
+  } catch (auditErr: any) {
+    console.error('[Create Event] Failed to persist audit log:', auditErr?.message || auditErr);
+  }
 
   if (storageMode === 'disk') saveStore(store);
   return res.json({ success: true, item: sanitizeEventForPublic(item, callerId) });
@@ -6288,6 +6381,19 @@ app.post('/api/demo/clear', async (req: Request, res: Response) => {
   }
   return res.json({ success: true, count: store.profiles.length });
 });
+
+/**
+ * Final Express error middleware: logs the error with the route and returns 500 JSON.
+ * Never includes stack traces or internal messages in the response.
+ */
+export function errorHandler(err: any, req: Request, res: Response, _next: express.NextFunction) {
+  console.error(`[Server Error] ${req.method} ${req.originalUrl || req.url}:`, err?.message || err);
+  if (!res.headersSent) {
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+}
+
+app.use(errorHandler);
 
 // Production static assets or Vite middleware in dev
 async function setupVite() {

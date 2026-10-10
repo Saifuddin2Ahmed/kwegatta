@@ -1083,28 +1083,52 @@ export async function rsvpEvent(id: string): Promise<{ success: boolean; is_atte
 
 export async function createEvent(item: any): Promise<any> {
   await getFreshAuthToken();
-  const res = await fetch('/api/events', {
-    method: 'POST',
-    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(item)
-  });
-  const data = await res.json();
+  let res: Response;
+  try {
+    res = await fetch('/api/events', {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(item)
+    });
+  } catch {
+    throw new Error('Could not save the event. Please try again.');
+  }
+
+  let data: any = null;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error('Could not save the event. Please try again.');
+  }
+
   if (!res.ok) {
-    throw new Error(data.error || 'Failed to create event');
+    throw new Error(data?.error || 'Could not save the event. Please try again.');
   }
   return data.item;
 }
 
 export async function updateEvent(id: string, patch: any): Promise<any> {
   await getFreshAuthToken();
-  const res = await fetch(`/api/events/${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(patch)
-  });
-  const data = await res.json();
+  let res: Response;
+  try {
+    res = await fetch(`/api/events/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(patch)
+    });
+  } catch {
+    throw new Error('Could not save the event. Please try again.');
+  }
+
+  let data: any = null;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error('Could not save the event. Please try again.');
+  }
+
   if (!res.ok) {
-    throw new Error(data.error || 'Failed to update event');
+    throw new Error(data?.error || 'Could not save the event. Please try again.');
   }
   return data.item;
 }

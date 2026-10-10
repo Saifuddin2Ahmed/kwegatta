@@ -244,14 +244,14 @@ describe('Member-Submitted Events & Approval Permissions', () => {
   });
 });
 
-describe('Service Worker & Cache-Control Configuration (PWA v1.4.1)', () => {
-  it('public/sw.js specifies CACHE_NAME as kwegatta-1.4.1 and handles cache strategies correctly', async () => {
+describe('Service Worker & Cache-Control Configuration (PWA v1.4.2)', () => {
+  it('public/sw.js specifies CACHE_NAME as kwegatta-1.4.2 and handles cache strategies correctly', async () => {
     const fs = await import('fs');
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.4.1
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.4.1'");
+    // 1. Cache name includes version kwegatta-1.4.2
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.4.2'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -903,6 +903,138 @@ describe('Timezone Conversion & DST Handling (v1.4.1)', () => {
     const parts = utcToZonedParts('2026-11-14T11:00:00.000Z', 'Africa/Kampala');
     expect(parts.date).toBe('2026-11-14');
     expect(parts.time).toBe('14:00');
+  });
+});
+
+describe('Firestore Persistence & Error Handling (v1.4.2)', () => {
+  it('strip helper removes undefined at every depth and keeps null/false/0/\'\'', async () => {
+    const { stripUndefined } = await import('../server');
+    const input = {
+      a: undefined,
+      b: null,
+      c: false,
+      d: 0,
+      e: '',
+      f: [undefined, 1, false, null, '', { x: undefined, y: 'keep', z: false }],
+      nested: {
+        u1: undefined,
+        deep: {
+          u2: undefined,
+          val: 'ok',
+          zero: 0,
+          empty: '',
+          none: null,
+          bool: false
+        }
+      }
+    };
+    const cleaned = stripUndefined(input);
+    expect(cleaned).toEqual({
+      b: null,
+      c: false,
+      d: 0,
+      e: '',
+      f: [1, false, null, '', { y: 'keep', z: false }],
+      nested: {
+        deep: {
+          val: 'ok',
+          zero: 0,
+          empty: '',
+          none: null,
+          bool: false
+        }
+      }
+    });
+    expect(cleaned).not.toHaveProperty('a');
+    expect((cleaned as any).nested).not.toHaveProperty('u1');
+    expect((cleaned as any).nested.deep).not.toHaveProperty('u2');
+  });
+
+  it('creating an event with only required fields succeeds against storage test double that throws on undefined', async () => {
+    const { setTestStorageWriter } = await import('../server');
+
+    // Test double: throws like Firestore if any field or nested field is undefined
+    const checkNoUndefined = (obj: any, path = '') => {
+      if (obj === undefined) {
+        throw new Error(`Firestore Error: Value at path "${path}" cannot be undefined`);
+      }
+      if (obj && typeof obj === 'object' && !(obj instanceof Date)) {
+        for (const [key, val] of Object.entries(obj)) {
+          const currentPath = path ? `${path}.${key}` : key;
+          if (val === undefined) {
+            throw new Error(`Firestore Error: Field "${currentPath}" contains undefined`);
+          }
+          checkNoUndefined(val, currentPath);
+        }
+      }
+    };
+
+    setTestStorageWriter(async (_col: string, _id: string, data: any) => {
+      checkNoUndefined(data);
+    });
+
+    try {
+      const res = await fetch(`${baseUrl}/api/events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-member-a'
+        },
+        body: JSON.stringify({
+          kind: 'event',
+          title: 'Required Fields Only Event',
+          description: 'Testing event with optional links and images omitted.',
+          start_date: '2026-11-20',
+          start_time: '14:00',
+          timezone: 'Africa/Kampala',
+          format: 'in_person',
+          location: 'Kampala Hub'
+        })
+      });
+
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.success).toBe(true);
+      expect(data.item.title).toBe('Required Fields Only Event');
+    } finally {
+      setTestStorageWriter(null);
+    }
+  });
+
+  it('when the storage layer rejects, POST /api/events returns 500 JSON within test timeout and store.events does not contain the item', async () => {
+    const { setTestStorageWriter, store } = await import('../server');
+
+    setTestStorageWriter(async () => {
+      throw new Error('Simulated storage connection error');
+    });
+
+    try {
+      const res = await fetch(`${baseUrl}/api/events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-member-b'
+        },
+        body: JSON.stringify({
+          kind: 'event',
+          title: 'Event That Fails Storage',
+          description: 'This event should not exist in in-memory store if persistDoc fails.',
+          start_date: '2026-11-22',
+          start_time: '10:00',
+          timezone: 'Africa/Kampala',
+          format: 'in_person',
+          location: 'Innovation Lab'
+        })
+      });
+
+      expect(res.status).toBe(500);
+      const data = await res.json();
+      expect(data).toEqual({ error: 'Something went wrong. Please try again.' });
+      // Crucial: store.events must not contain the item that failed persistence
+      expect(store.events.some((e: any) => e.title === 'Event That Fails Storage')).toBe(false);
+    } finally {
+      setTestStorageWriter(null);
+    }
   });
 });
 
