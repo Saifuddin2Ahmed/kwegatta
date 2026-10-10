@@ -612,6 +612,8 @@ interface StoreData {
   posts: any[];
   reports: any[];
   events: any[];
+  event_questions: any[];
+  event_guests: any[];
   pinned_announcement: any;
   admin_emails: string[];
   team: TeamMember[];
@@ -962,6 +964,8 @@ function createInitialStore(demo: boolean = isDemoMode): StoreData {
         attendee_ids: ['demo-peter', 'demo-amina']
       }
     ] : [],
+    event_questions: [],
+    event_guests: [],
     pinned_announcement: null,
     admin_emails: [],
     team: [...INITIAL_TEAM_MEMBERS],
@@ -996,6 +1000,12 @@ function loadStore(): StoreData {
         } else {
           // One-time sanitization: purge any leftover test events with test author
           parsed.events = parsed.events.filter((e: any) => e.author_id !== 'test-user-unapproved-author');
+        }
+        if (!parsed.event_questions || !Array.isArray(parsed.event_questions)) {
+          parsed.event_questions = [];
+        }
+        if (!parsed.event_guests || !Array.isArray(parsed.event_guests)) {
+          parsed.event_guests = [];
         }
         if (!parsed.admin_emails || !Array.isArray(parsed.admin_emails)) {
           parsed.admin_emails = [];
@@ -4368,7 +4378,27 @@ export function filterEventsForCaller(
   });
 }
 
-export function sanitizeEventForPublic(item: any, callerId?: string | null): any {
+export function canViewHostContact(item: any, callerId?: string | null, isAdmin: boolean = false, guestToken?: string): boolean {
+  if (!item) return false;
+  if (isAdmin) return true;
+  if (callerId) {
+    const callerProfile = store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId);
+    const callerProfileId = callerProfile?.id || callerId;
+    if (item.author_id === callerProfileId || item.author_id === callerId) return true;
+    const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
+    if (attendeeIds.includes(callerProfileId) || attendeeIds.includes(callerId)) return true;
+  }
+  if (guestToken) {
+    const tokenHash = crypto.createHash('sha256').update(guestToken).digest('hex');
+    const isValidGuest = (store.event_guests || []).some(
+      (g: any) => g.event_id === item.id && g.token_hash === tokenHash
+    );
+    if (isValidGuest) return true;
+  }
+  return false;
+}
+
+export function sanitizeEventForPublic(item: any, callerId?: string | null, isAllowedContact?: boolean): any {
   if (!item) return item;
   const phase = computeEventPhase(item);
   const isPast = phase === 'past';
@@ -4377,14 +4407,25 @@ export function sanitizeEventForPublic(item: any, callerId?: string | null): any
   // Join link: shown only to signed-in members, and hidden when event is past
   const joinLink = (!callerId || isPast) ? undefined : item.join_link;
 
+  // Host contact details: returned ONLY to (a) author, (b) admins, (c) signed-in members who RSVPed, (d) guests with valid token
+  const contactPhone = isAllowedContact ? item.contact_phone : undefined;
+  const contactEmail = isAllowedContact ? item.contact_email : undefined;
+
   // Reports: never public and never show reporter identity to anyone except admin in admin routes
   const { reports, ...rest } = item;
+
+  const guestCount = (store.event_guests || []).filter((g: any) => g.event_id === item.id).length;
+  const totalAttendeeCount = (Array.isArray(item.attendee_ids) ? item.attendee_ids.length : 0) + guestCount;
 
   return {
     ...rest,
     phase,
     time_needs_update: !hasRealTimes && item.kind === 'event',
     join_link: joinLink,
+    contact_phone: contactPhone,
+    contact_email: contactEmail,
+    guest_count: guestCount,
+    attendee_count: totalAttendeeCount,
     cover_image: item.cover_image ? `/api/event-image/${item.id}` : undefined,
     report_count: Array.isArray(reports) ? reports.length : (item.report_count || 0),
     under_review: Boolean(item.under_review || (item.hidden_by_moderation && !item.reviewed_by_admin))
@@ -4435,11 +4476,15 @@ app.get('/api/events', (req: Request, res: Response) => {
     }
   });
 
-  const sanitizedList = list.map((ev: any) => sanitizeEventForPublic(ev, callerId));
+  const sanitizedList = list.map((ev: any) => {
+    const isAllowed = canViewHostContact(ev, callerId, isAdmin);
+    return sanitizeEventForPublic(ev, callerId, isAllowed);
+  });
   return res.json(sanitizedList);
 });
 
 app.get('/api/events/:id', (req: Request, res: Response) => {
+  cleanupExpiredGuestRecords();
   const { id } = req.params;
   const callerId = resolveAuthUserId(req);
   const isAdmin = checkAdmin(req);
@@ -4526,14 +4571,32 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
     store.profiles.some((p: any) => (p.account_uid === callerId || p.id === callerId) && attendeeIds.includes(p.id))
   ));
 
-  const sanitized = sanitizeEventForPublic(item, callerId);
+  const guestToken = typeof req.query.g === 'string' ? req.query.g : undefined;
+  const isAllowedContact = canViewHostContact(item, callerId, isAdmin, guestToken);
+  const sanitized = sanitizeEventForPublic(item, callerId, isAllowedContact);
+
+  // Guest details for guest holder
+  let guestInfo: any = undefined;
+  if (guestToken) {
+    const tokenHash = crypto.createHash('sha256').update(guestToken).digest('hex');
+    const guestRec = (store.event_guests || []).find((g: any) => g.event_id === id && g.token_hash === tokenHash);
+    if (guestRec) {
+      guestInfo = {
+        id: guestRec.id,
+        name: guestRec.name,
+        phone: guestRec.phone,
+        email: guestRec.email,
+        created_at: guestRec.created_at
+      };
+    }
+  }
 
   return res.json({
     ...sanitized,
     attendees: callerId ? attendeeProfiles : undefined,
-    attendee_count: attendeeIds.length,
     people_to_meet: callerId ? peopleToMeet : undefined,
-    is_attending: isAttending
+    is_attending: isAttending,
+    guest_info: guestInfo
   });
 });
 
@@ -4640,6 +4703,24 @@ app.post('/api/events', async (req: Request, res: Response) => {
     }
   }
 
+  let contact_phone: string | undefined = undefined;
+  if (raw.contact_phone) {
+    const cleanPhone = String(raw.contact_phone).trim();
+    if (!/^\+?[0-9]{7,15}$/.test(cleanPhone)) {
+      return res.status(400).json({ error: 'Contact phone must be a valid phone or WhatsApp number (7-15 digits with optional leading +).' });
+    }
+    contact_phone = cleanPhone;
+  }
+
+  let contact_email: string | undefined = undefined;
+  if (raw.contact_email) {
+    const cleanEmail = String(raw.contact_email).trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return res.status(400).json({ error: 'Contact email must be a valid email address.' });
+    }
+    contact_email = cleanEmail;
+  }
+
   const authorId = callerProfile?.id || callerId || 'admin';
   const authorName = isAdmin ? adminInfo.adminName : (callerProfile?.name || 'Member');
   const isOrganiser = Boolean(callerProfile?.is_organiser);
@@ -4682,6 +4763,8 @@ app.post('/api/events', async (req: Request, res: Response) => {
     format: timeValidation.format || (raw.format ? sanitizeText(raw.format, 20) : 'in_person'),
     location: timeValidation.location || (raw.location ? sanitizeText(raw.location, 200) : undefined),
     join_link: timeValidation.join_link,
+    contact_phone,
+    contact_email,
     time_needs_update: Boolean(timeValidation.time_needs_update),
     cover_image: raw.cover_image ? validateAndSanitizeEventCoverImage(raw.cover_image) : undefined,
     registration_link,
@@ -4759,7 +4842,8 @@ app.post('/api/events', async (req: Request, res: Response) => {
   }
 
   if (storageMode === 'disk') saveStore(store);
-  return res.json({ success: true, item: sanitizeEventForPublic(item, callerId) });
+  const isAllowedContact = canViewHostContact(item, callerId, isAdmin);
+  return res.json({ success: true, item: sanitizeEventForPublic(item, callerId, isAllowedContact) });
 });
 
 app.patch('/api/events/:id', async (req: Request, res: Response) => {
@@ -4796,6 +4880,30 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
     if (timeValidation.time_needs_update !== undefined) item.time_needs_update = timeValidation.time_needs_update;
   }
 
+  if (raw.contact_phone !== undefined) {
+    if (raw.contact_phone) {
+      const cleanPhone = String(raw.contact_phone).trim();
+      if (!/^\+?[0-9]{7,15}$/.test(cleanPhone)) {
+        return res.status(400).json({ error: 'Contact phone must be a valid phone or WhatsApp number (7-15 digits with optional leading +).' });
+      }
+      item.contact_phone = cleanPhone;
+    } else {
+      item.contact_phone = undefined;
+    }
+  }
+
+  if (raw.contact_email !== undefined) {
+    if (raw.contact_email) {
+      const cleanEmail = String(raw.contact_email).trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+        return res.status(400).json({ error: 'Contact email must be a valid email address.' });
+      }
+      item.contact_email = cleanEmail;
+    } else {
+      item.contact_email = undefined;
+    }
+  }
+
   if (raw.title !== undefined) item.title = sanitizeText(raw.title, 150);
   if (raw.description !== undefined) item.description = sanitizeText(raw.description, 2000);
   if (raw.datetime !== undefined) item.datetime = sanitizeText(raw.datetime, 60);
@@ -4816,6 +4924,11 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
   if (isAdmin && raw.published !== undefined) {
     item.published = Boolean(raw.published);
     if (item.published) item.status = 'published';
+  }
+
+  // If an author edits a hidden event, mark it as awaiting review for admins
+  if (!isAdmin && item.hidden_by_moderation) {
+    item.awaiting_review = true;
   }
 
   await persistDoc('events', item.id, item);
@@ -4949,8 +5062,27 @@ app.post('/api/events/:id/report', async (req: Request, res: Response) => {
   // Auto-hide check: 3 or more reports from different members hides event from public lists
   const distinctReporters = new Set(item.reports.map((r: any) => r.reporter_id)).size;
   if (distinctReporters >= 3 && !item.reviewed_by_admin) {
+    const wasNotHidden = !item.hidden_by_moderation;
     item.hidden_by_moderation = true;
     item.under_review = true;
+
+    if (wasNotHidden && item.author_id) {
+      const authorProfile = store.profiles.find((p: any) => p.id === item.author_id || p.account_uid === item.author_id);
+      if (authorProfile) {
+        const notif = {
+          id: 'notif-autohide-' + Date.now(),
+          to_id: authorProfile.id,
+          from_id: 'system',
+          type: 'moderation',
+          body: `Your event "${item.title}" is under review due to community reports.`,
+          event_id: item.id,
+          read: false,
+          created_at: new Date().toISOString()
+        };
+        store.notifications.unshift(notif);
+        await persistDoc('notifications', notif.id, notif);
+      }
+    }
   }
 
   await persistDoc('events', item.id, item);
@@ -4962,6 +5094,444 @@ app.post('/api/events/:id/report', async (req: Request, res: Response) => {
     report_count: item.report_count,
     hidden_by_moderation: Boolean(item.hidden_by_moderation)
   });
+});
+
+/* =========================================================================
+   PART 2: QUESTIONS ON THE EVENT PAGE
+   ========================================================================= */
+
+let lastGuestCleanupMs = 0;
+export function resetGuestCleanupTimerForTest(): void {
+  lastGuestCleanupMs = 0;
+}
+
+export function cleanupExpiredGuestRecords(): void {
+  const now = Date.now();
+  if (now - lastGuestCleanupMs < 3600000) return; // Throttle to once per hour
+  lastGuestCleanupMs = now;
+
+  if (!Array.isArray(store.event_guests)) store.event_guests = [];
+  const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+
+  const toKeep: any[] = [];
+  for (const g of store.event_guests) {
+    const event = (store.events || []).find((e: any) => e.id === g.event_id);
+    if (event) {
+      const eventEndMs = new Date(event.ends_at || event.starts_at || event.datetime || event.created_at).getTime();
+      if (now - eventEndMs > thirtyDaysMs) {
+        removeDoc('event_guests', g.id).catch(() => {});
+        continue;
+      }
+    }
+    toKeep.push(g);
+  }
+  store.event_guests = toKeep;
+}
+
+// GET /api/events/:id/questions (public read)
+app.get('/api/events/:id/questions', (req: Request, res: Response) => {
+  cleanupExpiredGuestRecords();
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) return res.status(404).json({ error: 'Event not found' });
+
+  const isAdmin = checkAdmin(req);
+  const callerId = resolveAuthUserId(req);
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
+  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
+
+  if (item.hidden_by_moderation && !isAdmin && !isAuthor) {
+    return res.status(404).json({ error: 'Event not found' });
+  }
+
+  const questions = (store.event_questions || [])
+    .filter((q: any) => q.event_id === id)
+    .sort((a: any, b: any) => String(a.created_at).localeCompare(String(b.created_at)));
+
+  return res.json(questions);
+});
+
+// POST /api/events/:id/questions (signed-in members with completed profile)
+app.post('/api/events/:id/questions', async (req: Request, res: Response) => {
+  cleanupExpiredGuestRecords();
+  const callerId = resolveAuthUserId(req);
+  if (!callerId) {
+    return res.status(401).json({ error: 'Please sign in to ask a question.' });
+  }
+
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) return res.status(404).json({ error: 'Event not found' });
+
+  const callerProfile = store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId);
+  if (!callerProfile || !callerProfile.name || !callerProfile.headline) {
+    return res.status(400).json({ error: 'Please complete your profile before asking a question.' });
+  }
+
+  if (item.is_cancelled) {
+    return res.status(400).json({ error: 'Posting questions is closed because this event was cancelled.' });
+  }
+
+  if (item.ends_at && Date.now() > new Date(item.ends_at).getTime() + 7 * 24 * 60 * 60 * 1000) {
+    return res.status(400).json({ error: 'Posting questions is closed for this event.' });
+  }
+
+  const content = sanitizeText(req.body?.content, 500);
+  if (!content || content.length < 3) {
+    return res.status(400).json({ error: 'Question must be between 3 and 500 characters.' });
+  }
+
+  const memberId = callerProfile.id;
+  const eventQuestions = (store.event_questions || []).filter((q: any) => q.event_id === id && q.author_id === memberId);
+  if (eventQuestions.length >= 5) {
+    return res.status(400).json({ error: 'Limit reached: At most 5 questions per member per event.' });
+  }
+
+  const past24h = Date.now() - 24 * 60 * 60 * 1000;
+  const dailyQuestions = (store.event_questions || []).filter(
+    (q: any) => q.author_id === memberId && new Date(q.created_at).getTime() >= past24h
+  );
+  if (dailyQuestions.length >= 20) {
+    return res.status(400).json({ error: 'Limit reached: At most 20 questions per day.' });
+  }
+
+  const question = {
+    id: 'q-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
+    event_id: id,
+    author_id: memberId,
+    author_name: callerProfile.name,
+    content,
+    created_at: new Date().toISOString()
+  };
+
+  if (!Array.isArray(store.event_questions)) store.event_questions = [];
+  store.event_questions.push(question);
+  await persistDoc('event_questions', question.id, question);
+
+  // Notify author
+  if (item.author_id && item.author_id !== memberId) {
+    const authorProfile = store.profiles.find((p: any) => p.id === item.author_id || p.account_uid === item.author_id);
+    if (authorProfile) {
+      const notif = {
+        id: 'notif-q-' + Date.now(),
+        to_id: authorProfile.id,
+        from_id: memberId,
+        type: 'question',
+        body: `New question on "${item.title}": "${content.slice(0, 60)}${content.length > 60 ? '...' : ''}"`,
+        event_id: id,
+        read: false,
+        created_at: new Date().toISOString()
+      };
+      store.notifications.unshift(notif);
+      await persistDoc('notifications', notif.id, notif);
+    }
+  }
+
+  return res.json({ success: true, question });
+});
+
+// POST /api/events/:id/questions/:qid/reply (author or admin only)
+app.post('/api/events/:id/questions/:qid/reply', async (req: Request, res: Response) => {
+  cleanupExpiredGuestRecords();
+  const callerId = resolveAuthUserId(req);
+  const isAdmin = checkAdmin(req);
+  if (!callerId && !isAdmin) {
+    return res.status(401).json({ error: 'Please sign in to reply.' });
+  }
+
+  const { id, qid } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) return res.status(404).json({ error: 'Event not found' });
+
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
+  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
+
+  if (!isAuthor && !isAdmin) {
+    return res.status(403).json({ error: 'Only the event host or an admin can reply to questions.' });
+  }
+
+  const question = (store.event_questions || []).find((q: any) => q.id === qid && q.event_id === id);
+  if (!question) return res.status(404).json({ error: 'Question not found' });
+
+  const content = sanitizeText(req.body?.content, 500);
+  if (!content || content.length < 3) {
+    return res.status(400).json({ error: 'Reply must be between 3 and 500 characters.' });
+  }
+
+  const replyAuthorName = isAdmin ? 'Moderator' : (callerProfile?.name || 'Host');
+  question.reply = {
+    id: 'reply-' + Date.now(),
+    author_id: callerProfileId || 'admin',
+    author_name: replyAuthorName,
+    is_host: isAuthor,
+    content,
+    created_at: new Date().toISOString()
+  };
+
+  await persistDoc('event_questions', question.id, question);
+
+  // Notify asker
+  if (question.author_id && question.author_id !== callerProfileId) {
+    const askerProfile = store.profiles.find((p: any) => p.id === question.author_id || p.account_uid === question.author_id);
+    if (askerProfile) {
+      const notif = {
+        id: 'notif-qr-' + Date.now(),
+        to_id: askerProfile.id,
+        from_id: callerProfileId || 'host',
+        type: 'question_reply',
+        body: `The host replied to your question on "${item.title}"`,
+        event_id: id,
+        read: false,
+        created_at: new Date().toISOString()
+      };
+      store.notifications.unshift(notif);
+      await persistDoc('notifications', notif.id, notif);
+    }
+  }
+
+  return res.json({ success: true, question });
+});
+
+// DELETE /api/events/:id/questions/:qid
+app.delete('/api/events/:id/questions/:qid', async (req: Request, res: Response) => {
+  cleanupExpiredGuestRecords();
+  const callerId = resolveAuthUserId(req);
+  const isAdmin = checkAdmin(req);
+  if (!callerId && !isAdmin) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+
+  const { id, qid } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) return res.status(404).json({ error: 'Event not found' });
+
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
+  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
+
+  const question = (store.event_questions || []).find((q: any) => q.id === qid && q.event_id === id);
+  if (!question) return res.status(404).json({ error: 'Question not found' });
+
+  const isWriter = Boolean(callerProfileId && (question.author_id === callerProfileId || question.author_id === callerId));
+  if (!isWriter && !isAuthor && !isAdmin) {
+    return res.status(403).json({ error: 'Forbidden: You cannot delete this question.' });
+  }
+
+  store.event_questions = (store.event_questions || []).filter((q: any) => q.id !== qid);
+  await removeDoc('event_questions', qid);
+
+  return res.json({ success: true });
+});
+
+/* =========================================================================
+   PART 4: REGISTER FOR AN EVENT WITHOUT AN ACCOUNT (GUEST REGISTRATION)
+   ========================================================================= */
+
+const guestIpRateMap = new Map<string, { eventRegistrations: Map<string, number[]>; totalTimestamps: number[] }>();
+
+app.post('/api/events/:id/guest-register', async (req: Request, res: Response) => {
+  cleanupExpiredGuestRecords();
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) return res.status(404).json({ error: 'Event not found.' });
+
+  const phase = computeEventPhase(item);
+  if (phase === 'past' || item.is_cancelled || item.hidden_by_moderation) {
+    return res.status(400).json({ error: 'Registration is closed for this event.' });
+  }
+
+  const raw = req.body || {};
+
+  // Honeypot check
+  if (raw.website || raw.honeypot || raw.hp) {
+    return res.status(400).json({ error: 'Spam submission rejected.' });
+  }
+
+  if (!raw.agree) {
+    return res.status(400).json({ error: 'You must agree to share contact details with the host.' });
+  }
+
+  const name = sanitizeText(raw.name, 80);
+  if (!name || name.length < 2) {
+    return res.status(400).json({ error: 'Full name must be between 2 and 80 characters.' });
+  }
+
+  let phone: string | undefined = undefined;
+  if (raw.phone) {
+    const cleanP = String(raw.phone).trim();
+    if (!/^\+?[0-9]{7,15}$/.test(cleanP)) {
+      return res.status(400).json({ error: 'Phone/WhatsApp number must be 7-15 digits with optional leading +.' });
+    }
+    phone = cleanP;
+  }
+
+  let email: string | undefined = undefined;
+  if (raw.email) {
+    const cleanE = String(raw.email).trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanE)) {
+      return res.status(400).json({ error: 'Please enter a valid email address.' });
+    }
+    email = cleanE;
+  }
+
+  if (!phone && !email) {
+    return res.status(400).json({ error: 'Please provide at least a phone number or an email address.' });
+  }
+
+  // Capacity check
+  if (item.capacity && item.capacity > 0) {
+    const guestCount = (store.event_guests || []).filter((g: any) => g.event_id === id).length;
+    const currentTotal = (Array.isArray(item.attendee_ids) ? item.attendee_ids.length : 0) + guestCount;
+    if (currentTotal >= item.capacity) {
+      return res.status(400).json({ error: 'Event is at full capacity.' });
+    }
+  }
+
+  // Duplicate contact check for this event
+  const existingGuest = (store.event_guests || []).find((g: any) => {
+    if (g.event_id !== id) return false;
+    if (phone && g.phone === phone) return true;
+    if (email && g.email && g.email.toLowerCase() === email.toLowerCase()) return true;
+    return false;
+  });
+  if (existingGuest) {
+    return res.status(400).json({ error: 'You have already registered for this event with this contact detail.' });
+  }
+
+  // IP Rate limiting
+  const ip = req.ip || req.socket?.remoteAddress || '127.0.0.1';
+  const now = Date.now();
+  const past24h = now - 24 * 60 * 60 * 1000;
+
+  let ipRecord = guestIpRateMap.get(ip);
+  if (!ipRecord) {
+    ipRecord = { eventRegistrations: new Map(), totalTimestamps: [] };
+    guestIpRateMap.set(ip, ipRecord);
+  }
+
+  ipRecord.totalTimestamps = ipRecord.totalTimestamps.filter(t => t >= past24h);
+  if (ipRecord.totalTimestamps.length >= 10) {
+    return res.status(429).json({ error: 'Guest registration limit reached for today.' });
+  }
+
+  let eventTs = ipRecord.eventRegistrations.get(id) || [];
+  eventTs = eventTs.filter(t => t >= past24h);
+  if (eventTs.length >= 3) {
+    return res.status(429).json({ error: 'Guest registration limit reached for this event today.' });
+  }
+
+  // Token generation
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+  const guestRecord = {
+    id: 'guest-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
+    event_id: id,
+    name,
+    phone,
+    email,
+    created_at: new Date().toISOString(),
+    token_hash: tokenHash
+  };
+
+  if (!Array.isArray(store.event_guests)) store.event_guests = [];
+  store.event_guests.push(guestRecord);
+  await persistDoc('event_guests', guestRecord.id, guestRecord);
+
+  // Record IP hits
+  eventTs.push(now);
+  ipRecord.eventRegistrations.set(id, eventTs);
+  ipRecord.totalTimestamps.push(now);
+
+  return res.json({
+    success: true,
+    token: rawToken,
+    guest_id: guestRecord.id,
+    event_id: id
+  });
+});
+
+app.post('/api/events/:id/guest-cancel', async (req: Request, res: Response) => {
+  cleanupExpiredGuestRecords();
+  const { id } = req.params;
+  const token = req.body?.token;
+  if (!token || typeof token !== 'string') {
+    return res.status(400).json({ error: 'Registration token is required.' });
+  }
+
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  const guestIndex = (store.event_guests || []).findIndex(
+    (g: any) => g.event_id === id && g.token_hash === tokenHash
+  );
+
+  if (guestIndex < 0) {
+    return res.status(400).json({ error: 'Invalid registration token.' });
+  }
+
+  const guestId = store.event_guests[guestIndex].id;
+  store.event_guests.splice(guestIndex, 1);
+  await removeDoc('event_guests', guestId);
+
+  return res.json({ success: true, message: 'Registration cancelled.' });
+});
+
+app.get('/api/events/:id/guests', (req: Request, res: Response) => {
+  cleanupExpiredGuestRecords();
+  const callerId = resolveAuthUserId(req);
+  const isAdmin = checkAdmin(req);
+  const { id } = req.params;
+
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) return res.status(404).json({ error: 'Event not found.' });
+
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
+  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
+
+  if (!isAuthor && !isAdmin) {
+    return res.status(403).json({ error: 'Forbidden: Only the event host or an admin can view guest registrations.' });
+  }
+
+  const guests = (store.event_guests || [])
+    .filter((g: any) => g.event_id === id)
+    .map((g: any) => ({
+      id: g.id,
+      event_id: g.event_id,
+      name: g.name,
+      phone: g.phone,
+      email: g.email,
+      created_at: g.created_at
+    }));
+
+  return res.json(guests);
+});
+
+app.delete('/api/events/:id/guests/:gid', async (req: Request, res: Response) => {
+  cleanupExpiredGuestRecords();
+  const callerId = resolveAuthUserId(req);
+  const isAdmin = checkAdmin(req);
+  const { id, gid } = req.params;
+
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) return res.status(404).json({ error: 'Event not found.' });
+
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
+  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
+
+  if (!isAuthor && !isAdmin) {
+    return res.status(403).json({ error: 'Forbidden: Only the event host or an admin can remove guests.' });
+  }
+
+  const guestIndex = (store.event_guests || []).findIndex((g: any) => g.id === gid && g.event_id === id);
+  if (guestIndex < 0) return res.status(404).json({ error: 'Guest registration not found.' });
+
+  store.event_guests.splice(guestIndex, 1);
+  await removeDoc('event_guests', gid);
+
+  return res.json({ success: true });
 });
 
 // Part 5: Admin moderation routes
@@ -4979,21 +5549,51 @@ app.post('/api/admin/events/:id/hide', async (req: Request, res: Response) => {
   const item = (store.events || []).find((e: any) => e.id === id);
   if (!item) return res.status(404).json({ error: 'Event not found' });
 
+  const allowedReasons = ['Not a real event', 'Spam or scam', 'Offensive', 'Duplicate', 'Other'];
+  const rawReason = req.body?.reason;
+  if (!rawReason || !allowedReasons.includes(rawReason)) {
+    return res.status(400).json({ error: 'Reason is required. Must be one of: ' + allowedReasons.join(', ') });
+  }
+
+  const note = req.body?.note ? sanitizeText(req.body.note, 300) : '';
+  const reasonStr = rawReason === 'Other' && note ? `Other (${note})` : rawReason;
+
   item.hidden_by_moderation = true;
   item.reviewed_by_admin = true;
+  item.under_review = false;
+  item.hidden_reason = reasonStr;
 
   const auditEntry = {
     id: 'audit-' + Date.now(),
     timestamp: new Date().toISOString(),
     action: 'HIDE_EVENT',
-    details: `Admin hid event "${item.title}" (${id})`,
+    details: `Admin hid event "${item.title}" (${id}). Reason: ${reasonStr}`,
     admin: admin.adminName
   };
   store.audit_log.unshift(auditEntry);
   await persistDoc('audit_log', auditEntry.id, auditEntry);
   await persistDoc('events', item.id, item);
-  if (storageMode === 'disk') saveStore(store);
 
+  // Notify author
+  if (item.author_id) {
+    const authorProfile = store.profiles.find((p: any) => p.id === item.author_id || p.account_uid === item.author_id);
+    if (authorProfile) {
+      const notif = {
+        id: 'notif-hide-' + Date.now(),
+        to_id: authorProfile.id,
+        from_id: 'moderator',
+        type: 'moderation',
+        body: `Your event "${item.title}" was hidden by a moderator. Reason: ${reasonStr}.`,
+        event_id: id,
+        read: false,
+        created_at: new Date().toISOString()
+      };
+      store.notifications.unshift(notif);
+      await persistDoc('notifications', notif.id, notif);
+    }
+  }
+
+  if (storageMode === 'disk') saveStore(store);
   return res.json({ success: true, message: 'Event hidden', item });
 });
 
@@ -5007,6 +5607,8 @@ app.post('/api/admin/events/:id/restore', async (req: Request, res: Response) =>
 
   item.hidden_by_moderation = false;
   item.reviewed_by_admin = true;
+  item.under_review = false;
+  item.awaiting_review = false;
 
   const auditEntry = {
     id: 'audit-' + Date.now(),
@@ -5018,8 +5620,27 @@ app.post('/api/admin/events/:id/restore', async (req: Request, res: Response) =>
   store.audit_log.unshift(auditEntry);
   await persistDoc('audit_log', auditEntry.id, auditEntry);
   await persistDoc('events', item.id, item);
-  if (storageMode === 'disk') saveStore(store);
 
+  // Notify author
+  if (item.author_id) {
+    const authorProfile = store.profiles.find((p: any) => p.id === item.author_id || p.account_uid === item.author_id);
+    if (authorProfile) {
+      const notif = {
+        id: 'notif-restore-' + Date.now(),
+        to_id: authorProfile.id,
+        from_id: 'moderator',
+        type: 'moderation',
+        body: `Your event "${item.title}" is visible again.`,
+        event_id: id,
+        read: false,
+        created_at: new Date().toISOString()
+      };
+      store.notifications.unshift(notif);
+      await persistDoc('notifications', notif.id, notif);
+    }
+  }
+
+  if (storageMode === 'disk') saveStore(store);
   return res.json({ success: true, message: 'Event restored', item });
 });
 
@@ -5031,6 +5652,15 @@ app.delete('/api/admin/events/:id', async (req: Request, res: Response) => {
   const item = (store.events || []).find((e: any) => e.id === id);
   if (!item) return res.status(404).json({ error: 'Event not found' });
 
+  const allowedReasons = ['Not a real event', 'Spam or scam', 'Offensive', 'Duplicate', 'Other'];
+  const rawReason = req.body?.reason;
+  if (!rawReason || !allowedReasons.includes(rawReason)) {
+    return res.status(400).json({ error: 'Reason is required. Must be one of: ' + allowedReasons.join(', ') });
+  }
+
+  const note = req.body?.note ? sanitizeText(req.body.note, 300) : '';
+  const reasonStr = rawReason === 'Other' && note ? `Other (${note})` : rawReason;
+
   store.events = (store.events || []).filter((e: any) => e.id !== id);
   await removeDoc('events', id);
 
@@ -5038,13 +5668,32 @@ app.delete('/api/admin/events/:id', async (req: Request, res: Response) => {
     id: 'audit-' + Date.now(),
     timestamp: new Date().toISOString(),
     action: 'DELETE_EVENT_ADMIN',
-    details: `Admin deleted event "${item.title}" (${id})`,
+    details: `Admin deleted event "${item.title}" (${id}). Reason: ${reasonStr}`,
     admin: admin.adminName
   };
   store.audit_log.unshift(auditEntry);
   await persistDoc('audit_log', auditEntry.id, auditEntry);
-  if (storageMode === 'disk') saveStore(store);
 
+  // Notify author
+  if (item.author_id) {
+    const authorProfile = store.profiles.find((p: any) => p.id === item.author_id || p.account_uid === item.author_id);
+    if (authorProfile) {
+      const notif = {
+        id: 'notif-del-' + Date.now(),
+        to_id: authorProfile.id,
+        from_id: 'moderator',
+        type: 'moderation',
+        body: `Your event "${item.title}" was removed by a moderator. Reason: ${reasonStr}.`,
+        event_id: id,
+        read: false,
+        created_at: new Date().toISOString()
+      };
+      store.notifications.unshift(notif);
+      await persistDoc('notifications', notif.id, notif);
+    }
+  }
+
+  if (storageMode === 'disk') saveStore(store);
   return res.json({ success: true, message: 'Event deleted' });
 });
 
@@ -5719,6 +6368,9 @@ app.get('/api/data/follows', (req: Request, res: Response) => {
    ========================================================================= */
 app.get('/api/data/:collection', (req: Request, res: Response) => {
   const col = req.params.collection as keyof StoreData;
+  if (col === 'event_guests' || col === 'event_questions') {
+    return res.status(403).json({ error: 'Access denied.' });
+  }
   if (!store[col]) {
     return res.status(404).json({ error: `Collection ${col} not found` });
   }
@@ -5831,6 +6483,9 @@ app.get('/api/data/:collection', (req: Request, res: Response) => {
 // Profile & Data Creation (Protected / Strict Validation / Session Required)
 app.post('/api/data/:collection', async (req: Request, res: Response) => {
   const col = req.params.collection as keyof StoreData;
+  if (col === 'event_guests' || col === 'event_questions') {
+    return res.status(403).json({ error: 'Access denied.' });
+  }
   if (!store[col]) {
     return res.status(404).json({ error: `Collection ${col} not found` });
   }
@@ -6055,6 +6710,9 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
 app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
   const col = req.params.collection as keyof StoreData;
   const id = req.params.id;
+  if (col === 'event_guests' || col === 'event_questions') {
+    return res.status(403).json({ error: 'Access denied.' });
+  }
   if (!store[col]) {
     return res.status(404).json({ error: `Collection ${col} not found` });
   }
@@ -6244,6 +6902,9 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
 app.delete('/api/data/:collection/:id', async (req: Request, res: Response) => {
   const col = req.params.collection as keyof StoreData;
   const id = req.params.id;
+  if (col === 'event_guests' || col === 'event_questions') {
+    return res.status(403).json({ error: 'Access denied.' });
+  }
   if (!store[col]) {
     return res.status(404).json({ error: `Collection ${col} not found` });
   }
@@ -6387,6 +7048,10 @@ app.post('/api/demo/clear', async (req: Request, res: Response) => {
  * Never includes stack traces or internal messages in the response.
  */
 export function errorHandler(err: any, req: Request, res: Response, _next: express.NextFunction) {
+  if (err && (err instanceof SyntaxError || err.type === 'entity.parse.failed' || err.name === 'SyntaxError') && (err.status === 400 || err.statusCode === 400) && 'body' in err) {
+    res.status(400).json({ error: 'Invalid request body.' });
+    return;
+  }
   console.error(`[Server Error] ${req.method} ${req.originalUrl || req.url}:`, err?.message || err);
   if (!res.headersSent) {
     res.status(500).json({ error: 'Something went wrong. Please try again.' });

@@ -201,6 +201,12 @@ export interface EventOpportunityItem {
   reviewed_by_admin?: boolean;
   cover_image?: string; // optional cover image
   registration_link?: string; // optional registration link
+  contact_phone?: string; // WhatsApp or phone (international format)
+  contact_email?: string; // valid host email
+  capacity?: number; // optional maximum attendees capacity
+  guest_count?: number; // count of guest registrations
+  hidden_reason?: string; // reason why event was hidden by admin or auto-moderation
+  awaiting_review?: boolean; // true if author edited a hidden event
   // For Opportunity:
   opportunity_type?: OpportunityType;
   deadline?: string;
@@ -218,6 +224,34 @@ export interface EventOpportunityItem {
   last_update_sent_at?: string;
   published: boolean;
   attendee_ids: string[];
+}
+
+export interface EventQuestionReply {
+  id: string;
+  author_id: string;
+  author_name: string;
+  is_host: boolean;
+  content: string;
+  created_at: string;
+}
+
+export interface EventQuestion {
+  id: string;
+  event_id: string;
+  author_id: string;
+  author_name: string;
+  content: string; // plain text, 3 to 500 characters
+  reply?: EventQuestionReply; // one level of replies only
+  created_at: string;
+}
+
+export interface EventGuest {
+  id: string;
+  event_id: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  created_at: string;
 }
 
 export interface PinnedAnnouncement {

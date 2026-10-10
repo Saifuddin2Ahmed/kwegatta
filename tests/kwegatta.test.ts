@@ -22,6 +22,8 @@ import {
   runSaifuddinProfileMigration,
   SAIFUDDIN_PROFILE_MIGRATION_FLAG,
   SAIFUDDIN_PROFILE_MIGRATION_V3_FLAG,
+  cleanupExpiredGuestRecords,
+  resetGuestCleanupTimerForTest,
   store
 } from '../server';
 import { validatePasswordStrength } from '../src/services/firebase';
@@ -244,14 +246,14 @@ describe('Member-Submitted Events & Approval Permissions', () => {
   });
 });
 
-describe('Service Worker & Cache-Control Configuration (PWA v1.4.2)', () => {
-  it('public/sw.js specifies CACHE_NAME as kwegatta-1.4.2 and handles cache strategies correctly', async () => {
+describe('Service Worker & Cache-Control Configuration (PWA v1.5.0)', () => {
+  it('public/sw.js specifies CACHE_NAME as kwegatta-1.5.0 and handles cache strategies correctly', async () => {
     const fs = await import('fs');
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.4.2
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.4.2'");
+    // 1. Cache name includes version kwegatta-1.5.0
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.0'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -363,7 +365,8 @@ describe('Privacy and Access Isolation (v1.3.1)', () => {
       'test-reporter-1',
       'test-reporter-2',
       'test-reporter-3',
-      'test-blocked-member'
+      'test-blocked-member',
+      'test-member-150'
     ];
     for (const uid of testCallerUids) {
       if (!store.profiles.some((p: any) => p.account_uid === uid || p.id === uid)) {
@@ -1035,6 +1038,330 @@ describe('Firestore Persistence & Error Handling (v1.4.2)', () => {
     } finally {
       setTestStorageWriter(null);
     }
+  });
+});
+
+describe('Release 1.5.0 Features', () => {
+  let testEventId: string;
+
+  beforeAll(async () => {
+    if (!Array.isArray(store.admin_emails)) store.admin_emails = [];
+    if (!store.admin_emails.includes('test-admin@kwegatta.test')) {
+      store.admin_emails.push('test-admin@kwegatta.test');
+    }
+
+    // Create an event with contact details for testing
+    const res = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-member-150'
+      },
+      body: JSON.stringify({
+        kind: 'event',
+        title: 'Release 1.5.0 Test Event',
+        description: 'Testing 1.5.0 features in depth.',
+        start_date: '2026-12-01',
+        start_time: '10:00',
+        timezone: 'Africa/Kampala',
+        format: 'in_person',
+        location: 'Kampala Lab',
+        contact_phone: '+256700000000',
+        contact_email: 'host@example.com'
+      })
+    });
+    const data = await res.json();
+    if (res.status !== 200) console.error('POST /api/events failed with:', res.status, data);
+    expect(res.status).toBe(200);
+    testEventId = data.item.id;
+  });
+
+  describe('PART 1. Host contact details', () => {
+    it('anonymous and non-registered members do not receive the two contact fields; a registered member does', async () => {
+      // 1. Anonymous visitor
+      const anonRes = await fetch(`${baseUrl}/api/events/${testEventId}`);
+      expect(anonRes.status).toBe(200);
+      const anonData = await anonRes.json();
+      expect(anonData.contact_phone).toBeUndefined();
+      expect(anonData.contact_email).toBeUndefined();
+
+      // 2. Non-registered member
+      const nonRegRes = await fetch(`${baseUrl}/api/events/${testEventId}`, {
+        headers: { Authorization: 'Bearer test-member-b' }
+      });
+      expect(nonRegRes.status).toBe(200);
+      const nonRegData = await nonRegRes.json();
+      expect(nonRegData.contact_phone).toBeUndefined();
+      expect(nonRegData.contact_email).toBeUndefined();
+
+      // 3. Member B RSVPs (registers)
+      const rsvpRes = await fetch(`${baseUrl}/api/events/${testEventId}/rsvp`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer test-member-b' }
+      });
+      expect(rsvpRes.status).toBe(200);
+
+      // 4. Registered member GETs event
+      const regRes = await fetch(`${baseUrl}/api/events/${testEventId}`, {
+        headers: { Authorization: 'Bearer test-member-b' }
+      });
+      expect(regRes.status).toBe(200);
+      const regData = await regRes.json();
+      expect(regData.contact_phone).toBe('+256700000000');
+      expect(regData.contact_email).toBe('host@example.com');
+    });
+  });
+
+  describe('PART 2. Questions on the event page', () => {
+    it('anonymous post 401; member cannot reply (403); non-owner cannot delete (403); the 6th question from one member on one event is rejected', async () => {
+      // 1. Anonymous post -> 401
+      const anonPost = await fetch(`${baseUrl}/api/events/${testEventId}/questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'Anonymous question?' })
+      });
+      expect(anonPost.status).toBe(401);
+
+      // 2. Member posts 5 questions
+      let firstQId = '';
+      for (let i = 1; i <= 5; i++) {
+        const qRes = await fetch(`${baseUrl}/api/events/${testEventId}/questions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer test-member-b'
+          },
+          body: JSON.stringify({ content: `Question number ${i} for host?` })
+        });
+        expect(qRes.status).toBe(200);
+        const qData = await qRes.json();
+        if (i === 1) firstQId = qData.question.id;
+      }
+
+      // 3. 6th question from same member on same event -> 400 rejected
+      const q6Res = await fetch(`${baseUrl}/api/events/${testEventId}/questions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-member-b'
+        },
+        body: JSON.stringify({ content: 'Question 6 should be rejected!' })
+      });
+      expect(q6Res.status).toBe(400);
+
+      // 4. Member (non-host, non-admin) cannot reply -> 403
+      const replyRes = await fetch(`${baseUrl}/api/events/${testEventId}/questions/${firstQId}/reply`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-member-b'
+        },
+        body: JSON.stringify({ content: 'I am replying but I am not host!' })
+      });
+      expect(replyRes.status).toBe(403);
+
+      // 5. Non-owner / non-author member cannot delete -> 403
+      const hostQRes = await fetch(`${baseUrl}/api/events/${testEventId}/questions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-member-150'
+        },
+        body: JSON.stringify({ content: 'Host question?' })
+      });
+      expect(hostQRes.status).toBe(200);
+      const hostQData = await hostQRes.json();
+
+      const delRes = await fetch(`${baseUrl}/api/events/${testEventId}/questions/${hostQData.question.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer test-member-b' }
+      });
+      expect(delRes.status).toBe(403);
+    });
+  });
+
+  describe('PART 3. Admin hide with reason and author notification', () => {
+    it('hide without a reason is rejected (400); the author gets exactly one notification per action; a non-admin gets 401/403', async () => {
+      // 1. Non-admin hide -> 401/403
+      const nonAdminHide = await fetch(`${baseUrl}/api/admin/events/${testEventId}/hide`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-member-b'
+        },
+        body: JSON.stringify({ reason: 'Spam or scam' })
+      });
+      expect([401, 403]).toContain(nonAdminHide.status);
+
+      // 2. Hide without reason -> 400
+      const noReasonHide = await fetch(`${baseUrl}/api/admin/events/${testEventId}/hide`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-admin'
+        },
+        body: JSON.stringify({})
+      });
+      expect(noReasonHide.status).toBe(400);
+
+      // Check author notification count before hide
+      const notifResBefore = await fetch(`${baseUrl}/api/data/notifications`, {
+        headers: { Authorization: 'Bearer test-member-150' }
+      });
+      const notifsBefore = await notifResBefore.json();
+      const countBefore = Array.isArray(notifsBefore) ? notifsBefore.length : 0;
+
+      // 3. Valid hide with reason -> 200
+      const validHide = await fetch(`${baseUrl}/api/admin/events/${testEventId}/hide`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-admin'
+        },
+        body: JSON.stringify({ reason: 'Spam or scam' })
+      });
+      expect(validHide.status).toBe(200);
+
+      // Author gets exactly 1 new notification for hide
+      const notifResAfterHide = await fetch(`${baseUrl}/api/data/notifications`, {
+        headers: { Authorization: 'Bearer test-member-150' }
+      });
+      const notifsAfterHide = await notifResAfterHide.json();
+      expect(notifsAfterHide.length).toBe(countBefore + 1);
+      expect(notifsAfterHide[0].body).toContain('was hidden by a moderator. Reason: Spam or scam.');
+
+      // 4. Restore event -> 200
+      const validRestore = await fetch(`${baseUrl}/api/admin/events/${testEventId}/restore`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer test-admin'
+        }
+      });
+      expect(validRestore.status).toBe(200);
+
+      // Author gets exactly 1 new notification for restore
+      const notifResAfterRestore = await fetch(`${baseUrl}/api/data/notifications`, {
+        headers: { Authorization: 'Bearer test-member-150' }
+      });
+      const notifsAfterRestore = await notifResAfterRestore.json();
+      expect(notifsAfterRestore.length).toBe(countBefore + 2);
+      expect(notifsAfterRestore[0].body).toContain('is visible again.');
+    });
+  });
+
+  describe('PART 4. Register for an event without an account', () => {
+    it('anonymous GET of guest records is 401/404 on every route; duplicate contact is rejected; the 4th registration from one IP for one event is rejected; a filled honeypot is rejected; a wrong token cannot cancel; records older than 30 days after ends_at are removed', async () => {
+      // 1. Anonymous GET of guest records -> 403 or 401
+      const anonGetGuests = await fetch(`${baseUrl}/api/events/${testEventId}/guests`);
+      expect([401, 403]).toContain(anonGetGuests.status);
+
+      // 2. Filled honeypot -> rejected (400)
+      const hpRes = await fetch(`${baseUrl}/api/events/${testEventId}/guest-register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Spam Bot',
+          email: 'bot@spam.com',
+          website: 'http://spam.com',
+          agree: true
+        })
+      });
+      expect(hpRes.status).toBe(400);
+
+      // 3. Register valid guest #1
+      const g1Res = await fetch(`${baseUrl}/api/events/${testEventId}/guest-register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Guest One',
+          email: 'guest1@example.com',
+          phone: '+256711111111',
+          agree: true
+        })
+      });
+      expect(g1Res.status).toBe(200);
+      const g1Data = await g1Res.json();
+      expect(g1Data.token).toBeDefined();
+
+      // 4. Duplicate contact registration on same event -> 400
+      const dupRes = await fetch(`${baseUrl}/api/events/${testEventId}/guest-register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Guest One Duplicate',
+          email: 'guest1@example.com',
+          agree: true
+        })
+      });
+      expect(dupRes.status).toBe(400);
+
+      // 5. Register guest #2 and #3 from same IP
+      const g2Res = await fetch(`${baseUrl}/api/events/${testEventId}/guest-register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Guest Two', email: 'guest2@example.com', agree: true })
+      });
+      expect(g2Res.status).toBe(200);
+
+      const g3Res = await fetch(`${baseUrl}/api/events/${testEventId}/guest-register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Guest Three', email: 'guest3@example.com', agree: true })
+      });
+      expect(g3Res.status).toBe(200);
+
+      // 6. 4th registration from same IP for one event -> 429
+      const g4Res = await fetch(`${baseUrl}/api/events/${testEventId}/guest-register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Guest Four', email: 'guest4@example.com', agree: true })
+      });
+      expect(g4Res.status).toBe(429);
+
+      // 7. Cancel with wrong token -> 400
+      const wrongCancel = await fetch(`${baseUrl}/api/events/${testEventId}/guest-cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: 'wrongtoken12345678901234567890123456789012' })
+      });
+      expect(wrongCancel.status).toBe(400);
+
+      // 8. Retention test: records older than 30 days after ends_at are removed
+      const { store, cleanupExpiredGuestRecords } = await import('../server');
+      const oldEvent = {
+        id: 'old-event-30days',
+        title: 'Old Event',
+        ends_at: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString()
+      };
+      store.events.push(oldEvent);
+      store.event_guests.push({
+        id: 'old-guest-1',
+        event_id: 'old-event-30days',
+        name: 'Old Guest',
+        email: 'oldguest@example.com',
+        token_hash: 'hash'
+      });
+
+      resetGuestCleanupTimerForTest();
+      cleanupExpiredGuestRecords();
+      expect(store.event_guests.some((g: any) => g.id === 'old-guest-1')).toBe(false);
+    });
+  });
+
+  describe('PART 5. Small fix for malformed JSON body', () => {
+    it('returns 400 with { "error": "Invalid request body." } on malformed JSON body', async () => {
+      const malformedRes = await fetch(`${baseUrl}/api/events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer test-member-a'
+        },
+        body: '{"invalid_json": '
+      });
+      expect(malformedRes.status).toBe(400);
+      const data = await malformedRes.json();
+      expect(data).toEqual({ error: 'Invalid request body.' });
+    });
   });
 });
 

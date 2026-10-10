@@ -20,9 +20,18 @@ import {
   AlertCircle,
   Camera,
   Video,
-  Download
+  Download,
+  Phone,
+  Mail,
+  MessageSquare,
+  Send,
+  ShieldAlert,
+  Lock,
+  UserPlus,
+  UserCheck,
+  XCircle
 } from 'lucide-react';
-import { EventOpportunityItem, OpportunityType, Profile } from '../types';
+import { EventOpportunityItem, OpportunityType, Profile, EventQuestion, EventGuest } from '../types';
 import { Avatar } from './Avatar';
 import {
   processEventCoverImage,
@@ -42,6 +51,14 @@ import {
   deleteEvent,
   reportEvent,
   sendEventAttendeeUpdate,
+  fetchEventQuestions,
+  postEventQuestion,
+  replyEventQuestion,
+  deleteEventQuestion,
+  registerEventGuest,
+  cancelEventGuest,
+  fetchEventGuests,
+  removeEventGuest,
   PUBLIC_APP_URL
 } from '../services/api';
 
@@ -173,10 +190,30 @@ export const EventsView: React.FC<EventsViewProps> = ({
   });
   const [formCoverImage, setFormCoverImage] = useState('');
   const [formRegLink, setFormRegLink] = useState('');
+  const [formContactPhone, setFormContactPhone] = useState('');
+  const [formContactEmail, setFormContactEmail] = useState('');
   const [formOppType, setFormOppType] = useState<OpportunityType>('Hackathon');
   const [formDeadline, setFormDeadline] = useState('');
   const [formLink, setFormLink] = useState('');
   const [formSubmitting, setFormSubmitting] = useState(false);
+
+  // Questions State (Part 2)
+  const [questions, setQuestions] = useState<EventQuestion[]>([]);
+  const [newQuestion, setNewQuestion] = useState('');
+  const [replyingQid, setReplyingQid] = useState<string | null>(null);
+  const [replyContent, setReplyContent] = useState('');
+  const [submittingQuestion, setSubmittingQuestion] = useState(false);
+  const [submittingReply, setSubmittingReply] = useState(false);
+
+  // Guest Registration State (Part 4)
+  const [isGuestModalOpen, setIsGuestModalOpen] = useState(false);
+  const [guestName, setGuestName] = useState('');
+  const [guestPhone, setGuestPhone] = useState('');
+  const [guestEmail, setGuestEmail] = useState('');
+  const [guestAgree, setGuestAgree] = useState(false);
+  const [guestWebsite, setGuestWebsite] = useState(''); // honeypot
+  const [submittingGuest, setSubmittingGuest] = useState(false);
+  const [eventGuests, setEventGuests] = useState<EventGuest[]>([]);
 
   // Send Update to Attendees Modal State
   const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);

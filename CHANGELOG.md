@@ -4,6 +4,35 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-10-10
+
+### Added & Improved (Release 1.5.0)
+- **Part 1: Host Contact Details**:
+  - Event forms include optional "Contact for attendees" section with `contact_phone` and `contact_email`.
+  - Added "Use my profile WhatsApp" auto-fill button.
+  - Restricted visibility on server to author, admins, registered RSVPed members, and guests with valid guest tokens.
+- **Part 2: Questions on the Event Page**:
+  - Added public read questions section under event description.
+  - Signed-in members with complete profiles can post questions (3 to 500 chars).
+  - Event host and admins can reply (host badge displayed).
+  - Added server routes: `GET /api/events/:id/questions`, `POST /api/events/:id/questions`, `POST /api/events/:id/questions/:qid/reply`, `DELETE /api/events/:id/questions/:qid`.
+  - Enforced question limits (5 per event per member, 20 per day per member) and closed posting on cancelled or past events (>7 days).
+  - Configured notifications for author on new questions and asker on host replies.
+- **Part 3: Admin Moderation Controls**:
+  - Added moderation dialogs for Hide, Restore, and Delete on Admin Events tab.
+  - Require selection of standard reason (Not a real event, Spam or scam, Offensive, Duplicate, Other with max 300 char note).
+  - Author receives notifications when event is hidden, restored, deleted, or auto-hidden after 3 reports.
+  - Author sees banner on hidden event with reason and review prompt. All actions logged in audit log.
+- **Part 4: Guest Event Registration**:
+  - Signed-out visitors can register for events via short form (name, contact, consent checkbox).
+  - Added `POST /api/events/:id/guest-register` storing 32-byte raw token SHA-256 hash in separate `event_guests` collection.
+  - Private guest token link `#/events/<id>?g=<token>` enables guest viewing registration, host contact details, and cancelling.
+  - Implemented server abuse protections: honeypot check, IP rate limits (3/event/day, 10 overall/day), duplicate contact check, capacity check, and closed event checks.
+  - Added guest list for author and admins with Remove action. Blocklisted `event_guests` and `event_questions` from generic data/sync routes.
+  - Lazy 30-day post-event retention cleanup. Updated `PRIVACY.md` with guest data privacy terms.
+- **Part 5: Express Middleware Fix**:
+  - Updated error handling middleware to catch malformed JSON body errors and return `400` with `{ "error": "Invalid request body." }`.
+
 ## [1.4.2] - 2026-10-10
 
 ### Fixed (Root Fix for Firestore Event Persistence & Error Propagation)

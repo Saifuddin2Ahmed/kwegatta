@@ -130,9 +130,28 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({ onBack }) => {
         </div>
       </section>
 
-      {/* Section 4: Storage & AI Model Boundary */}
+      {/* Section 4: Guest Registrations for Events */}
       <section className="kw-card p-6 sm:p-8 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl space-y-4">
-        <h2 className="text-lg font-bold text-[var(--fg)]">4. Where Data is Stored &amp; Model Boundary</h2>
+        <h2 className="text-lg font-bold text-[var(--fg)]">4. Guest Registrations for Events (Accountless RSVP)</h2>
+        <div className="space-y-2.5 text-xs sm:text-sm text-[var(--fg-muted)] leading-relaxed">
+          <p>
+            * <strong>Data Collected:</strong> Full name (2-80 characters), contact phone/WhatsApp or email, and required consent checkbox.
+          </p>
+          <p>
+            * <strong>Visibility Boundary:</strong> Shared <strong>ONLY</strong> with the event host and platform admins. Guests are never listed by name in public attendee lists and details are never exposed to other members.
+          </p>
+          <p>
+            * <strong>30-Day Retention:</strong> Guest registration records are automatically purged 30 days after the event ends.
+          </p>
+          <p>
+            * <strong>Unverified Contacts Notice:</strong> Guest and host contact details are user-provided and unverified.
+          </p>
+        </div>
+      </section>
+
+      {/* Section 5: Storage & AI Model Boundary */}
+      <section className="kw-card p-6 sm:p-8 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl space-y-4">
+        <h2 className="text-lg font-bold text-[var(--fg)]">5. Where Data is Stored &amp; Model Boundary</h2>
         <div className="space-y-2.5 text-xs sm:text-sm text-[var(--fg-muted)] leading-relaxed">
           <p>
             * <strong>Database:</strong> Google Cloud Firestore (project <code className="text-[var(--gold-text)]">kwegatta</code>). Native mode with persistent session storage.

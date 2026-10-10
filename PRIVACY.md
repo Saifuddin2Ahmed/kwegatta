@@ -95,7 +95,18 @@ With direct member publishing enabled, Kwegatta balances immediate expression wi
 
 ---
 
-## 7. Honest Limitations & Current Scope
+## 7. Guest Registrations for Events (Accountless RSVP)
+
+For community members registering for an event without creating an account:
+* **Data Collected**: Full name (2–80 characters), contact phone/WhatsApp or email address, and explicit agreement checkbox to share details with the host.
+* **Visibility Boundary**: Guest registration details are shared **ONLY** with the specific event host and platform administrators. Guests are never listed by name in public attendee lists, and guest details are never exposed to other members or generic API routes.
+* **30-Day Retention Policy**: Guest registration records are automatically deleted from server storage 30 days after the event ends.
+* **Contact Details Notice**: Guest contact details and host contact details are user-provided and unverified by Kwegatta.
+* **AI Privacy Boundary**: Guest details are never passed to the Gemma AI model and are never used for matchmaking or profile synthesis.
+
+---
+
+## 8. Honest Limitations & Current Scope
 
 Because Kwegatta was launched as an open-source initiative for **Hacktoberfest 2026 Hack Day Kampala x MUBS**:
 * **WhatsApp Handover**: When you press Connect, conversation handover takes place externally on WhatsApp (`wa.me`). Messages exchanged on WhatsApp are end-to-end encrypted by WhatsApp and do not pass through Kwegatta servers.
@@ -103,7 +114,7 @@ Because Kwegatta was launched as an open-source initiative for **Hacktoberfest 2
 
 ---
 
-## 8. Contact Us
+## 9. Contact Us
 
 For privacy inquiries or data removal requests:
 * Email: **`privacy@kwegatta.org`** / **`saifuddin.ai.dev@gmail.com`**

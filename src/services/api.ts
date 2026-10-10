@@ -1134,12 +1134,134 @@ export async function updateEvent(id: string, patch: any): Promise<any> {
 }
 
 export async function deleteEvent(id: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/events/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('[deleteEvent] error:', err);
+    return false;
+  }
+}
+
+export async function fetchEventQuestions(eventId: string): Promise<any[]> {
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/questions`, {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) return [];
+  return await res.json();
+}
+
+export async function postEventQuestion(eventId: string, content: string): Promise<any> {
   await getFreshAuthToken();
-  const res = await fetch(`/api/events/${encodeURIComponent(id)}`, {
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/questions`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ content })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to post question');
+  return data.question;
+}
+
+export async function replyEventQuestion(eventId: string, qid: string, content: string): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/questions/${encodeURIComponent(qid)}/reply`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ content })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to post reply');
+  return data.question;
+}
+
+export async function deleteEventQuestion(eventId: string, qid: string): Promise<boolean> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/questions/${encodeURIComponent(qid)}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders()
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to delete question');
+  return true;
+}
+
+export async function registerEventGuest(eventId: string, payload: { name: string; phone?: string; email?: string; agree: boolean; website?: string }): Promise<{ token: string; guest_id: string }> {
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/guest-register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to register');
+  return data;
+}
+
+export async function cancelEventGuest(eventId: string, token: string): Promise<boolean> {
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/guest-cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to cancel registration');
+  return true;
+}
+
+export async function fetchEventGuests(eventId: string): Promise<any[]> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/guests`, {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) return [];
+  return await res.json();
+}
+
+export async function removeEventGuest(eventId: string, gid: string): Promise<boolean> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/guests/${encodeURIComponent(gid)}`, {
     method: 'DELETE',
     headers: getAuthHeaders()
   });
   return res.ok;
+}
+
+export async function adminHideEvent(eventId: string, reason: string, note?: string): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/events/${encodeURIComponent(eventId)}/hide`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ reason, note })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to hide event');
+  return data;
+}
+
+export async function adminRestoreEvent(eventId: string): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/events/${encodeURIComponent(eventId)}/restore`, {
+    method: 'POST',
+    headers: getAuthHeaders()
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to restore event');
+  return data;
+}
+
+export async function adminDeleteEvent(eventId: string, reason: string, note?: string): Promise<boolean> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/events/${encodeURIComponent(eventId)}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ reason, note })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to delete event');
+  return true;
 }
 
 export async function fetchPinnedAnnouncement(): Promise<{ id: string; text: string; link?: string; active: boolean } | null> {

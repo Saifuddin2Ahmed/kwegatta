@@ -76,7 +76,10 @@ import {
   blockEventAuthor,
   unblockEventAuthor,
   deleteEventAdmin,
-  fetchAdminEvents
+  fetchAdminEvents,
+  adminHideEvent,
+  adminRestoreEvent,
+  adminDeleteEvent
 } from '../services/api';
 import { auth } from '../services/firebase';
 import { CoverImageUploader } from './EventsView';
@@ -198,6 +201,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [eventPublished, setEventPublished] = useState(true);
   const [viewingAttendeesEvent, setViewingAttendeesEvent] = useState<any | null>(null);
   const [adminEventFilter, setAdminEventFilter] = useState<'all' | 'reported' | 'hidden' | 'cancelled'>('all');
+
+  // Part 3 Moderation Modal State
+  const [modModal, setModModal] = useState<{ id: string; title: string; action: 'hide' | 'restore' | 'delete' } | null>(null);
+  const [modReason, setModReason] = useState<string>('Not a real event');
+  const [modNote, setModNote] = useState<string>('');
+  const [isSubmittingMod, setIsSubmittingMod] = useState(false);
 
   // Review & Approval State
   const [rejectingEvent, setRejectingEvent] = useState<any | null>(null);
@@ -546,37 +555,34 @@ export const AdminView: React.FC<AdminViewProps> = ({
     }
   };
 
-  const handleDeleteEvent = async (id: string, title: string) => {
-    if (!confirm(`Delete "${title}"? This cannot be undone.`)) return;
-    try {
-      await deleteEvent(id);
-      onToast('Deleted item');
-      fetchAdminData();
-      onRefreshGlobalData();
-    } catch (err: any) {
-      onToast('Failed to delete: ' + err.message);
-    }
+  const openModModal = (id: string, title: string, action: 'hide' | 'restore' | 'delete') => {
+    setModModal({ id, title, action });
+    setModReason('Not a real event');
+    setModNote('');
   };
 
-  const handleHideEvent = async (id: string) => {
+  const handleModConfirm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!modModal) return;
+    setIsSubmittingMod(true);
     try {
-      await hideEvent(id);
-      onToast('Event hidden from public lists');
+      if (modModal.action === 'hide') {
+        await adminHideEvent(modModal.id, modReason, modNote);
+        onToast('Event hidden and author notified');
+      } else if (modModal.action === 'restore') {
+        await adminRestoreEvent(modModal.id);
+        onToast('Event restored and author notified');
+      } else if (modModal.action === 'delete') {
+        await adminDeleteEvent(modModal.id, modReason, modNote);
+        onToast('Event deleted and author notified');
+      }
+      setModModal(null);
       fetchAdminData();
       onRefreshGlobalData();
     } catch (err: any) {
-      onToast(err.message || 'Failed to hide event');
-    }
-  };
-
-  const handleRestoreEvent = async (id: string) => {
-    try {
-      await restoreEvent(id);
-      onToast('Event restored to public lists');
-      fetchAdminData();
-      onRefreshGlobalData();
-    } catch (err: any) {
-      onToast(err.message || 'Failed to restore event');
+      onToast(err.message || 'Action failed');
+    } finally {
+      setIsSubmittingMod(false);
     }
   };
 
@@ -1188,7 +1194,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
                           {item.hidden_by_moderation ? (
                             <button
-                              onClick={() => handleRestoreEvent(item.id)}
+                              onClick={() => openModModal(item.id, item.title, 'restore')}
                               className="kw-btn text-xs py-1.5 px-3 font-semibold text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/10"
                               title="Restore event to public lists"
                             >
@@ -1196,7 +1202,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                             </button>
                           ) : (
                             <button
-                              onClick={() => handleHideEvent(item.id)}
+                              onClick={() => openModModal(item.id, item.title, 'hide')}
                               className="kw-btn text-xs py-1.5 px-3 font-semibold text-amber-400 border border-amber-500/40 hover:bg-amber-500/10"
                               title="Hide event from public lists"
                             >
@@ -1223,7 +1229,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           )}
 
                           <button
-                            onClick={() => handleDeleteEvent(item.id, item.title)}
+                            onClick={() => openModModal(item.id, item.title, 'delete')}
                             className="kw-btn kw-btn-danger text-xs py-1.5 px-2.5"
                             title="Delete event"
                           >
@@ -1508,7 +1514,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         Edit
                       </button>
                       <button
-                        onClick={() => handleDeleteEvent(item.id, item.title)}
+                        onClick={() => openModModal(item.id, item.title, 'delete')}
                         className="kw-btn kw-btn-danger text-xs py-1.5 px-2"
                         title="Delete item"
                       >
@@ -2618,6 +2624,75 @@ export const AdminView: React.FC<AdminViewProps> = ({
           onRefreshGlobalData();
         }}
       />
+
+      {/* Moderation Action Modal Dialog (Part 3) */}
+      {modModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="kw-card p-6 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl max-w-md w-full space-y-4 animate-in fade-in zoom-in-95">
+            <h3 className="text-lg font-bold text-[var(--fg)] capitalize">
+              {modModal.action} "{modModal.title}"
+            </h3>
+            <p className="text-xs text-[var(--fg-muted)]">
+              {modModal.action === 'restore'
+                ? 'Are you sure you want to restore this event to public listings? The author will be notified.'
+                : `Please select a reason to ${modModal.action} this event. The author will receive a notification with this reason.`}
+            </p>
+
+            {modModal.action !== 'restore' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-[var(--fg)] mb-1">Reason *</label>
+                  <select
+                    value={modReason}
+                    onChange={e => setModReason(e.target.value)}
+                    className="kw-input text-xs w-full"
+                  >
+                    <option value="Not a real event">Not a real event</option>
+                    <option value="Spam or scam">Spam or scam</option>
+                    <option value="Offensive">Offensive</option>
+                    <option value="Duplicate">Duplicate</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                {modReason === 'Other' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-[var(--fg)] mb-1">Note (max 300 chars)</label>
+                    <textarea
+                      value={modNote}
+                      onChange={e => setModNote(e.target.value.slice(0, 300))}
+                      placeholder="Explain the reason..."
+                      className="kw-input text-xs w-full h-20"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-[var(--card-border)]">
+              <button
+                type="button"
+                onClick={() => setModModal(null)}
+                className="kw-btn kw-btn-ghost text-xs py-2 px-3"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleModConfirm}
+                disabled={isSubmittingMod}
+                className={`kw-btn text-xs py-2 px-4 font-bold ${
+                  modModal.action === 'restore'
+                    ? 'kw-btn-primary'
+                    : 'kw-btn-danger'
+                }`}
+              >
+                {isSubmittingMod ? 'Processing...' : `Confirm ${modModal.action}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
