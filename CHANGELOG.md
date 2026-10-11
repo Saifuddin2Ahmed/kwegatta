@@ -4,6 +4,16 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-10-10
+
+### Fixed & Improved (Release 1.5.2)
+- **Guest Registration Modal in Detail View**:
+  - Extracted `GuestRegisterModal` into a dedicated component with accessibility focus trap, Escape key handling, backdrop click dismiss, and focus restoration to the trigger button.
+  - Rendered `GuestRegisterModal`, Edit modal, Report modal, and Attendee Update modal directly inside the Event Detail view return so they open correctly over the event page without requiring the list view to be mounted.
+  - Ensured immediate live updates on successful guest registration without page reloads: Register button transitions to "You're registered" card, going count increments, and host contact card becomes visible.
+- **Copy & Plurals Fix**:
+  - Corrected attendee count plurals for signed-out visitors: "Be the first to register." (0 attendees), "1 person is going to this event." (1 attendee), and "N people are going to this event." (N attendees).
+
 ## [1.5.1] - 2026-10-10
 
 ### Fixed & Improved (Release 1.5.1)

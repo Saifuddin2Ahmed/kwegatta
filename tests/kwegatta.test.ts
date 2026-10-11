@@ -1,4 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+// @vitest-environment jsdom
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import React from 'react';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { EventsView } from '../src/components/EventsView';
+import * as apiModule from '../src/services/api';
 import {
   app,
   validateGemmaModelId,
@@ -246,14 +251,14 @@ describe('Member-Submitted Events & Approval Permissions', () => {
   });
 });
 
-describe('Service Worker & Cache-Control Configuration (PWA v1.5.1)', () => {
-  it('public/sw.js specifies CACHE_NAME as kwegatta-1.5.1 and handles cache strategies correctly', async () => {
+describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
+  it('public/sw.js specifies CACHE_NAME as kwegatta-1.5.2 and handles cache strategies correctly', async () => {
     const fs = await import('fs');
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.5.1
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.1'");
+    // 1. Cache name includes version kwegatta-1.5.2
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.2'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -690,19 +695,15 @@ describe('Quality Assurance & Safety Guarantees (v1.3.1)', () => {
       getItem: () => { throw new Error('QuotaExceededError'); },
       setItem: () => { throw new Error('QuotaExceededError'); }
     };
-    const prev = (globalThis as any).localStorage;
-    (globalThis as any).localStorage = mockStorage;
+    const prev = window.localStorage;
+    Object.defineProperty(window, 'localStorage', { value: mockStorage, configurable: true, writable: true });
 
     try {
       expect(() => getStoredThemePreference()).not.toThrow();
       expect(getStoredThemePreference()).toBe('system');
       expect(() => saveThemePreference('dark')).not.toThrow();
     } finally {
-      if (prev) {
-        (globalThis as any).localStorage = prev;
-      } else {
-        delete (globalThis as any).localStorage;
-      }
+      Object.defineProperty(window, 'localStorage', { value: prev, configurable: true, writable: true });
     }
   });
 
@@ -1525,6 +1526,177 @@ describe('Release 1.5.0 Features', () => {
       expect(authorRes.status).toBe(200);
       const authorData = await authorRes.json();
       expect(authorData.hidden_reason).toBeDefined();
+    });
+  });
+
+  describe('Release 1.5.2 Frontend UI & Bug Fixes', () => {
+    it('renders event detail view as a signed-out visitor, clicks Register, and asserts "I agree that the host can see these details"', async () => {
+      const mockEvent = {
+        id: 'test-ev-152-detail',
+        kind: 'event',
+        title: 'Kampala AI Builders Hackday',
+        description: 'Build awesome AI projects in Kampala.',
+        starts_at: new Date(Date.now() + 86400000).toISOString(),
+        ends_at: new Date(Date.now() + 90000000).toISOString(),
+        timezone: 'Africa/Kampala',
+        format: 'in_person',
+        location: 'Innovation Village',
+        created_at: new Date().toISOString(),
+        published: true,
+        attendee_ids: [],
+        attendee_count: 0,
+        phase: 'upcoming'
+      };
+
+      window.location.hash = '#/events';
+      try { localStorage.clear(); } catch {}
+
+      if (!store.events) store.events = [];
+      store.events.push(mockEvent as any);
+
+      vi.spyOn(apiModule, 'fetchEvents').mockResolvedValue([]);
+      vi.spyOn(apiModule, 'fetchEventById').mockResolvedValue(mockEvent);
+      vi.spyOn(apiModule, 'fetchEventQuestions').mockResolvedValue([]);
+
+      const { act, waitFor } = await import('@testing-library/react');
+
+      await act(async () => {
+        render(
+          React.createElement(EventsView, {
+            currentProfile: null,
+            allProfiles: [],
+            initialItemId: mockEvent.id,
+            onViewProfile: vi.fn(),
+            onToast: vi.fn()
+          })
+        );
+        await new Promise(r => setTimeout(r, 50));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /Register/i })).toBeTruthy();
+      });
+
+      const regBtn = screen.getByRole('button', { name: /Register/i });
+      await act(async () => {
+        fireEvent.click(regBtn);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/I agree that the host can see these details/i)).toBeTruthy();
+      });
+    });
+
+    it('renders event create form and asserts "Contact for attendees" is present', async () => {
+      const mockProfile = {
+        id: 'prof-builder-152',
+        name: 'Kampala Builder',
+        role: 'Developer',
+        headline: 'AI Engineer',
+        bio: 'Building on Gemma',
+        offers: 'Code',
+        needs: 'Mentorship',
+        tags: [],
+        skills: [],
+        created_at: new Date().toISOString()
+      };
+
+      vi.spyOn(apiModule, 'fetchEvents').mockResolvedValue([]);
+
+      const { act, waitFor } = await import('@testing-library/react');
+
+      await act(async () => {
+        render(
+          React.createElement(EventsView, {
+            currentProfile: mockProfile,
+            allProfiles: [mockProfile],
+            onViewProfile: vi.fn(),
+            onToast: vi.fn()
+          })
+        );
+      });
+
+      const createBtn = screen.getByRole('button', { name: /Create event/i });
+      await act(async () => {
+        fireEvent.click(createBtn);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText(/Contact for attendees \(optional\)/i)).toBeTruthy();
+      });
+    });
+
+    it('renders detail view as the author and asserts "Guest registrations" is present', async () => {
+      const authorProfile = {
+        id: 'author-152',
+        name: 'Author Person',
+        role: 'Developer',
+        headline: 'Host',
+        bio: 'Hosting',
+        offers: 'Events',
+        needs: 'Attendees',
+        tags: [],
+        skills: [],
+        created_at: new Date().toISOString()
+      };
+
+      const mockEvent = {
+        id: 'ev-author-152',
+        kind: 'event',
+        title: 'Author Event',
+        description: 'Host event',
+        author_id: authorProfile.id,
+        starts_at: new Date(Date.now() + 86400000).toISOString(),
+        timezone: 'Africa/Kampala',
+        created_at: new Date().toISOString(),
+        published: true,
+        attendee_ids: [],
+        phase: 'upcoming'
+      };
+
+      window.location.hash = '#/events';
+      try { localStorage.clear(); } catch {}
+
+      if (!store.events) store.events = [];
+      store.events.push(mockEvent as any);
+
+      vi.spyOn(apiModule, 'fetchEvents').mockResolvedValue([]);
+      vi.spyOn(apiModule, 'fetchEventById').mockResolvedValue(mockEvent);
+      vi.spyOn(apiModule, 'fetchEventQuestions').mockResolvedValue([]);
+      vi.spyOn(apiModule, 'fetchEventGuests').mockResolvedValue([]);
+
+      const { act, waitFor } = await import('@testing-library/react');
+
+      await act(async () => {
+        render(
+          React.createElement(EventsView, {
+            currentProfile: authorProfile,
+            allProfiles: [authorProfile],
+            initialItemId: mockEvent.id,
+            onViewProfile: vi.fn(),
+            onToast: vi.fn()
+          })
+        );
+        await new Promise(r => setTimeout(r, 50));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText((content) => content.includes('Guest registrations'))).toBeTruthy();
+      });
+    });
+
+    it('correctly formats attendee plural copy for 0, 1 and 2 attendees', () => {
+      const formatPlural = (count: number) => {
+        return count === 0
+          ? 'Be the first to register.'
+          : count === 1
+          ? '1 person is going to this event.'
+          : `${count} people are going to this event.`;
+      };
+
+      expect(formatPlural(0)).toBe('Be the first to register.');
+      expect(formatPlural(1)).toBe('1 person is going to this event.');
+      expect(formatPlural(2)).toBe('2 people are going to this event.');
     });
   });
 });

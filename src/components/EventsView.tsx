@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { EventOpportunityItem, OpportunityType, Profile, EventQuestion, EventGuest } from '../types';
 import { Avatar } from './Avatar';
+import { GuestRegisterModal } from './GuestRegisterModal';
 import {
   processEventCoverImage,
   formatEventDateTime,
@@ -55,7 +56,6 @@ import {
   postEventQuestion,
   replyEventQuestion,
   deleteEventQuestion,
-  registerEventGuest,
   cancelEventGuest,
   fetchEventGuests,
   removeEventGuest,
@@ -170,7 +170,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<EventOpportunityItem | null>(null);
 
-  // Form Fields (Part 1, Part 2 & Part 4)
+  // Form Fields
   const [formKind, setFormKind] = useState<'event' | 'opportunity'>('event');
   const [formTitle, setFormTitle] = useState('');
   const [formDescription, setFormDescription] = useState('');
@@ -197,7 +197,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [formLink, setFormLink] = useState('');
   const [formSubmitting, setFormSubmitting] = useState(false);
 
-  // Questions State (Part 3)
+  // Questions State
   const [questions, setQuestions] = useState<EventQuestion[]>([]);
   const [newQuestion, setNewQuestion] = useState('');
   const [replyingQid, setReplyingQid] = useState<string | null>(null);
@@ -205,14 +205,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [submittingQuestion, setSubmittingQuestion] = useState(false);
   const [submittingReply, setSubmittingReply] = useState(false);
 
-  // Guest Registration State (Part 4)
+  // Guest Registration Modal State & Trigger Ref
   const [isGuestModalOpen, setIsGuestModalOpen] = useState(false);
-  const [guestName, setGuestName] = useState('');
-  const [guestPhone, setGuestPhone] = useState('');
-  const [guestEmail, setGuestEmail] = useState('');
-  const [guestAgree, setGuestAgree] = useState(false);
-  const [guestWebsite, setGuestWebsite] = useState(''); // honeypot
-  const [submittingGuest, setSubmittingGuest] = useState(false);
+  const registerBtnRef = useRef<HTMLButtonElement>(null);
   const [eventGuests, setEventGuests] = useState<EventGuest[]>([]);
 
   // Send Update to Attendees Modal State
@@ -487,7 +482,6 @@ export const EventsView: React.FC<EventsViewProps> = ({
       return;
     }
 
-    // Contact phone/email validation (Part 1)
     if (formContactPhone.trim()) {
       const cleanPhone = formContactPhone.replace(/[\s-]/g, '');
       if (!/^\+?[0-9]{7,15}$/.test(cleanPhone)) {
@@ -570,7 +564,6 @@ export const EventsView: React.FC<EventsViewProps> = ({
       return;
     }
 
-    // Contact phone/email validation (Part 1)
     if (formContactPhone.trim()) {
       const cleanPhone = formContactPhone.replace(/[\s-]/g, '');
       if (!/^\+?[0-9]{7,15}$/.test(cleanPhone)) {
@@ -658,21 +651,6 @@ export const EventsView: React.FC<EventsViewProps> = ({
     }
   };
 
-  const handleAuthorDelete = async (itemId: string, itemTitle: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (!confirm(`Permanently delete "${itemTitle}"? This cannot be undone.`)) return;
-    try {
-      const ok = await deleteEvent(itemId);
-      if (ok) {
-        onToast('Event deleted.');
-        if (selectedItemId === itemId) setSelectedItemId(null);
-        loadEventsList();
-      }
-    } catch (err: any) {
-      onToast(err.message || 'Failed to delete event');
-    }
-  };
-
   const handleAskQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedItemId) return;
@@ -730,49 +708,25 @@ export const EventsView: React.FC<EventsViewProps> = ({
     }
   };
 
-  const handleRegisterGuest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedItemId) return;
-    if (!guestName.trim()) {
-      onToast('Please enter your full name.');
-      return;
-    }
-    if (!guestPhone.trim() && !guestEmail.trim()) {
-      onToast('Please add at least one way to reach you.');
-      return;
-    }
-    if (!guestAgree) {
-      onToast('You must agree to share contact details with the host.');
-      return;
-    }
-    setSubmittingGuest(true);
-    try {
-      const res = await registerEventGuest(selectedItemId, {
-        name: guestName.trim(),
-        phone: guestPhone.trim() || undefined,
-        email: guestEmail.trim() || undefined,
-        agree: guestAgree,
-        website: guestWebsite
+  const handleGuestSuccess = (token: string) => {
+    setIsGuestModalOpen(false);
+    onToast("You're registered!");
+    if (selectedItemId) {
+      fetchEventById(selectedItemId, token).then(fresh => {
+        if (fresh) {
+          setDetailedItem(fresh);
+        } else {
+          setDetailedItem((prev: any) =>
+            prev
+              ? {
+                  ...prev,
+                  attendee_count: (prev.attendee_count || 0) + 1,
+                  guest_info: { token }
+                }
+              : prev
+          );
+        }
       });
-      if (res.token) {
-        try {
-          localStorage.setItem(`kw_guest_${selectedItemId}`, res.token);
-        } catch {}
-        setIsGuestModalOpen(false);
-        setGuestName('');
-        setGuestPhone('');
-        setGuestEmail('');
-        setGuestAgree(false);
-        setGuestWebsite('');
-        onToast("You're registered!");
-        fetchEventById(selectedItemId, res.token).then(fresh => {
-          if (fresh) setDetailedItem(fresh);
-        });
-      }
-    } catch (err: any) {
-      onToast(err?.message || 'Failed to register');
-    } finally {
-      setSubmittingGuest(false);
     }
   };
 
@@ -915,7 +869,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
           </button>
         </div>
 
-        {/* Hidden Moderator Banner (Part 5) */}
+        {/* Hidden Moderator Banner */}
         {isAuthor && detailedItem.hidden_by_moderation && (
           <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs space-y-1">
             <p className="font-bold">
@@ -1038,7 +992,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
               </div>
             </div>
 
-            {/* Contact the host (Part 2) */}
+            {/* Contact the host */}
             {(detailedItem.contact_phone || detailedItem.contact_email) ? (
               <div className="kw-card p-4 space-y-3 border-[var(--gold)]/30">
                 <div className="flex items-center justify-between">
@@ -1092,7 +1046,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
               </div>
             ) : null}
 
-            {/* Join Link (Part 2: signed-in members / guest token only) */}
+            {/* Join Link */}
             {detailedItem.join_link && !isPast && !isCancelled && (
               <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-3 text-xs">
                 <div className="flex items-center gap-2 text-emerald-300 font-semibold">
@@ -1163,7 +1117,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     </button>
                   )
                 ) : (!isPast && !isCancelled) ? (
-                  /* Signed-Out Register Button / Confirmation (Part 4) */
+                  /* Signed-Out Register Button / Confirmation */
                   (() => {
                     const token = getGuestToken(detailedItem.id);
                     const isRegisteredGuest = Boolean(token || detailedItem.guest_info);
@@ -1211,9 +1165,10 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
                     return (
                       <button
+                        ref={registerBtnRef}
                         type="button"
                         onClick={() => setIsGuestModalOpen(true)}
-                        className="kw-btn kw-btn-gold py-2.5 px-5 font-bold text-xs rounded-xl shadow-lg shadow-amber-500/10 flex items-center gap-2"
+                        className="kw-btn kw-btn-gold py-2.5 px-5 font-bold text-xs rounded-xl shadow-lg shadow-amber-500/10 flex items-center gap-2 cursor-pointer"
                       >
                         <UserPlus className="w-4 h-4" />
                         Register
@@ -1289,7 +1244,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
           </div>
         </div>
 
-        {/* Questions Section (Part 3) */}
+        {/* Questions Section */}
         <div className="kw-card p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
             <h3 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">
@@ -1444,7 +1399,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
           )}
         </div>
 
-        {/* Guest registrations panel (Part 5: Author & Admin) */}
+        {/* Guest registrations panel (Author & Admin) */}
         {(isAuthor || currentProfile?.is_admin) && (
           <div className="kw-card p-6 space-y-4 border-[var(--gold)]/30">
             <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
@@ -1490,7 +1445,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     <button
                       type="button"
                       onClick={() => handleRemoveGuest(g.id)}
-                      className="kw-btn kw-btn-danger text-xs py-1 px-2.5"
+                      className="kw-btn kw-btn-danger text-xs py-1 px-2.5 cursor-pointer"
                     >
                       Remove
                     </button>
@@ -1501,7 +1456,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
           </div>
         )}
 
-        {/* Who's Going Section */}
+        {/* Who's Going Section with Plural Copy Fix */}
         {currentProfile ? (
           <div className="kw-card p-6 space-y-4">
             <div className="flex items-center gap-2 border-b border-[var(--card-border)] pb-3">
@@ -1513,7 +1468,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
             {attendees.length === 0 ? (
               <div className="p-6 rounded-lg bg-[var(--bg)] border border-[var(--card-border)] text-center text-xs text-[var(--fg-muted)]">
-                No one has RSVP'd yet. Be the first to join!
+                Be the first to register.
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
@@ -1535,13 +1490,277 @@ export const EventsView: React.FC<EventsViewProps> = ({
           </div>
         ) : (
           <div className="p-4 rounded-xl kw-card text-center text-xs text-[var(--fg-muted)] flex items-center justify-between gap-4">
-            <span>{attendeeCount} people are going to this event.</span>
+            <span>
+              {attendeeCount === 0
+                ? 'Be the first to register.'
+                : attendeeCount === 1
+                ? '1 person is going to this event.'
+                : `${attendeeCount} people are going to this event.`}
+            </span>
             <button
               onClick={onJoinClick}
               className="kw-btn kw-btn-gold text-xs py-1.5 px-3 font-semibold cursor-pointer"
             >
               Sign in to see attendees
             </button>
+          </div>
+        )}
+
+        {/* MODALS RENDERED DIRECTLY INSIDE DETAIL VIEW RETURN */}
+        <GuestRegisterModal
+          isOpen={isGuestModalOpen}
+          onClose={() => setIsGuestModalOpen(false)}
+          eventId={selectedItemId}
+          onSuccess={handleGuestSuccess}
+          onToast={onToast}
+          onJoinClick={onJoinClick}
+          triggerRef={registerBtnRef}
+        />
+
+        {/* EDIT MODAL */}
+        {isEditModalOpen && editingItem && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4">
+            <div className="kw-card max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto border-[var(--gold)]/40 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+                <h3 className="font-bold text-sm text-[var(--fg)]">Edit Event Details</h3>
+                <button
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleEditSubmit} className="space-y-4 text-xs">
+                <div>
+                  <label className="font-semibold text-[var(--fg)] block mb-1">Title *</label>
+                  <input
+                    type="text"
+                    value={formTitle}
+                    onChange={e => setFormTitle(e.target.value)}
+                    required
+                    className="kw-input text-xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold text-[var(--fg)] block mb-1">Description *</label>
+                  <textarea
+                    value={formDescription}
+                    onChange={e => setFormDescription(e.target.value)}
+                    rows={3}
+                    required
+                    className="kw-textarea text-xs"
+                  />
+                </div>
+
+                {editingItem.kind === 'event' && (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="font-semibold text-[var(--fg)] block mb-1">Start Date</label>
+                        <input
+                          type="date"
+                          value={formStartDate}
+                          onChange={e => setFormStartDate(e.target.value)}
+                          className="kw-input text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="font-semibold text-[var(--fg)] block mb-1">Start Time</label>
+                        <input
+                          type="time"
+                          value={formStartTime}
+                          onChange={e => setFormStartTime(e.target.value)}
+                          className="kw-input text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="font-semibold text-[var(--fg)] block mb-1">End Date</label>
+                        <input
+                          type="date"
+                          value={formEndDate}
+                          onChange={e => setFormEndDate(e.target.value)}
+                          className="kw-input text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="font-semibold text-[var(--fg)] block mb-1">End Time</label>
+                        <input
+                          type="time"
+                          value={formEndTime}
+                          onChange={e => setFormEndTime(e.target.value)}
+                          className="kw-input text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="font-semibold text-[var(--fg)] block mb-1">Timezone</label>
+                      <input
+                        type="text"
+                        value={formTimezone}
+                        onChange={e => setFormTimezone(e.target.value)}
+                        className="kw-input text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="font-semibold text-[var(--fg)] block mb-1">Location</label>
+                      <input
+                        type="text"
+                        value={formLocation}
+                        onChange={e => setFormLocation(e.target.value)}
+                        className="kw-input text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="font-semibold text-[var(--fg)] block mb-1">Join link (https://)</label>
+                      <input
+                        type="url"
+                        value={formJoinLink}
+                        onChange={e => setFormJoinLink(e.target.value)}
+                        className="kw-input text-xs"
+                      />
+                    </div>
+
+                    {/* Contact for attendees */}
+                    <div className="space-y-3 pt-2 border-t border-[var(--card-border)]">
+                      <div>
+                        <h4 className="font-bold text-xs text-[var(--fg)]">Contact for attendees (optional)</h4>
+                        <p className="text-[13px] text-[var(--fg-muted)]">Only people registered for this event can see this.</p>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="font-semibold text-[var(--fg)]">WhatsApp or phone</label>
+                          {currentProfile?.whatsapp && (
+                            <button
+                              type="button"
+                              onClick={() => setFormContactPhone(currentProfile.whatsapp || '')}
+                              className="text-[13px] text-[var(--gold-text)] hover:underline cursor-pointer"
+                            >
+                              Use my profile WhatsApp
+                            </button>
+                          )}
+                        </div>
+                        <input
+                          type="tel"
+                          value={formContactPhone}
+                          onChange={e => setFormContactPhone(e.target.value)}
+                          placeholder="+256700000000"
+                          className="kw-input text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="font-semibold text-[var(--fg)] block mb-1">Email</label>
+                        <input
+                          type="email"
+                          value={formContactEmail}
+                          onChange={e => setFormContactEmail(e.target.value)}
+                          placeholder="host@example.com"
+                          className="kw-input text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <CoverImageUploader
+                      value={formCoverImage}
+                      onChange={setFormCoverImage}
+                      title={formTitle}
+                    />
+                  </>
+                )}
+
+                <div className="flex items-center gap-2 pt-3 border-t border-[var(--card-border)]">
+                  <button
+                    type="submit"
+                    disabled={formSubmitting}
+                    className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold flex-1 cursor-pointer"
+                  >
+                    {formSubmitting ? 'Saving...' : 'Save Changes'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditModalOpen(false)}
+                    className="kw-btn text-xs py-2 px-3 border border-[var(--card-border)] cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* REPORT MODAL */}
+        {isReportModalOpen && reportingItem && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4">
+            <div className="kw-card max-w-md w-full p-6 space-y-4 border-rose-500/40 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+                <div className="flex items-center gap-2 text-rose-400">
+                  <Flag className="w-4 h-4" />
+                  <h3 className="font-bold text-sm text-[var(--fg)]">Report Event</h3>
+                </div>
+                <button
+                  onClick={() => setIsReportModalOpen(false)}
+                  className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <p className="text-xs text-[var(--fg-muted)]">
+                Help keep Kwegatta safe and genuine. Reports are strictly confidential and reviewed by community administrators.
+              </p>
+
+              <form onSubmit={handleReportSubmit} className="space-y-4 text-xs">
+                <div>
+                  <label className="font-semibold text-[var(--fg)] block mb-1">Reason *</label>
+                  <select
+                    value={reportReason}
+                    onChange={e => setReportReason(e.target.value)}
+                    className="kw-input text-xs"
+                  >
+                    <option value="Not a real event">Not a real event</option>
+                    <option value="Spam or scam">Spam or scam</option>
+                    <option value="Offensive">Offensive</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="font-semibold text-[var(--fg)] block mb-1">Optional Note</label>
+                  <textarea
+                    value={reportDetails}
+                    onChange={e => setReportDetails(e.target.value)}
+                    rows={3}
+                    placeholder="Additional context for administrators..."
+                    className="kw-textarea text-xs"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 pt-2">
+                  <button
+                    type="submit"
+                    disabled={submittingReport}
+                    className="kw-btn kw-btn-danger text-xs py-2 px-4 font-bold flex-1 cursor-pointer"
+                  >
+                    {submittingReport ? 'Submitting...' : 'Submit Report'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsReportModalOpen(false)}
+                    className="kw-btn text-xs py-2 px-3 border border-[var(--card-border)] cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
       </div>
@@ -1981,7 +2200,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     </div>
                   )}
 
-                  {/* Contact for attendees (Part 1) */}
+                  {/* Contact for attendees */}
                   <div className="space-y-3 pt-2 border-t border-[var(--card-border)]">
                     <div>
                       <h4 className="font-bold text-xs text-[var(--fg)]">Contact for attendees (optional)</h4>
@@ -2210,7 +2429,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     />
                   </div>
 
-                  {/* Contact for attendees (Part 1) */}
+                  {/* Contact for attendees */}
                   <div className="space-y-3 pt-2 border-t border-[var(--card-border)]">
                     <div>
                       <h4 className="font-bold text-xs text-[var(--fg)]">Contact for attendees (optional)</h4>
@@ -2278,114 +2497,15 @@ export const EventsView: React.FC<EventsViewProps> = ({
         </div>
       )}
 
-      {/* GUEST REGISTRATION MODAL (Part 4) */}
-      {isGuestModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4">
-          <div className="kw-card max-w-md w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto border-[var(--gold)]/40 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
-              <div>
-                <h3 className="font-bold text-sm text-[var(--fg)]">Register for event</h3>
-                <p className="text-xs text-[var(--fg-muted)]">No account needed.</p>
-              </div>
-              <button
-                onClick={() => setIsGuestModalOpen(false)}
-                className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleRegisterGuest} className="space-y-4 text-xs">
-              {/* Honeypot hidden input */}
-              <input
-                type="text"
-                name="website"
-                value={guestWebsite}
-                onChange={e => setGuestWebsite(e.target.value)}
-                style={{ display: 'none' }}
-                tabIndex={-1}
-                autoComplete="off"
-              />
-
-              <div>
-                <label className="font-semibold text-[var(--fg)] block mb-1">Full name *</label>
-                <input
-                  type="text"
-                  value={guestName}
-                  onChange={e => setGuestName(e.target.value)}
-                  placeholder="Your name"
-                  required
-                  className="kw-input text-xs"
-                />
-              </div>
-
-              <div>
-                <label className="font-semibold text-[var(--fg)] block mb-1">WhatsApp or phone</label>
-                <input
-                  type="tel"
-                  value={guestPhone}
-                  onChange={e => setGuestPhone(e.target.value)}
-                  placeholder="+256700000000"
-                  className="kw-input text-xs"
-                />
-              </div>
-
-              <div>
-                <label className="font-semibold text-[var(--fg)] block mb-1">Email</label>
-                <input
-                  type="email"
-                  value={guestEmail}
-                  onChange={e => setGuestEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className="kw-input text-xs"
-                />
-              </div>
-
-              <p className="text-[13px] text-[var(--fg-subtle)] italic">
-                Add at least one way to reach you.
-              </p>
-
-              <label className="flex items-start gap-2 cursor-pointer text-xs text-[var(--fg-muted)]">
-                <input
-                  type="checkbox"
-                  checked={guestAgree}
-                  onChange={e => setGuestAgree(e.target.checked)}
-                  required
-                  className="mt-0.5"
-                />
-                <span>I agree that the host can see these details to manage this event.</span>
-              </label>
-
-              <div className="space-y-2 pt-2 border-t border-[var(--card-border)]">
-                <button
-                  type="submit"
-                  disabled={submittingGuest}
-                  className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold w-full cursor-pointer"
-                >
-                  {submittingGuest ? 'Registering...' : 'Register'}
-                </button>
-                <div className="flex items-center justify-between text-[13px] pt-1">
-                  {onJoinClick && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsGuestModalOpen(false);
-                        onJoinClick();
-                      }}
-                      className="text-[var(--gold-text)] hover:underline cursor-pointer font-semibold"
-                    >
-                      Have an account? Sign in
-                    </button>
-                  )}
-                  <a href="#/privacy" className="text-[var(--fg-muted)] hover:underline">
-                    Privacy Policy
-                  </a>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* GUEST REGISTRATION MODAL */}
+      <GuestRegisterModal
+        isOpen={isGuestModalOpen}
+        onClose={() => setIsGuestModalOpen(false)}
+        eventId={selectedItemId || ''}
+        onSuccess={handleGuestSuccess}
+        onToast={onToast}
+        onJoinClick={onJoinClick}
+      />
 
       {/* REPORT MODAL */}
       {isReportModalOpen && reportingItem && (
