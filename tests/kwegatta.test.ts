@@ -1681,7 +1681,7 @@ describe('Release 1.5.0 Features', () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText((content) => content.includes('Guest registrations'))).toBeTruthy();
+        expect(screen.getByText((content: string) => content.includes('Guest registrations'))).toBeTruthy();
       });
     });
 
