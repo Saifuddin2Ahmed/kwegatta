@@ -295,7 +295,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         fetch('/api/admin/events', { headers }),
         fetch('/api/admin/admins', { headers }).catch(() => null),
         fetchPinnedAnnouncement(),
-        fetchTeam().catch(() => [])
+        fetch('/api/admin/team', { headers }).then(r => r.ok ? r.json() : fetchTeam()).catch(() => fetchTeam().catch(() => []))
       ]);
 
       if (ovRes.status === 401 || memRes.status === 401) {
@@ -735,6 +735,19 @@ export const AdminView: React.FC<AdminViewProps> = ({
     }
   };
 
+  const handleRemovePhotoForTeam = async (member: TeamMember) => {
+    if (!confirm(`Remove the photo for ${member.name}? Their initials will be shown instead.`)) return;
+    try {
+      await updateTeamMember(member.id, { photo: '' });
+      setTeamList(prev => prev.map(m => m.id === member.id ? { ...m, photo: null, photo_url: null } : m));
+      onToast('Photo removed');
+      await fetchAdminData();
+      onRefreshGlobalData();
+    } catch (err: any) {
+      onToast('Failed to remove photo: ' + (err.message || err));
+    }
+  };
+
   // Pin Announcement Actions
   const handlePinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1044,7 +1057,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
           { id: 'overview', label: 'Overview', icon: BarChart3 },
           { id: 'team', label: `Team (${teamList.length})`, icon: UserCheck },
           { id: 'events', label: `Events (${adminEvents.length})`, icon: Calendar },
-          { id: 'admins', label: `Admins (${adminAccounts.admin_emails.length || 1})`, icon: Lock },
+          { id: 'admins', label: `Admins (${adminAccounts?.admin_emails?.length || 1})`, icon: Lock },
           { id: 'members', label: `Members (${overview?.members_count || 0})`, icon: Users },
           { id: 'reports', label: `Reports (${reports.filter(r => r.status === 'pending').length})`, icon: Flag },
           { id: 'posts', label: `Posts (${overview?.posts_count || 0})`, icon: MessageSquare },
@@ -1755,7 +1768,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
             ) : (
               <div className="space-y-3">
                 {teamList.map((member, index) => {
-                  const photoUrl = member.photo || member.linked_avatar || (member.linked_profile_id ? `/api/avatar/${member.linked_profile_id}` : null);
+                  const photoUrl = member.photo_url || member.photo || member.linked_avatar || (member.linked_profile_id ? `/api/avatar/${member.linked_profile_id}` : null);
                   return (
                     <div
                       key={member.id}
@@ -1766,34 +1779,48 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="flex items-start gap-3 min-w-0">
                           {/* Photo or Initials */}
-                          <div className="relative shrink-0">
-                            {photoUrl ? (
-                              <img
-                                src={photoUrl}
-                                alt={member.name}
-                                className="w-12 h-12 rounded-full object-cover border border-[var(--card-border)]"
-                              />
-                            ) : (
-                              <div className="w-12 h-12 rounded-full bg-[var(--gold-subtle)] text-[var(--gold-text)] font-bold text-sm grid place-items-center border border-[var(--card-border)]">
-                                {member.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                              </div>
+                          <div className="flex flex-col items-center gap-1.5 shrink-0">
+                            <div className="relative">
+                              {photoUrl ? (
+                                <img
+                                  src={photoUrl}
+                                  alt={member.name}
+                                  className="w-12 h-12 rounded-full object-cover border border-[var(--card-border)]"
+                                />
+                              ) : (
+                                <div className="w-12 h-12 rounded-full bg-[var(--gold-subtle)] text-[var(--gold-text)] font-bold text-sm grid place-items-center border border-[var(--card-border)]">
+                                  {member.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                                </div>
+                              )}
+                              <label
+                                title="Upload / Replace Photo (resized to WebP)"
+                                className="absolute -bottom-1 -right-1 p-1 rounded-full bg-[var(--bg-elevated)] border border-[var(--card-border)] text-[var(--fg)] hover:text-[var(--gold-text)] cursor-pointer shadow-sm"
+                              >
+                                <Camera className="w-3 h-3" />
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  disabled={teamPhotoUploadingId === member.id}
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) handlePhotoUploadForTeam(member.id, file);
+                                  }}
+                                />
+                              </label>
+                            </div>
+                            {Boolean(member.photo) && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemovePhotoForTeam(member)}
+                                className="text-[11px] text-red-400 hover:text-red-300 font-medium hover:underline flex items-center gap-0.5 cursor-pointer"
+                                title="Remove photo"
+                                aria-label="Remove photo"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Remove photo</span>
+                              </button>
                             )}
-                            <label
-                              title="Upload / Replace Photo (resized to WebP)"
-                              className="absolute -bottom-1 -right-1 p-1 rounded-full bg-[var(--bg-elevated)] border border-[var(--card-border)] text-[var(--fg)] hover:text-[var(--gold-text)] cursor-pointer shadow-sm"
-                            >
-                              <Camera className="w-3 h-3" />
-                              <input
-                                type="file"
-                                accept="image/*"
-                                className="hidden"
-                                disabled={teamPhotoUploadingId === member.id}
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0];
-                                  if (file) handlePhotoUploadForTeam(member.id, file);
-                                }}
-                              />
-                            </label>
                           </div>
 
                           {/* Member Details */}

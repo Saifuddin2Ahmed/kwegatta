@@ -6070,14 +6070,44 @@ export function canChangeTeam(isAdmin: boolean): boolean {
   return Boolean(isAdmin);
 }
 
+export function getPublicTeamList(): any[] {
+  let list = Array.isArray(store.team) ? [...store.team] : [];
+  list = list.filter((m: any) => !m.hidden);
+  list.sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
+
+  return list.map((m: any) => {
+    let linkedAvatar = null;
+    let linkedProfile = null;
+    if (m.linked_profile_id) {
+      const lp = store.profiles.find((p: any) => p.id === m.linked_profile_id);
+      if (lp) {
+        linkedProfile = { id: lp.id, name: lp.name, role: lp.role, headline: lp.headline };
+        linkedAvatar = lp.avatar ? `/api/avatar/${lp.id}` : null;
+      }
+    }
+    return {
+      id: m.id,
+      name: m.name,
+      line2: m.line2,
+      github: m.github || null,
+      linked_profile_id: m.linked_profile_id || null,
+      order: Number(m.order) || 0,
+      photo_url: m.photo ? `/api/team-photo/${m.id}` : null,
+      linked_avatar: linkedAvatar,
+      linked_profile: linkedProfile
+    };
+  });
+}
+
 // Public: Get team members
 app.get('/api/team', (req: Request, res: Response) => {
   const isAdmin = checkAdmin(req);
-  let list = Array.isArray(store.team) ? [...store.team] : [];
   if (!isAdmin) {
-    list = list.filter((m: any) => !m.hidden);
+    return res.json(getPublicTeamList());
   }
-  list = list.sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
+
+  let list = Array.isArray(store.team) ? [...store.team] : [];
+  list.sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
 
   const enriched = list.map((m: any) => {
     let linkedAvatar = null;
@@ -6091,6 +6121,36 @@ app.get('/api/team', (req: Request, res: Response) => {
     }
     return {
       ...m,
+      photo_url: m.photo ? `/api/team-photo/${m.id}` : null,
+      linked_avatar: linkedAvatar,
+      linked_profile: linkedProfile
+    };
+  });
+
+  return res.json(enriched);
+});
+
+// Admin: Get all team members (full data including hidden)
+app.get('/api/admin/team', (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  let list = Array.isArray(store.team) ? [...store.team] : [];
+  list.sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
+
+  const enriched = list.map((m: any) => {
+    let linkedAvatar = null;
+    let linkedProfile = null;
+    if (m.linked_profile_id) {
+      const lp = store.profiles.find((p: any) => p.id === m.linked_profile_id);
+      if (lp) {
+        linkedProfile = { id: lp.id, name: lp.name, role: lp.role, headline: lp.headline };
+        linkedAvatar = lp.avatar || null;
+      }
+    }
+    return {
+      ...m,
+      photo_url: m.photo ? `/api/team-photo/${m.id}` : null,
       linked_avatar: linkedAvatar,
       linked_profile: linkedProfile
     };
@@ -6165,7 +6225,7 @@ app.patch('/api/admin/team/:id', async (req: Request, res: Response) => {
   if (raw.github !== undefined) member.github = sanitizeText(raw.github, 60).replace(/^@/, '') || null;
   if (raw.linkedin !== undefined) member.linkedin = sanitizeText(raw.linkedin, 150) || null;
   if (raw.linked_profile_id !== undefined) member.linked_profile_id = sanitizeText(raw.linked_profile_id, 80) || null;
-  if (raw.photo !== undefined) member.photo = sanitizeAvatar(raw.photo) || null;
+  if (raw.photo !== undefined) member.photo = raw.photo ? (sanitizeAvatar(raw.photo) || null) : null;
   if (raw.hidden !== undefined) member.hidden = Boolean(raw.hidden);
   if (raw.order !== undefined) member.order = Number(raw.order) || 0;
   member.updated_at = new Date().toISOString();
@@ -6306,13 +6366,7 @@ app.delete('/api/admin/team/:id', async (req: Request, res: Response) => {
 app.get('/api/team-photo/:id', (req: Request, res: Response) => {
   const { id } = req.params;
   const member = (store.team || []).find((m: any) => m.id === id);
-  if (!member || !member.photo) {
-    if (member?.linked_profile_id) {
-      const linked = store.profiles.find((p: any) => p.id === member.linked_profile_id);
-      if (linked?.avatar) {
-        return res.redirect(`/api/avatar/${linked.id}`);
-      }
-    }
+  if (!member || !member.photo || member.hidden) {
     return res.status(404).send('Team photo not found');
   }
 
@@ -6528,6 +6582,10 @@ app.get('/api/data/:collection', (req: Request, res: Response) => {
   }
 
   // Enforce privacy on collections if called via generic endpoint
+  if (col === 'team') {
+    return res.json(getPublicTeamList());
+  }
+
   if (col === 'notifications' || col === 'matches' || col === 'follows') {
     const authUserId = resolveAuthUserId(req);
     if (!authUserId) {

@@ -23,7 +23,7 @@ import { auth } from '../services/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { AuthModal } from './AuthModal';
 import { ISO_COUNTRIES, getSortedCountries, guessCountry, deriveLocation } from '../lib/countries';
-import { INTENT_CHOICES, ROLE_CHOICES, STAGE_CHOICES } from '../lib/profileChoices';
+import { INTENT_CHOICES, ROLE_CHOICES, STAGE_CHOICES, toggleChoice } from '../lib/profileChoices';
 
 interface OnboardingChatProps {
   onCompleted: (profile: Profile) => void;
@@ -293,27 +293,11 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
 
   // Toggle selection for multiple choice chips
   const handleToggleIntent = (intent: string) => {
-    if (selectedIntents.includes(intent)) {
-      setSelectedIntents(prev => prev.filter(i => i !== intent));
-    } else {
-      if (selectedIntents.length < 3) {
-        setSelectedIntents(prev => [...prev, intent]);
-      } else {
-        showSelectionNotice('Remove one to add another');
-      }
-    }
+    setSelectedIntents(prev => toggleChoice(prev, intent, 3));
   };
 
   const handleToggleRole = (role: string) => {
-    if (selectedRoles.includes(role)) {
-      setSelectedRoles(prev => prev.filter(r => r !== role));
-    } else {
-      if (selectedRoles.length < 2) {
-        setSelectedRoles(prev => [...prev, role]);
-      } else {
-        showSelectionNotice('Remove one to add another');
-      }
-    }
+    setSelectedRoles(prev => toggleChoice(prev, role, 2));
   };
 
   // Photo handlers
@@ -889,7 +873,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                         <button
                           key={stage}
                           type="button"
-                          onClick={() => setSelectedStage(stage)}
+                          onClick={() => setSelectedStage(prev => prev === stage ? '' : stage)}
                           className={`p-3 rounded-xl text-xs font-medium border transition-all text-left cursor-pointer active:scale-[0.98] ${
                             isSelected
                               ? 'bg-[var(--teal)] text-[#0B1220] border-[var(--teal)] font-bold shadow-sm'

@@ -361,7 +361,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           {team.map((member) => {
-            const photoUrl = member.photo || member.linked_avatar || (member.linked_profile_id ? `/api/avatar/${member.linked_profile_id}` : null);
+            const photoUrl = member.photo_url || member.photo || member.linked_avatar || (member.linked_profile_id ? `/api/avatar/${member.linked_profile_id}` : null);
             const line2 = member.line2 || (member as any).affiliation || '';
 
             return (

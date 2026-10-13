@@ -4,6 +4,28 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.10] - 2026-10-13
+
+### Changed (Release 1.5.10)
+- **Admin: remove a team member's photo; hidden team members and raw photos are no longer exposed publicly**:
+  - Admin team editor includes a "Remove photo" action with confirmation to restore initial letter placeholder.
+  - Team member photos can be cleared via `PATCH /api/admin/team/:id` with `{ photo: '' }`.
+  - Public endpoints (`/api/data/team` and `/api/team`) exclude hidden members and return `photo_url` instead of raw base64 data.
+  - `GET /api/team-photo/:id` returns 404 for hidden members and members without photos.
+  - `AboutView` updated to display team member images via `photo_url`.
+
+## [1.5.9] - 2026-10-13
+
+### Fixed (Release 1.5.9)
+- **Fix: easier role and intent selection; tap removes, star sets main role**:
+  - Tapping a selected chip removes it across roles and intents.
+  - Tapping an unselected chip at the limit replaces the last selected item.
+  - Role chips support setting the main role via a star (★) button, labeling the first chip "Main", with a helper line.
+  - Intents display an "x / 3 selected" counter and helper line.
+  - Stage allows deselection on tapping the selected choice again.
+  - Save button in Edit Profile disabled with "Pick at least one role" when roles list is empty.
+  - Shared `toggleChoice` and `makeFirst` logic in `src/lib/profileChoices.ts` applied across Edit Profile and Onboarding.
+
 ## [1.5.8] - 2026-10-13
 
 ### Fixed (Release 1.5.8)

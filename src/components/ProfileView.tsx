@@ -50,7 +50,7 @@ import { generateQrCodeDataUrl, formatWhatsAppUrl, resizeImageFile } from '../ut
 import { Avatar } from './Avatar';
 import { SocialLinksRow } from './SocialLinksRow';
 import { getSortedCountries, deriveLocation } from '../lib/countries';
-import { ROLE_CHOICES, STAGE_CHOICES, INTENT_CHOICES, parseIntents } from '../lib/profileChoices';
+import { ROLE_CHOICES, STAGE_CHOICES, INTENT_CHOICES, parseIntents, toggleChoice, makeFirst } from '../lib/profileChoices';
 import { auth, addPasswordToAccount, validatePasswordStrength, formatAuthError } from '../services/firebase';
 import { EmailAuthProvider, linkWithCredential } from 'firebase/auth';
 
@@ -183,27 +183,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   }, [profile]);
 
   const handleToggleRole = (r: string) => {
-    if (editRoles.includes(r)) {
-      if (editRoles[0] === r) {
-        if (editRoles.length > 1) {
-          setEditRoles([editRoles[1]]);
-        }
-      } else {
-        setEditRoles([r, editRoles[0]]);
-      }
-    } else {
-      if (editRoles.length < 2) {
-        setEditRoles([...editRoles, r]);
-      }
-    }
+    setEditRoles(prev => toggleChoice(prev, r, 2));
   };
 
   const handleToggleIntent = (intnt: string) => {
-    if (editIntents.includes(intnt)) {
-      setEditIntents(editIntents.filter(i => i !== intnt));
-    } else if (editIntents.length < 3) {
-      setEditIntents([...editIntents, intnt]);
-    }
+    setEditIntents(prev => toggleChoice(prev, intnt, 3));
   };
 
   // Social & Academic links edit state
@@ -279,12 +263,16 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   };
 
   const handleSaveProfile = async () => {
+    if (editRoles.length === 0) {
+      onToast('Pick at least one role');
+      return;
+    }
     try {
       const cleanCity = editCity.trim().slice(0, 100);
       const cleanCountry = editCountry;
       const derivedLoc = deriveLocation(cleanCity, cleanCountry);
 
-      const finalRoles = editRoles.length > 0 ? editRoles : (profile.roles?.length ? profile.roles : [profile.role || 'Developer']);
+      const finalRoles = editRoles;
 
       const payload = {
         roles: finalRoles,
@@ -1266,38 +1254,51 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       {ROLE_CHOICES.map(r => {
                         const isSelected = editRoles.includes(r);
                         const isFirst = editRoles[0] === r;
-                        const isSecond = editRoles[1] === r;
-                        const isDisabled = !isSelected && editRoles.length >= 2;
 
                         return (
                           <button
                             type="button"
                             key={r}
                             onClick={() => handleToggleRole(r)}
-                            disabled={isDisabled}
                             className={`text-xs px-2.5 py-1 rounded-full border transition-all cursor-pointer flex items-center gap-1.5 ${
                               isSelected
                                 ? 'bg-[var(--gold-subtle)] border-[var(--gold)] text-[var(--fg)] font-semibold'
-                                : isDisabled
-                                ? 'opacity-40 cursor-not-allowed bg-[var(--bg-subtle)] border-[var(--card-border)] text-[var(--fg-muted)]'
                                 : 'bg-[var(--card)] border-[var(--card-border)] text-[var(--fg-muted)] hover:border-[var(--gold)]'
                             }`}
                           >
                             <span>{r}</span>
+                            {isSelected && (
+                              <button
+                                type="button"
+                                aria-label="Make main role"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditRoles(prev => makeFirst(prev, r));
+                                }}
+                                className={`text-[11px] p-0.5 rounded hover:scale-110 transition-transform ${
+                                  isFirst ? 'text-[var(--gold-text)] font-bold' : 'text-[var(--fg-muted)] hover:text-[var(--gold-text)]'
+                                }`}
+                              >
+                                ★
+                              </button>
+                            )}
                             {isFirst && (
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--gold)] text-[#090D16] font-bold">
-                                shown on profile
-                              </span>
-                            )}
-                            {isSecond && (
-                              <span className="text-[10px] text-[var(--muted)] font-normal">
-                                (2nd)
+                                Main
                               </span>
                             )}
                           </button>
                         );
                       })}
                     </div>
+                    <p className="text-[11px] text-[var(--fg-muted)]">
+                      Tap to add or remove. ★ sets your main role. Up to 2.
+                    </p>
+                    {editRoles.length === 0 && (
+                      <p className="text-xs text-amber-500 font-medium">
+                        Pick at least one role
+                      </p>
+                    )}
                   </div>
 
                   {/* Your stage */}
@@ -1306,24 +1307,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       Your stage
                     </label>
                     <div className="flex flex-wrap gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setEditStage('')}
-                        className={`text-xs px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
-                          editStage === ''
-                            ? 'bg-[var(--accent-subtle)] border-[var(--accent)] text-[var(--fg)] font-semibold'
-                            : 'bg-[var(--card)] border-[var(--card-border)] text-[var(--fg-muted)] hover:border-[var(--card-border)]'
-                        }`}
-                      >
-                        None
-                      </button>
                       {STAGE_CHOICES.map(stg => {
                         const isSelected = editStage === stg;
                         return (
                           <button
                             type="button"
                             key={stg}
-                            onClick={() => setEditStage(stg)}
+                            onClick={() => setEditStage(prev => prev === stg ? '' : stg)}
                             className={`text-xs px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
                               isSelected
                                 ? 'bg-[var(--accent-subtle)] border-[var(--accent)] text-[var(--fg)] font-semibold'
@@ -1338,26 +1328,26 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   </div>
 
                   {/* What brings you here */}
-                  {/* What brings you here */}
                   <div className="space-y-1.5 pt-1">
-                    <label className="block text-xs font-semibold text-[var(--fg)]">
-                      What brings you here (up to 3)
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-semibold text-[var(--fg)]">
+                        What brings you here (up to 3)
+                      </label>
+                      <span className="text-xs text-[var(--fg-muted)] tabular-nums">
+                        {editIntents.length} / 3 selected
+                      </span>
+                    </div>
                     <div className="flex flex-wrap gap-1.5">
                       {INTENT_CHOICES.map(intnt => {
                         const isSelected = editIntents.includes(intnt);
-                        const isDisabled = !isSelected && editIntents.length >= 3;
                         return (
                           <button
                             type="button"
                             key={intnt}
                             onClick={() => handleToggleIntent(intnt)}
-                            disabled={isDisabled}
                             className={`text-xs px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
                               isSelected
                                 ? 'bg-[var(--teal-subtle)] border-[var(--teal)] text-[var(--fg)] font-semibold'
-                                : isDisabled
-                                ? 'opacity-40 cursor-not-allowed bg-[var(--bg-subtle)] border-[var(--card-border)] text-[var(--fg-muted)]'
                                 : 'bg-[var(--card)] border-[var(--card-border)] text-[var(--fg-muted)] hover:border-[var(--card-border)]'
                             }`}
                           >
@@ -1366,6 +1356,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         );
                       })}
                     </div>
+                    <p className="text-[11px] text-[var(--fg-muted)]">
+                      Tap to add or remove. Up to 3.
+                    </p>
                   </div>
                 </div>
 
@@ -1811,7 +1804,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-[var(--border)]">
+              <div className="flex justify-end items-center gap-2 pt-2 border-t border-[var(--border)]">
+                {editRoles.length === 0 && (
+                  <span className="text-xs text-amber-500 font-medium">
+                    Pick at least one role
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={() => setIsEditing(false)}
@@ -1822,7 +1820,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 <button
                   type="button"
                   onClick={handleSaveProfile}
-                  className="kw-btn kw-btn-gold text-xs py-1.5 px-4 font-bold cursor-pointer"
+                  disabled={editRoles.length === 0}
+                  className={`kw-btn kw-btn-gold text-xs py-1.5 px-4 font-bold flex items-center gap-1.5 ${
+                    editRoles.length === 0 ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                  }`}
                 >
                   <Check className="w-3.5 h-3.5" />
                   <span>Save changes</span>

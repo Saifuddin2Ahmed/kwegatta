@@ -288,6 +288,7 @@ export interface TeamMember {
   linkedin?: string | null;
   linked_profile_id?: string | null;
   photo?: string | null;
+  photo_url?: string | null;
   order: number;
   hidden: boolean;
   linked_avatar?: string | null;

@@ -35,7 +35,7 @@ import {
   store
 } from '../server';
 import { validatePasswordStrength } from '../src/services/firebase';
-import { normalizeIntent, parseIntents } from '../src/lib/profileChoices';
+import { normalizeIntent, parseIntents, toggleChoice, makeFirst } from '../src/lib/profileChoices';
 import { ShareCardModal, avatarSrc } from '../src/components/ShareCardModal';
 
 let server: any;
@@ -262,8 +262,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.5.8
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.8'");
+    // 1. Cache name includes version kwegatta-1.5.10
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.10'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -2133,11 +2133,18 @@ describe('Release 1.5.0 Features', () => {
       expect(screen.getAllByText('How you appear').length).toBeGreaterThan(0);
       expect(screen.getAllByText('Your role (up to 2)').length).toBeGreaterThan(0);
 
-      // Tap Developer (which is currently second role) to make it first
-      const devBtns = screen.getAllByRole('button', { name: /Developer/i });
-      await act(async () => {
-        fireEvent.click(devBtns[devBtns.length - 1]);
-      });
+      // Tap Developer's star (or chip) to make it first
+      const makeMainBtns = screen.queryAllByRole('button', { name: /make main role/i });
+      if (makeMainBtns.length > 0) {
+        await act(async () => {
+          fireEvent.click(makeMainBtns[makeMainBtns.length - 1]);
+        });
+      } else {
+        const devBtns = screen.getAllByRole('button', { name: /Developer/i });
+        await act(async () => {
+          fireEvent.click(devBtns[devBtns.length - 1]);
+        });
+      }
 
       // Click Save changes
       const saveBtns = screen.getAllByRole('button', { name: /save changes/i });
@@ -2614,6 +2621,398 @@ describe('Release 1.5.0 Features', () => {
         } finally {
           (window as any).Image = originalImage;
           vi.restoreAllMocks();
+        }
+      });
+    });
+
+    describe('Release 1.5.9 Chip Selection & Main Role Fixes', () => {
+      it('a) toggleChoice removes selected item', () => {
+        expect(toggleChoice(['Developer', 'Founder'], 'Founder', 2)).toEqual(['Developer']);
+      });
+
+      it('b) toggleChoice replaces last item when at limit', () => {
+        expect(toggleChoice(['Developer', 'Founder'], 'Mentor', 2)).toEqual(['Developer', 'Mentor']);
+      });
+
+      it('c) toggleChoice adds item when under limit', () => {
+        expect(toggleChoice(['Developer'], 'Mentor', 2)).toEqual(['Developer', 'Mentor']);
+      });
+
+      it('d) makeFirst moves specified item to first position', () => {
+        expect(makeFirst(['Developer', 'Mentor'], 'Mentor')).toEqual(['Mentor', 'Developer']);
+      });
+
+      it('e) toggleChoice for intents with max 3 at the limit replaces the last one', () => {
+        expect(toggleChoice(['Find a co-founder', 'Find a technical partner', 'Join a project'], 'Learn a skill', 3))
+          .toEqual(['Find a co-founder', 'Find a technical partner', 'Learn a skill']);
+      });
+
+      it("f) Render: Edit Profile with roles ['Founder','Developer']; tap Founder → only Developer remains and the \"Main\" label is on Developer; Save sends roles ['Developer']", async () => {
+        const { ProfileView } = await import('../src/components/ProfileView');
+        const testProfile = {
+          id: 'test-user-159-f',
+          name: 'Two Role Member',
+          role: 'Founder',
+          roles: ['Founder', 'Developer'],
+          country: 'UG',
+          city: 'Kampala',
+          location: 'Kampala, Uganda'
+        };
+
+        let updatedProfileState: any = null;
+
+        await act(async () => {
+          render(
+            React.createElement(ProfileView, {
+              profile: testProfile as any,
+              currentProfile: testProfile as any,
+              followersCount: 0,
+              followingCount: 0,
+              isFollowing: false,
+              onToggleFollow: vi.fn(),
+              onUpdateProfile: (updated: any) => {
+                updatedProfileState = updated;
+              },
+              onToast: vi.fn()
+            })
+          );
+        });
+
+        // Open Edit Profile
+        const editBtns = screen.getAllByRole('button', { name: /edit profile/i });
+        await act(async () => {
+          fireEvent.click(editBtns[editBtns.length - 1]);
+        });
+
+        // Tap Founder chip to remove it
+        const founderChips = screen.getAllByText('Founder');
+        await act(async () => {
+          fireEvent.click(founderChips[founderChips.length - 1]);
+        });
+
+        // Check that Main label is now on Developer
+        const mainBadges = screen.getAllByText('Main');
+        expect(mainBadges.length).toBeGreaterThan(0);
+        const devChips = screen.getAllByText('Developer');
+        const devChipButton = devChips[devChips.length - 1].closest('button');
+        expect(devChipButton?.textContent).toContain('Main');
+
+        // Save changes
+        const saveBtns = screen.getAllByRole('button', { name: /save changes/i });
+        await act(async () => {
+          fireEvent.click(saveBtns[saveBtns.length - 1]);
+        });
+
+        expect(updatedProfileState).toBeTruthy();
+        expect(updatedProfileState.roles).toEqual(['Developer']);
+        expect(updatedProfileState.role).toBe('Developer');
+      });
+
+      it('g) Render: removing all roles disables Save', async () => {
+        const { ProfileView } = await import('../src/components/ProfileView');
+        const testProfile = {
+          id: 'test-user-159-g',
+          name: 'Single Role Member',
+          role: 'Developer',
+          roles: ['Developer'],
+          country: 'UG',
+          city: 'Kampala',
+          location: 'Kampala, Uganda'
+        };
+
+        await act(async () => {
+          render(
+            React.createElement(ProfileView, {
+              profile: testProfile as any,
+              currentProfile: testProfile as any,
+              followersCount: 0,
+              followingCount: 0,
+              isFollowing: false,
+              onToggleFollow: vi.fn(),
+              onUpdateProfile: vi.fn(),
+              onToast: vi.fn()
+            })
+          );
+        });
+
+        // Open Edit Profile
+        const editBtns = screen.getAllByRole('button', { name: /edit profile/i });
+        await act(async () => {
+          fireEvent.click(editBtns[editBtns.length - 1]);
+        });
+
+        // Tap Developer chip to remove it (leaving 0 roles)
+        const devChips = screen.getAllByText('Developer');
+        await act(async () => {
+          fireEvent.click(devChips[devChips.length - 1]);
+        });
+
+        // Save button must be disabled
+        const saveBtns = screen.getAllByRole('button', { name: /save changes/i });
+        const saveBtn = saveBtns[saveBtns.length - 1] as HTMLButtonElement;
+        expect(saveBtn.disabled).toBe(true);
+        expect(saveBtn.hasAttribute('disabled')).toBe(true);
+
+        // "Pick at least one role" message must be shown
+        expect(screen.getAllByText('Pick at least one role').length).toBeGreaterThan(0);
+      });
+    });
+
+    describe('Release 1.5.10 — Admin Remove Photo and Public Team Data Sanitization', () => {
+      it('a) Admin PATCH {photo:""} -> photo null; GET /api/team-photo/:id -> 404', async () => {
+        if (!Array.isArray(store.team)) store.team = [];
+        const memberId = 'team-member-1510-a';
+        const samplePhoto = 'data:image/webp;base64,UklGRkAAAABXRUJQVlA4IDQAAADwAQCdASoBAAEAAkA4JaQAA3AA/vv+gA==';
+        store.team.push({
+          id: memberId,
+          name: 'Mupole Test A',
+          title: 'Core Dev',
+          line1: 'Dev',
+          line2: 'Uganda',
+          photo: samplePhoto,
+          hidden: false,
+          order: 1
+        });
+
+        // Ensure test-admin is in admin_emails
+        if (!Array.isArray(store.admin_emails)) store.admin_emails = [];
+        if (!store.admin_emails.includes('test-admin@kwegatta.test')) {
+          store.admin_emails.push('test-admin@kwegatta.test');
+        }
+
+        // Before: GET /api/team-photo/:id should be 200
+        const prePhoto = await fetch(`${baseUrl}/api/team-photo/${memberId}`);
+        expect(prePhoto.status).toBe(200);
+
+        // Admin PATCH with { photo: '' }
+        const patchRes = await fetch(`${baseUrl}/api/admin/team/${memberId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer test-admin'
+          },
+          body: JSON.stringify({ photo: '' })
+        });
+        expect(patchRes.status).toBe(200);
+        const data = await patchRes.json();
+        expect(data.member.photo).toBeNull();
+
+        // Verify member in store.team has photo null
+        const updated = store.team.find((m: any) => m.id === memberId);
+        expect(updated?.photo).toBeNull();
+
+        // GET /api/team-photo/:id must now be 404
+        const photoRes = await fetch(`${baseUrl}/api/team-photo/${memberId}`);
+        expect(photoRes.status).toBe(404);
+      });
+
+      it('b) Same PATCH without admin auth -> 401/403, photo unchanged', async () => {
+        if (!Array.isArray(store.team)) store.team = [];
+        const memberId = 'team-member-1510-b';
+        const samplePhoto = 'data:image/webp;base64,UklGRkAAAABXRUJQVlA4IDQAAADwAQCdASoBAAEAAkA4JaQAA3AA/vv+gA==';
+        store.team.push({
+          id: memberId,
+          name: 'Mupole Test B',
+          title: 'Core Dev',
+          line1: 'Dev',
+          line2: 'Uganda',
+          photo: samplePhoto,
+          hidden: false,
+          order: 2
+        });
+
+        // PATCH without admin auth
+        const patchRes = await fetch(`${baseUrl}/api/admin/team/${memberId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ photo: '' })
+        });
+        expect([401, 403]).toContain(patchRes.status);
+
+        // Member photo remains unchanged
+        const member = store.team.find((m: any) => m.id === memberId);
+        expect(member?.photo).toBe(samplePhoto);
+      });
+
+      it('c) GET /api/data/team excludes hidden members and contains no "data:image" string anywhere in the response', async () => {
+        if (!Array.isArray(store.team)) store.team = [];
+        const samplePhoto = 'data:image/webp;base64,UklGRkAAAABXRUJQVlA4IDQAAADwAQCdASoBAAEAAkA4JaQAA3AA/vv+gA==';
+        const visibleId = 'team-visible-1510-c';
+        const hiddenId = 'team-hidden-1510-c';
+
+        store.team.push({
+          id: visibleId,
+          name: 'Visible Member',
+          title: 'Designer',
+          line1: 'UI',
+          line2: 'Makerere',
+          github: 'visdev',
+          linked_profile_id: null,
+          photo: samplePhoto,
+          hidden: false,
+          order: 10
+        });
+        store.team.push({
+          id: hiddenId,
+          name: 'Hidden Member',
+          title: 'Secret',
+          line1: 'Secret',
+          line2: 'Secret Org',
+          photo: samplePhoto,
+          hidden: true,
+          order: 11
+        });
+
+        const res = await fetch(`${baseUrl}/api/data/team`);
+        expect(res.status).toBe(200);
+        const text = await res.text();
+
+        // Must contain NO "data:image" anywhere
+        expect(text.includes('data:image')).toBe(false);
+
+        // Excludes hidden members
+        const parsed = JSON.parse(text);
+        expect(Array.isArray(parsed)).toBe(true);
+        expect(parsed.some((m: any) => m.id === hiddenId)).toBe(false);
+        const visible = parsed.find((m: any) => m.id === visibleId);
+        expect(visible).toBeTruthy();
+        expect(visible.photo_url).toBe(`/api/team-photo/${visibleId}`);
+        expect(visible.photo).toBeUndefined();
+      });
+
+      it('d) GET /api/team-photo/<hidden member id> -> 404', async () => {
+        if (!Array.isArray(store.team)) store.team = [];
+        const samplePhoto = 'data:image/webp;base64,UklGRkAAAABXRUJQVlA4IDQAAADwAQCdASoBAAEAAkA4JaQAA3AA/vv+gA==';
+        const hiddenId = 'team-hidden-1510-d';
+
+        store.team.push({
+          id: hiddenId,
+          name: 'Hidden Person D',
+          title: 'Advisor',
+          line1: 'Advisor',
+          line2: 'Org',
+          photo: samplePhoto,
+          hidden: true,
+          order: 12
+        });
+
+        const res = await fetch(`${baseUrl}/api/team-photo/${hiddenId}`);
+        expect(res.status).toBe(404);
+      });
+
+      it('e) Render: AdminView shows "Remove photo" only for members with a photo; confirming calls PATCH with {photo:""}', async () => {
+        const { AdminView } = await import('../src/components/AdminView');
+        const memberWithPhoto = {
+          id: 'team-with-photo-e',
+          name: 'Has Photo Member',
+          title: 'Engineer',
+          photo: 'data:image/webp;base64,UklGRkAAAABXRUJQVlA4IDQAAADwAQCdASoBAAEAAkA4JaQAA3AA/vv+gA==',
+          hidden: false,
+          order: 1
+        };
+        const memberWithoutPhoto = {
+          id: 'team-without-photo-e',
+          name: 'No Photo Member',
+          title: 'Community',
+          photo: null,
+          hidden: false,
+          order: 2
+        };
+
+        let patchCalledWith: any = null;
+        const originalFetch = global.fetch;
+        global.fetch = vi.fn().mockImplementation((url, init) => {
+          if (typeof url === 'string') {
+            if (url.includes('/api/admin/status')) {
+              return Promise.resolve({
+                ok: true,
+                status: 200,
+                json: async () => ({ isAdmin: true, adminName: 'Admin', adminEmail: 'admin@test.com', fallbackEnabled: false })
+              });
+            }
+            if (url.includes('/api/admin/team') && init?.method === 'PATCH') {
+              patchCalledWith = JSON.parse(init.body as string);
+              return Promise.resolve({
+                ok: true,
+                status: 200,
+                json: async () => ({ success: true, member: { ...memberWithPhoto, photo: null } })
+              });
+            }
+            if (url.includes('/api/admin/team') || url.includes('/api/team')) {
+              return Promise.resolve({
+                ok: true,
+                status: 200,
+                json: async () => [memberWithPhoto, memberWithoutPhoto]
+              });
+            }
+            if (url.includes('/api/admin/admins')) {
+              return Promise.resolve({
+                ok: true,
+                status: 200,
+                json: async () => ({ admin_emails: ['admin@test.com'], env_admins: [], stored_admins: [] })
+              });
+            }
+            if (
+              url.includes('/api/admin/overview') ||
+              url.includes('/api/admin/members') ||
+              url.includes('/api/admin/posts') ||
+              url.includes('/api/admin/audit-log') ||
+              url.includes('/api/admin/reports') ||
+              url.includes('/api/admin/events')
+            ) {
+              return Promise.resolve({
+                ok: true,
+                status: 200,
+                json: async () => []
+              });
+            }
+          }
+          return originalFetch(url, init);
+        });
+
+        // Mock window.confirm
+        const originalConfirm = window.confirm;
+        const confirmSpy = vi.fn().mockReturnValue(true);
+        window.confirm = confirmSpy;
+
+        try {
+          await act(async () => {
+            render(
+              React.createElement(AdminView, {
+                onBack: vi.fn(),
+                onRefreshGlobalData: vi.fn(),
+                onToast: vi.fn()
+              })
+            );
+          });
+
+          // Switch to Team tab
+          const teamTabBtn = screen.getByRole('button', { name: /Team/i });
+          await act(async () => {
+            fireEvent.click(teamTabBtn);
+          });
+
+          // Verify "Remove photo" is shown for member with photo
+          const removePhotoBtns = screen.getAllByRole('button', { name: /remove photo/i });
+          expect(removePhotoBtns.length).toBe(1);
+
+          // Click "Remove photo"
+          await act(async () => {
+            fireEvent.click(removePhotoBtns[0]);
+          });
+
+          // Confirm was called with expected prompt
+          expect(confirmSpy).toHaveBeenCalledWith(
+            'Remove the photo for Has Photo Member? Their initials will be shown instead.'
+          );
+
+          // PATCH called with { photo: '' }
+          expect(patchCalledWith).toEqual({ photo: '' });
+        } finally {
+          window.confirm = originalConfirm;
+          global.fetch = originalFetch;
         }
       });
     });

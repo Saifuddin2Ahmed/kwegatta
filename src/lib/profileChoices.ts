@@ -60,3 +60,20 @@ export function normalizeIntent(input: unknown): string | null {
   return valid.join(', ');
 }
 
+export function toggleChoice(list: string[], value: string, max: number): string[] {
+  if (list.includes(value)) {
+    return list.filter(item => item !== value);
+  }
+  if (list.length < max) {
+    return [...list, value];
+  }
+  return [...list.slice(0, max - 1), value];
+}
+
+export function makeFirst(list: string[], value: string): string[] {
+  if (!list.includes(value)) {
+    return [...list];
+  }
+  return [value, ...list.filter(item => item !== value)];
+}
+
