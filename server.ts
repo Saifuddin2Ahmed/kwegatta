@@ -8,7 +8,7 @@ import { initializeApp, getApps, type App } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { getAuth as getAdminAuth, type Auth as AdminAuth } from 'firebase-admin/auth';
 import { ISO_COUNTRIES, deriveLocation } from './src/lib/countries';
-import { ROLE_CHOICES, STAGE_CHOICES, INTENT_CHOICES } from './src/lib/profileChoices';
+import { ROLE_CHOICES, STAGE_CHOICES, INTENT_CHOICES, normalizeIntent } from './src/lib/profileChoices';
 
 export function filterRoles(inputRoles: any, existingRoles: string[] = []): string[] {
   if (!Array.isArray(inputRoles)) return existingRoles;
@@ -3404,7 +3404,8 @@ app.post('/api/admin/import', async (req: Request, res: Response) => {
       }
       const role = roles[0];
       const stage = typeof raw.stage === 'string' && (raw.stage === '' || STAGE_CHOICES.includes(raw.stage.trim())) ? raw.stage.trim() : '';
-      const intent = typeof raw.intent === 'string' && (raw.intent === '' || INTENT_CHOICES.includes(raw.intent.trim())) ? raw.intent.trim() : '';
+      const normalizedIntent = normalizeIntent(raw.intent);
+      const intent = normalizedIntent !== null ? normalizedIntent : '';
 
       const rawCountry = sanitizeText(raw.country, 10).toUpperCase();
       const country = ISO_COUNTRIES.includes(rawCountry) ? rawCountry : '';
@@ -6703,11 +6704,10 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
       stage = existingProfile.stage;
     }
 
-    let intent = '';
-    if (typeof raw.intent === 'string' && (raw.intent === '' || INTENT_CHOICES.includes(raw.intent.trim()))) {
-      intent = raw.intent.trim();
-    } else if (existingProfile?.intent) {
-      intent = existingProfile.intent;
+    let intent = existingProfile?.intent || '';
+    const normalizedIntent = normalizeIntent(raw.intent);
+    if (normalizedIntent !== null) {
+      intent = normalizedIntent;
     }
 
     const id = existingProfile ? existingProfile.id : (requestedId || authUserId || ('user-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex')));
@@ -6975,9 +6975,9 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
       patch.role = newRoles[0];
     }
     if (patch.intent !== undefined) {
-      const rawIntent = typeof patch.intent === 'string' ? patch.intent.trim() : '';
-      if (rawIntent === '' || INTENT_CHOICES.includes(rawIntent)) {
-        patch.intent = rawIntent;
+      const normalizedIntent = normalizeIntent(patch.intent);
+      if (normalizedIntent !== null) {
+        patch.intent = normalizedIntent;
       } else {
         delete patch.intent;
       }

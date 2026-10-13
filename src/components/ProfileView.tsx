@@ -50,7 +50,7 @@ import { generateQrCodeDataUrl, formatWhatsAppUrl, resizeImageFile } from '../ut
 import { Avatar } from './Avatar';
 import { SocialLinksRow } from './SocialLinksRow';
 import { getSortedCountries, deriveLocation } from '../lib/countries';
-import { ROLE_CHOICES, STAGE_CHOICES, INTENT_CHOICES } from '../lib/profileChoices';
+import { ROLE_CHOICES, STAGE_CHOICES, INTENT_CHOICES, parseIntents } from '../lib/profileChoices';
 import { auth, addPasswordToAccount, validatePasswordStrength, formatAuthError } from '../services/firebase';
 import { EmailAuthProvider, linkWithCredential } from 'firebase/auth';
 
@@ -152,11 +152,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     return '';
   });
 
-  const [editIntent, setEditIntent] = useState<string>(() => {
-    if (profile.intent && INTENT_CHOICES.includes(profile.intent)) {
-      return profile.intent;
-    }
-    return '';
+  const [editIntents, setEditIntents] = useState<string[]>(() => {
+    return parseIntents(profile.intent);
   });
 
   useEffect(() => {
@@ -182,7 +179,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       : (profile.role && ROLE_CHOICES.includes(profile.role) ? [profile.role] : ['Developer']);
     setEditRoles(initialRoles.length > 0 ? initialRoles : ['Developer']);
     setEditStage(profile.stage && STAGE_CHOICES.includes(profile.stage) ? profile.stage : '');
-    setEditIntent(profile.intent && INTENT_CHOICES.includes(profile.intent) ? profile.intent : '');
+    setEditIntents(parseIntents(profile.intent));
   }, [profile]);
 
   const handleToggleRole = (r: string) => {
@@ -198,6 +195,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       if (editRoles.length < 2) {
         setEditRoles([...editRoles, r]);
       }
+    }
+  };
+
+  const handleToggleIntent = (intnt: string) => {
+    if (editIntents.includes(intnt)) {
+      setEditIntents(editIntents.filter(i => i !== intnt));
+    } else if (editIntents.length < 3) {
+      setEditIntents([...editIntents, intnt]);
     }
   };
 
@@ -286,7 +291,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         roles: finalRoles,
         role: finalRoles[0],
         stage: editStage,
-        intent: editIntent,
+        intent: editIntents.join(', '),
         headline: editHeadline.slice(0, 100),
         bio: editBio.slice(0, 400),
         country: cleanCountry,
@@ -1332,32 +1337,26 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   </div>
 
                   {/* What brings you here */}
+                  {/* What brings you here */}
                   <div className="space-y-1.5 pt-1">
                     <label className="block text-xs font-semibold text-[var(--fg)]">
-                      What brings you here
+                      What brings you here (up to 3)
                     </label>
                     <div className="flex flex-wrap gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setEditIntent('')}
-                        className={`text-xs px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
-                          editIntent === ''
-                            ? 'bg-[var(--teal-subtle)] border-[var(--teal)] text-[var(--fg)] font-semibold'
-                            : 'bg-[var(--card)] border-[var(--card-border)] text-[var(--fg-muted)] hover:border-[var(--card-border)]'
-                        }`}
-                      >
-                        None
-                      </button>
                       {INTENT_CHOICES.map(intnt => {
-                        const isSelected = editIntent === intnt;
+                        const isSelected = editIntents.includes(intnt);
+                        const isDisabled = !isSelected && editIntents.length >= 3;
                         return (
                           <button
                             type="button"
                             key={intnt}
-                            onClick={() => setEditIntent(intnt)}
+                            onClick={() => handleToggleIntent(intnt)}
+                            disabled={isDisabled}
                             className={`text-xs px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
                               isSelected
                                 ? 'bg-[var(--teal-subtle)] border-[var(--teal)] text-[var(--fg)] font-semibold'
+                                : isDisabled
+                                ? 'opacity-40 cursor-not-allowed bg-[var(--bg-subtle)] border-[var(--card-border)] text-[var(--fg-muted)]'
                                 : 'bg-[var(--card)] border-[var(--card-border)] text-[var(--fg-muted)] hover:border-[var(--card-border)]'
                             }`}
                           >

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { EventsView } from '../src/components/EventsView';
 import { OnboardingChat } from '../src/components/OnboardingChat';
 import { AuthModal } from '../src/components/AuthModal';
@@ -35,6 +35,7 @@ import {
   store
 } from '../server';
 import { validatePasswordStrength } from '../src/services/firebase';
+import { normalizeIntent, parseIntents } from '../src/lib/profileChoices';
 
 let server: any;
 let baseUrl: string;
@@ -260,8 +261,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.5.5
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.5'");
+    // 1. Cache name includes version kwegatta-1.5.6
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.6'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -2146,6 +2147,127 @@ describe('Release 1.5.0 Features', () => {
       expect(updatedProfileState).toBeTruthy();
       expect(updatedProfileState.role).toBe('Developer');
       expect(updatedProfileState.roles[0]).toBe('Developer');
+    });
+
+    describe('Release 1.5.6 Multi-Intent Fixes', () => {
+      it('a) normalizeIntent test cases', () => {
+        expect(normalizeIntent("Find a co-founder, Find a technical partner"))
+          .toBe("Find a co-founder, Find a technical partner");
+        expect(normalizeIntent("Find a co-founder, Hacker"))
+          .toBe("Find a co-founder");
+        expect(normalizeIntent("Hacker"))
+          .toBeNull();
+        expect(normalizeIntent(""))
+          .toBe("");
+        expect(normalizeIntent([]))
+          .toBe("");
+        expect(normalizeIntent("Find a co-founder, Find a technical partner, Find a business partner, Join a project"))
+          .toBe("Find a co-founder, Find a technical partner, Find a business partner");
+      });
+
+      it('b) Server create with multi-intent stored unchanged', async () => {
+        const res = await fetch(`${baseUrl}/api/data/profiles`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer admin'
+          },
+          body: JSON.stringify({
+            id: 'test-user-156-create',
+            name: 'Intent User',
+            intent: 'Find a co-founder, Learn a skill',
+            country: 'UG',
+            city: 'Kampala'
+          })
+        });
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(data.intent).toBe('Find a co-founder, Learn a skill');
+      });
+
+      it('c) Server PATCH intent "xyz" leaves existing intent; PATCH intent "" clears it', async () => {
+        // 1. PATCH with invalid "xyz"
+        const res1 = await fetch(`${baseUrl}/api/data/profiles/test-user-156-create`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer admin'
+          },
+          body: JSON.stringify({
+            intent: 'xyz'
+          })
+        });
+        expect(res1.status).toBe(200);
+        const data1 = await res1.json();
+        expect(data1.intent).toBe('Find a co-founder, Learn a skill');
+
+        // 2. PATCH with ""
+        const res2 = await fetch(`${baseUrl}/api/data/profiles/test-user-156-create`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer admin'
+          },
+          body: JSON.stringify({
+            intent: ''
+          })
+        });
+        expect(res2.status).toBe(200);
+        const data2 = await res2.json();
+        expect(data2.intent).toBe('');
+      });
+
+      it('d) Render: Edit Profile with profile.intent "Find a co-founder, Learn a skill" shows both chips selected; saving sends same string', async () => {
+        const { ProfileView } = await import('../src/components/ProfileView');
+        const testProfile = {
+          id: 'test-user-156-edit',
+          name: 'Multi Intent Member',
+          role: 'Developer',
+          roles: ['Developer'],
+          intent: 'Find a co-founder, Learn a skill',
+          country: 'UG',
+          city: 'Kampala',
+          location: 'Kampala, Uganda'
+        };
+
+        let updatedProfileState: any = null;
+
+        await act(async () => {
+          render(
+            React.createElement(ProfileView, {
+              profile: testProfile as any,
+              currentProfile: testProfile as any,
+              followersCount: 0,
+              followingCount: 0,
+              isFollowing: false,
+              onToggleFollow: vi.fn(),
+              onUpdateProfile: (updated: any) => {
+                updatedProfileState = updated;
+              },
+              onToast: vi.fn()
+            })
+          );
+        });
+
+        // Open Edit Profile
+        const editBtns = screen.getAllByRole('button', { name: /edit profile/i });
+        await act(async () => {
+          fireEvent.click(editBtns[editBtns.length - 1]);
+        });
+
+        // Check chips exist
+        expect(screen.getAllByText('Find a co-founder').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('Learn a skill').length).toBeGreaterThan(0);
+
+        // Save changes
+        const saveBtns = screen.getAllByRole('button', { name: /save changes/i });
+        await act(async () => {
+          fireEvent.click(saveBtns[saveBtns.length - 1]);
+        });
+
+        expect(updatedProfileState).toBeTruthy();
+        expect(updatedProfileState.intent).toBe('Find a co-founder, Learn a skill');
+      });
     });
   });
 });

@@ -4,6 +4,14 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.6] - 2026-10-13
+
+### Fixed (Release 1.5.6)
+- **Fix: intents are multi-select again**: Onboarding and Edit Profile no longer drop intents.
+  - Added `normalizeIntent` and `parseIntents` in `src/lib/profileChoices.ts` to support multi-intent strings.
+  - Updated server validation (`normalizeIntent`) across profile creation/save, restore, and PATCH endpoints so multi-intent profiles are never wiped or lost.
+  - Updated Edit Profile UI in `ProfileView.tsx` to multi-select intent chips (up to 3).
+
 ## [1.5.5] - 2026-10-13
 
 ### Added (Release 1.5.5)
