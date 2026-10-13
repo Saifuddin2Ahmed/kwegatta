@@ -283,6 +283,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         </div>
       )}
 
+      {/* Privacy Policy consent line */}
+      <p className="text-[12px] text-[var(--fg-muted)] text-center leading-normal">
+        By continuing you agree to our{' '}
+        <a
+          href="#/privacy"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[var(--gold-text)] underline hover:opacity-80 font-medium"
+        >
+          Privacy Policy
+        </a>
+        .
+      </p>
+
       {/* PRIMARY BUTTON: Continue with Google (One Tap) */}
       <button
         type="button"

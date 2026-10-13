@@ -983,7 +983,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 )}
                 <div>
                   <p className="font-semibold text-[var(--fg)]">
-                    {detailedItem.format === 'online' ? 'Online' : (detailedItem.location || 'Kampala, Uganda')}
+                    {detailedItem.format === 'online' ? 'Online' : (detailedItem.location || '')}
                   </p>
                   <p className="text-[13px] text-[var(--fg-subtle)] mt-0.5 capitalize">
                     {detailedItem.format ? `${detailedItem.format.replace('_', ' ')} format` : 'In person'}
@@ -1779,7 +1779,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
             Events & Opportunities
           </h1>
           <p className="text-xs text-[var(--fg-muted)] mt-1">
-            Discover Kampala tech meetups, hackathons, grants, and partner calls.
+            Discover tech meetups, hackathons, grants and partner calls.
           </p>
         </div>
 
@@ -1830,7 +1830,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
           </h3>
           <p className="text-xs text-[var(--fg-muted)] max-w-sm mx-auto">
             {activeTab === 'upcoming'
-              ? 'Be the first to organize a meetup or post an opportunity for Kampala builders.'
+              ? 'Be the first to organize a meetup or post an opportunity.'
               : 'Past events will appear here once ended.'}
           </p>
           {activeTab === 'upcoming' && (
@@ -1924,7 +1924,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                           <MapPin className="w-3 h-3 text-[var(--gold-text)]" />
                         )
                       ) : null}
-                      <span>{isEvent ? (item.format === 'online' ? 'Online' : (item.location || 'Kampala')) : 'Opportunity'}</span>
+                      <span>{isEvent ? (item.format === 'online' ? 'Online' : (item.location || '')) : 'Opportunity'}</span>
                     </span>
                   </div>
 
@@ -2024,7 +2024,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
               <div>
                 <h3 className="font-bold text-sm text-[var(--fg)]">Create an Event or Opportunity</h3>
                 <p className="text-xs text-[var(--fg-muted)]">
-                  Published directly to the Kampala community.
+                  Published directly to the community.
                 </p>
               </div>
               <button
@@ -2070,7 +2070,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   type="text"
                   value={formTitle}
                   onChange={e => setFormTitle(e.target.value)}
-                  placeholder="e.g. Flutter Kampala Hackday"
+                  placeholder="e.g. Flutter Hackday"
                   required
                   className="kw-input text-xs"
                 />
@@ -2176,7 +2176,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                         type="text"
                         value={formLocation}
                         onChange={e => setFormLocation(e.target.value)}
-                        placeholder="e.g. Innovation Village, Ntinda, Kampala"
+                        placeholder="e.g. venue name, area, city"
                         required
                         className="kw-input text-xs"
                       />

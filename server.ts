@@ -7,6 +7,9 @@ import { fileURLToPath } from 'url';
 import { initializeApp, getApps, type App } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { getAuth as getAdminAuth, type Auth as AdminAuth } from 'firebase-admin/auth';
+import { ISO_COUNTRIES, deriveLocation } from './src/lib/countries';
+
+export const PRIVACY_VERSION = '2026-10';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -861,7 +864,7 @@ export function sanitizePublicProfile(p: any, callerAuthUid: string | null, isAd
   const isWhatsAppHidden = Boolean(p.hide_whatsapp && !isSelf);
   const canSeeWhatsApp = Boolean(callerAuthUid && !isWhatsAppHidden);
 
-  const { account_uid, email, blocked_ids, ...rest } = p;
+  const { account_uid, email, blocked_ids, privacy_accepted_at, privacy_version, ...rest } = p;
 
   return {
     ...rest,
@@ -2843,6 +2846,8 @@ app.post('/api/ai/ask-kwegatta', askLimiter, async (req: Request, res: Response)
     skills: p.skills || [],
     tags: p.tags || [],
     location: p.location || '',
+    country: p.country || '',
+    city: p.city || '',
     research_area: p.research_area || '',
     institution: p.institution || ''
   }));
@@ -3373,9 +3378,12 @@ app.post('/api/admin/import', async (req: Request, res: Response) => {
       if (!raw || typeof raw !== 'object') continue;
       const id = String(raw.id || '').trim();
       const rawName = String(raw.name || '').trim();
-      if (!id || !rawName) continue;
-
       const role = sanitizeText(raw.role, 50) || (Array.isArray(raw.roles) && raw.roles[0]) || 'Developer';
+      const rawCountry = sanitizeText(raw.country, 10).toUpperCase();
+      const country = ISO_COUNTRIES.includes(rawCountry) ? rawCountry : '';
+      const city = sanitizeText(raw.city, 100);
+      const derivedLoc = deriveLocation(city, country);
+      const location = (country || city) ? derivedLoc : (raw.location ? sanitizeText(raw.location, 100) : '');
 
       const profile = {
         id, // Preserved exact same ID!
@@ -3384,7 +3392,9 @@ app.post('/api/admin/import', async (req: Request, res: Response) => {
         roles: sanitizeArray(raw.roles, 2, 40),
         intent: sanitizeText(raw.intent, 100),
         stage: sanitizeText(raw.stage, 100),
-        location: sanitizeText(raw.location, 100),
+        country,
+        city,
+        location,
         hours_per_week: sanitizeText(raw.hours_per_week, 50),
         headline: sanitizeText(raw.headline, 200),
         bio: sanitizeText(raw.bio, 1000),
@@ -6639,9 +6649,19 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'A valid name (at least 2 characters) is required' });
     }
 
+    const rawCountry = sanitizeText(raw.country, 10).toUpperCase();
+    const country = ISO_COUNTRIES.includes(rawCountry) ? rawCountry : '';
+    const city = sanitizeText(raw.city, 100);
+    const derivedLoc = deriveLocation(city, country);
+    const location = (country || city) ? derivedLoc : (raw.location !== undefined ? sanitizeText(raw.location, 100) : (existingProfile?.location || ''));
+
     const role = sanitizeText(raw.role, 50) || (Array.isArray(raw.roles) && raw.roles[0]) || 'Developer';
     const id = existingProfile ? existingProfile.id : (requestedId || authUserId || ('user-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex')));
     const account_uid = authUserId || existingProfile?.account_uid || null;
+
+    // Record privacy consent server-side (ITEM 2):
+    const privacy_accepted_at = existingProfile?.privacy_accepted_at || new Date().toISOString();
+    const privacy_version = existingProfile?.privacy_version || PRIVACY_VERSION;
 
     const row = {
       id,
@@ -6653,7 +6673,11 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
       intent: sanitizeText(raw.intent, 100),
       intents: sanitizeArray(raw.intents, 5, 100),
       stage: sanitizeText(raw.stage, 100),
-      location: sanitizeText(raw.location, 100),
+      country,
+      city,
+      location,
+      privacy_accepted_at,
+      privacy_version,
       hours_per_week: sanitizeText(raw.hours_per_week, 50),
       headline: sanitizeText(raw.headline, 200),
       bio: sanitizeText(raw.bio, 1000),
@@ -6895,9 +6919,22 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
     if (patch.stage !== undefined) {
       patch.stage = sanitizeText(patch.stage, 100);
     }
-    if (patch.location !== undefined) {
+    if (patch.country !== undefined) {
+      const rawC = sanitizeText(patch.country, 10).toUpperCase();
+      patch.country = ISO_COUNTRIES.includes(rawC) ? rawC : '';
+    }
+    if (patch.city !== undefined) {
+      patch.city = sanitizeText(patch.city, 100);
+    }
+    if (patch.country !== undefined || patch.city !== undefined) {
+      const targetCountry = patch.country !== undefined ? patch.country : (existing?.country || '');
+      const targetCity = patch.city !== undefined ? patch.city : (existing?.city || '');
+      patch.location = deriveLocation(targetCity, targetCountry);
+    } else if (patch.location !== undefined) {
       patch.location = sanitizeText(patch.location, 100);
     }
+    delete patch.privacy_accepted_at;
+    delete patch.privacy_version;
     if (patch.hours_per_week !== undefined) {
       patch.hours_per_week = sanitizeText(patch.hours_per_week, 50);
     }

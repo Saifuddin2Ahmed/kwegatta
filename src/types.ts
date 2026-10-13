@@ -41,6 +41,7 @@ export interface Profile {
   intents?: string[];
   stage?: string;
   location?: string;
+  country?: string;
   city?: string;
   hours_per_week?: string;
   headline: string;

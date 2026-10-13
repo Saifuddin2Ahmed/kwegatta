@@ -22,6 +22,7 @@ import { Avatar } from './Avatar';
 import { auth } from '../services/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { AuthModal } from './AuthModal';
+import { ISO_COUNTRIES, getSortedCountries, guessCountry, deriveLocation } from '../lib/countries';
 
 interface OnboardingChatProps {
   onCompleted: (profile: Profile) => void;
@@ -56,15 +57,6 @@ const STAGE_CHOICES = [
   'I have skills and want to join one'
 ];
 
-const LOCATION_CHOICES = [
-  'Kampala',
-  'Entebbe',
-  'Jinja',
-  'Gulu',
-  'Mbarara',
-  'Remote'
-];
-
 const HOURS_CHOICES = [
   '5-10 hrs/week',
   '10-20 hrs/week',
@@ -95,12 +87,12 @@ const ROLE_BASED_OFFERS: Record<string, string[]> = {
   Business: [
     'Financial modeling & budgets',
     'Market research & customer calls',
-    'B2B sales & partnerships in Kampala',
+    'B2B sales & partnerships',
     'Grant proposals & investor pitching'
   ],
   'Domain expert': [
     'Agricultural supply chain & farmer logistics',
-    'Retail market dynamics in Uganda',
+    'Retail market dynamics',
     'Fintech regulations & payments',
     'Healthcare logistics & clinics'
   ],
@@ -179,7 +171,19 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
   });
 
   const [formData, setFormData] = useState<Partial<Profile>>(() => {
-    return initialDraft?.formData || { roles: [], tags: [], skills: [] };
+    const draft = initialDraft?.formData || {};
+    const country = draft.country || guessCountry();
+    const city = draft.city || '';
+    const location = draft.location || deriveLocation(city, country);
+    return {
+      roles: [],
+      tags: [],
+      skills: [],
+      ...draft,
+      country,
+      city,
+      location
+    };
   });
 
   const [selectedIntents, setSelectedIntents] = useState<string[]>(() => {
@@ -379,9 +383,13 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
     const rolesList = selectedRoles.length ? selectedRoles : (data.roles?.length ? data.roles : [primaryRole]);
     const intentStr = selectedIntents.join(', ') || data.intent || '';
 
+    const finalCountry = data.country || formData.country || '';
+    const finalCity = data.city || formData.city || '';
+    const finalLocation = deriveLocation(finalCity, finalCountry) || data.location || formData.location || '';
+
     const defaultHeadline = data.offers
       ? (data.offers.length > 70 ? data.offers.slice(0, 67) + '...' : data.offers)
-      : `${primaryRole} in ${data.location || 'Kampala'}`;
+      : (finalLocation ? `${primaryRole} in ${finalLocation}` : primaryRole);
 
     const defaultBio = (data.offers || data.needs)
       ? `I offer ${data.offers || 'collaboration'}. I am looking for ${data.needs || 'partners'}.`
@@ -391,7 +399,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
       new Set([
         primaryRole,
         selectedStage || data.stage,
-        data.location || 'Kampala'
+        finalLocation
       ].filter(Boolean) as string[])
     );
 
@@ -404,7 +412,9 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
       roles: rolesList,
       intent: intentStr,
       stage: selectedStage || data.stage || '',
-      location: data.location || 'Kampala, Uganda',
+      country: finalCountry,
+      city: finalCity,
+      location: finalLocation,
       hours_per_week: data.hours_per_week || '',
       headline: defaultHeadline,
       bio: defaultBio,
@@ -626,7 +636,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                 <Check className="w-3.5 h-3.5 text-[var(--gold-text)] flex-shrink-0" />
                 <span className="font-semibold text-[var(--fg)]">Basic Details:</span>
                 <span className="truncate">
-                  {formData.name} · {formData.location || 'Kampala'} ({formData.hours_per_week || 'Flexible'})
+                  {formData.name}{(formData.location || deriveLocation(formData.city, formData.country)) ? ` · ${formData.location || deriveLocation(formData.city, formData.country)}` : ''}{formData.hours_per_week ? ` (${formData.hours_per_week})` : ''}
                 </span>
               </div>
               <button
@@ -939,7 +949,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
               <div className="space-y-4 animate-in fade-in">
                 <div>
                   <h2 className="text-base sm:text-lg font-bold text-[var(--fg)] tracking-tight">
-                    Name, city, and hours per week
+                    Name, location, hours per week
                   </h2>
                   <p className="text-xs text-[var(--fg-muted)] mt-1">
                     Basic details to introduce you to other collaborators.
@@ -960,37 +970,53 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                   />
                 </div>
 
+                {/* Country */}
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-xs font-semibold text-[var(--fg)] block">
+                    Country
+                  </label>
+                  <select
+                    aria-label="Country"
+                    value={formData.country || ''}
+                    onChange={e => {
+                      const country = e.target.value;
+                      setFormData(prev => ({
+                        ...prev,
+                        country,
+                        location: deriveLocation(prev.city, country)
+                      }));
+                    }}
+                    className="w-full bg-[var(--bg-subtle)] border border-[var(--card-border)] focus:border-[var(--gold)] text-xs sm:text-sm text-[var(--fg)] rounded-xl px-3.5 py-2.5 focus:outline-none"
+                  >
+                    <option value="">Select country...</option>
+                    {getSortedCountries().map(c => (
+                      <option key={c.code} value={c.code}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* City */}
                 <div className="space-y-1.5 pt-1">
                   <label className="text-xs font-semibold text-[var(--fg)] block">
-                    City / Location
+                    City
                   </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {LOCATION_CHOICES.map(loc => {
-                      const isSelected = formData.location === loc;
-                      return (
-                        <button
-                          key={loc}
-                          type="button"
-                          onClick={() => setFormData(prev => ({ ...prev, location: loc }))}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
-                            isSelected
-                              ? 'bg-[var(--gold)] text-[#0B1220] border-[var(--gold)] font-bold shadow-xs'
-                              : 'bg-[var(--bg-subtle)] text-[var(--fg)] border-[var(--card-border)] hover:border-[var(--gold)]'
-                          }`}
-                        >
-                          {loc}
-                        </button>
-                      );
-                    })}
-                    <input
-                      type="text"
-                      placeholder="Other location..."
-                      value={!LOCATION_CHOICES.includes(formData.location || '') ? (formData.location || '') : ''}
-                      onChange={e => setFormData(prev => ({ ...prev, location: e.target.value }))}
-                      className="bg-[var(--bg-subtle)] border border-[var(--card-border)] rounded-lg px-2.5 py-1 text-xs text-[var(--fg)] focus:outline-none focus:border-[var(--gold)]"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    placeholder="Your city"
+                    maxLength={100}
+                    value={formData.city || ''}
+                    onChange={e => {
+                      const city = e.target.value;
+                      setFormData(prev => ({
+                        ...prev,
+                        city,
+                        location: deriveLocation(city, prev.country)
+                      }));
+                    }}
+                    className="w-full bg-[var(--bg-subtle)] border border-[var(--card-border)] focus:border-[var(--gold)] text-xs sm:text-sm text-[var(--fg)] rounded-xl px-3.5 py-2.5 focus:outline-none"
+                  />
                 </div>
 
                 {/* Hours */}

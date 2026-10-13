@@ -30,7 +30,7 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({ onBack }) => {
           Your Data, Your Control.
         </h1>
         <p className="text-sm text-[var(--fg-muted)] leading-relaxed max-w-2xl">
-          <strong>Kwegatta</strong> is committed to open contact, transparency, and data minimization, designed to be <strong>Aligned with the Digital Public Goods Standard</strong> (self-assessed independent open-source compliance; does not imply formal third-party certification or endorsement). This document details exactly what data is collected, why, where it is stored, who can see it, and how members retain complete sovereignty over their personal information.
+          <strong>Kwegatta</strong> is committed to open contact, transparency, and data minimization, designed to be <strong>Aligned with the Digital Public Goods Standard</strong> (self-assessed independent open-source compliance; does not imply formal third-party certification or endorsement). This document details exactly what data is collected, why, where it is stored, who can see it, and how members retain complete sovereignty over their personal information. We record the date you accepted this policy when you create your profile.
         </p>
       </div>
 

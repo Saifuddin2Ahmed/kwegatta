@@ -303,7 +303,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
               <div>
                 <span className="font-semibold text-[var(--fg)]">Sign in to ask Kwegatta</span>
                 <p className="text-[13px] text-[var(--fg-muted)]">
-                  Ask in plain sentences to match with collaborators across Kampala and beyond.
+                  Ask in plain sentences to match with collaborators anywhere.
                 </p>
               </div>
             </div>

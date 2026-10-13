@@ -3,6 +3,9 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { EventsView } from '../src/components/EventsView';
+import { OnboardingChat } from '../src/components/OnboardingChat';
+import { AuthModal } from '../src/components/AuthModal';
+import { guessCountry } from '../src/lib/countries';
 import * as apiModule from '../src/services/api';
 import {
   app,
@@ -257,8 +260,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.5.2
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.2'");
+    // 1. Cache name includes version kwegatta-1.5.3
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.3'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -1697,6 +1700,201 @@ describe('Release 1.5.0 Features', () => {
       expect(formatPlural(0)).toBe('Be the first to register.');
       expect(formatPlural(1)).toBe('1 person is going to this event.');
       expect(formatPlural(2)).toBe('2 people are going to this event.');
+    });
+  });
+
+  describe('Release 1.5.3 Features', () => {
+    it('a) guessCountry returns SD for ar-SD, EG for Africa/Cairo timezone, and empty for unknown', () => {
+      const originalNav = global.navigator;
+      const originalIntl = global.Intl;
+
+      // Case 1: navigator.language = 'ar-SD'
+      Object.defineProperty(global, 'navigator', {
+        value: { language: 'ar-SD' },
+        writable: true,
+        configurable: true
+      });
+      expect(guessCountry()).toBe('SD');
+
+      // Case 2: navigator.language = 'en', timezone Africa/Cairo
+      Object.defineProperty(global, 'navigator', {
+        value: { language: 'en' },
+        writable: true,
+        configurable: true
+      });
+      const origDateTimeFormat = Intl.DateTimeFormat;
+      (Intl as any).DateTimeFormat = function() {
+        return {
+          resolvedOptions: () => ({ timeZone: 'Africa/Cairo' })
+        };
+      };
+      expect(guessCountry()).toBe('EG');
+
+      // Case 3: unknown timezone
+      (Intl as any).DateTimeFormat = function() {
+        return {
+          resolvedOptions: () => ({ timeZone: 'Unknown/Zone' })
+        };
+      };
+      expect(guessCountry()).toBe('');
+
+      (Intl as any).DateTimeFormat = origDateTimeFormat;
+      Object.defineProperty(global, 'navigator', {
+        value: originalNav,
+        writable: true,
+        configurable: true
+      });
+    });
+
+    it('b) Server profile sanitize: country XX -> empty, SD kept, location derived in 4 combinations without Kampala default', async () => {
+      // 1. Invalid country 'XX'
+      const res1 = await fetch(`${baseUrl}/api/data/profiles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-c1' },
+        body: JSON.stringify({ name: 'User C1', role: 'Developer', country: 'XX', city: '' })
+      });
+      expect(res1.status).toBe(200);
+      const data1 = await res1.json();
+      expect(data1.country).toBe('');
+      expect(data1.location).toBe('');
+
+      // 2. Both city and country set (Khartoum, SD)
+      const res2 = await fetch(`${baseUrl}/api/data/profiles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-c2' },
+        body: JSON.stringify({ name: 'User C2', role: 'Developer', country: 'SD', city: 'Khartoum' })
+      });
+      expect(res2.status).toBe(200);
+      const data2 = await res2.json();
+      expect(data2.country).toBe('SD');
+      expect(data2.city).toBe('Khartoum');
+      expect(data2.location).toBe('Khartoum, Sudan');
+
+      // 3. City only
+      const res3 = await fetch(`${baseUrl}/api/data/profiles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-c3' },
+        body: JSON.stringify({ name: 'User C3', role: 'Developer', country: '', city: 'Khartoum' })
+      });
+      expect(res3.status).toBe(200);
+      const data3 = await res3.json();
+      expect(data3.country).toBe('');
+      expect(data3.city).toBe('Khartoum');
+      expect(data3.location).toBe('Khartoum');
+
+      // 4. Country only
+      const res4 = await fetch(`${baseUrl}/api/data/profiles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-c4' },
+        body: JSON.stringify({ name: 'User C4', role: 'Developer', country: 'SD', city: '' })
+      });
+      expect(res4.status).toBe(200);
+      const data4 = await res4.json();
+      expect(data4.country).toBe('SD');
+      expect(data4.city).toBe('');
+      expect(data4.location).toBe('Sudan');
+
+      // 5. Neither (both blank) -> no Kampala default
+      const res5 = await fetch(`${baseUrl}/api/data/profiles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-c5' },
+        body: JSON.stringify({ name: 'User C5', role: 'Developer', country: '', city: '' })
+      });
+      expect(res5.status).toBe(200);
+      const data5 = await res5.json();
+      expect(data5.location).toBe('');
+      expect(data5.location).not.toContain('Kampala');
+    });
+
+    it('c) Server: privacy_accepted_at and privacy_version are set on first save, unchanged on second save, ignored from client, absent from public profiles', async () => {
+      // First save (creation) - sending fake client values
+      const res1 = await fetch(`${baseUrl}/api/data/profiles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-privacy-1' },
+        body: JSON.stringify({
+          name: 'Privacy User',
+          role: 'Developer',
+          privacy_accepted_at: '1990-01-01T00:00:00.000Z',
+          privacy_version: 'v0-hacked'
+        })
+      });
+      expect(res1.status).toBe(200);
+      const data1 = await res1.json();
+
+      // Check stored row on server
+      const stored1 = store.profiles.find((p: any) => p.id === data1.id);
+      expect(stored1).toBeTruthy();
+      expect(stored1.privacy_accepted_at).not.toBe('1990-01-01T00:00:00.000Z');
+      expect(stored1.privacy_version).toBe('2026-10');
+      const firstAcceptedAt = stored1.privacy_accepted_at;
+
+      // Second save (update) - sending fake client values
+      const res2 = await fetch(`${baseUrl}/api/data/profiles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-privacy-1' },
+        body: JSON.stringify({
+          name: 'Privacy User Updated',
+          role: 'Developer',
+          privacy_accepted_at: '2030-01-01T00:00:00.000Z',
+          privacy_version: 'v2-hacked'
+        })
+      });
+      expect(res2.status).toBe(200);
+
+      const stored2 = store.profiles.find((p: any) => p.id === data1.id);
+      expect(stored2.privacy_accepted_at).toBe(firstAcceptedAt);
+      expect(stored2.privacy_version).toBe('2026-10');
+
+      // Public profile response check: must be absent from /api/data/profiles
+      const listRes = await fetch(`${baseUrl}/api/data/profiles`);
+      expect(listRes.status).toBe(200);
+      const listData = await listRes.json();
+      const publicTarget = listData.find((p: any) => p.id === data1.id);
+      expect(publicTarget).toBeTruthy();
+      expect(publicTarget.privacy_accepted_at).toBeUndefined();
+      expect(publicTarget.privacy_version).toBeUndefined();
+    });
+
+    it('d) Render test: onboarding location screen has country select and city input without Kampala chips, AuthModal has privacy link', async () => {
+      const { act, render, screen } = await import('@testing-library/react');
+
+      localStorage.setItem('kw_onboarding_answers_v3', JSON.stringify({ screenIndex: 2 }));
+
+      // Render OnboardingChat
+      await act(async () => {
+        render(
+          React.createElement(OnboardingChat, {
+            onCompleted: vi.fn(),
+            onCancel: vi.fn()
+          })
+        );
+      });
+
+      // Kampala, Entebbe, Jinja chips should NOT exist
+      expect(screen.queryByText('Kampala')).toBeNull();
+      expect(screen.queryByText('Entebbe')).toBeNull();
+      expect(screen.queryByText('Jinja')).toBeNull();
+
+      // Country select and City input
+      expect(screen.getByRole('combobox', { name: /country/i })).toBeTruthy();
+      expect(screen.getByPlaceholderText('Your city')).toBeTruthy();
+
+      localStorage.removeItem('kw_onboarding_answers_v3');
+
+      // Render AuthModal
+      await act(async () => {
+        render(
+          React.createElement(AuthModal, {
+            isOpen: true,
+            onClose: vi.fn(),
+            onSuccess: vi.fn()
+          })
+        );
+      });
+
+      const privacyLinks = screen.getAllByRole('link', { name: /privacy policy/i });
+      expect(privacyLinks.length).toBeGreaterThan(0);
+      expect(privacyLinks[0].getAttribute('href')).toContain('#/privacy');
     });
   });
 });

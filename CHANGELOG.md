@@ -4,6 +4,20 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-10-12
+
+### Added & Changed (Release 1.5.3)
+- **Global Onboarding: Country & City Selection**:
+  - Replaced Kampala location choices with global location selection: a searchable sorted country selector covering all ISO 3166-1 alpha-2 codes and a free-text city input.
+  - Implemented automatic country detection (`guessCountry()`) using browser region and timezone fallback.
+  - Removed default 'Kampala' fallbacks across onboarding and events views.
+  - Derived profile location dynamically as "City, Country name".
+- **Privacy Policy Consent Line**:
+  - Added "By continuing you agree to our Privacy Policy." consent link in AuthModal leading directly to `#/privacy`.
+  - Recorded server-side consent metadata (`privacy_accepted_at`, `privacy_version = '2026-10'`) upon initial profile creation/save.
+  - Protected consent fields from public profile endpoints and public lists.
+  - Updated Privacy Policy details in `PrivacyView`.
+
 ## [1.5.2] - 2026-10-10
 
 ### Fixed & Improved (Release 1.5.2)
