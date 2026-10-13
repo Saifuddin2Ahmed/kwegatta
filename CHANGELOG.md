@@ -4,7 +4,15 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.3] - 2026-10-12
+## [1.5.4] - 2026-10-13
+
+### Fixed & Polish (Release 1.5.4)
+- **Edit Profile Country & City**: Added searchable country selector and city text input to profile edit form; prefilling city from legacy location when country/city are empty.
+- **Team Display**: Rendered only photo, name, university (line2), and GitHub link on public team cards in AboutView.
+- **Repository Hygiene**: Deleted `bun.lock`, added CI badge to README, cleaned up team tables in README, TEAM.md, and AUTHORS.
+- **Sitemap & Timezone Fallbacks**: Updated sitemap.xml to clean path URLs for static views and updated default timezone fallback to UTC in EventsView.
+
+## [1.5.3] - 2026-10-13
 
 ### Added & Changed (Release 1.5.3)
 - **Global Onboarding: Country & City Selection**:

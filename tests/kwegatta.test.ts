@@ -260,8 +260,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.5.3
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.3'");
+    // 1. Cache name includes version kwegatta-1.5.4
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.4'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -1895,6 +1895,100 @@ describe('Release 1.5.0 Features', () => {
       const privacyLinks = screen.getAllByRole('link', { name: /privacy policy/i });
       expect(privacyLinks.length).toBeGreaterThan(0);
       expect(privacyLinks[0].getAttribute('href')).toContain('#/privacy');
+    });
+  });
+
+  describe('Release 1.5.4 Polish & Profile Edits', () => {
+    it('a) Render: Edit Profile shows country select + city input; with profile {location:"Kampala"} and no country/city, City is prefilled "Kampala"', async () => {
+      const { act, render, screen, fireEvent } = await import('@testing-library/react');
+      const { ProfileView } = await import('../src/components/ProfileView');
+
+      const testProfile: any = {
+        id: 'test-user-edit-1',
+        name: 'Kampala Member',
+        role: 'Developer',
+        location: 'Kampala'
+      };
+
+      let containerNode: HTMLElement;
+      await act(async () => {
+        const res = render(
+          React.createElement(ProfileView, {
+            profile: testProfile,
+            currentProfile: testProfile,
+            followersCount: 0,
+            followingCount: 0,
+            isFollowing: false,
+            onToggleFollow: vi.fn(),
+            onUpdateProfile: vi.fn(),
+            onToast: vi.fn()
+          })
+        );
+        containerNode = res.container;
+      });
+
+      const editBtn = screen.getByRole('button', { name: /edit profile/i });
+      await act(async () => {
+        fireEvent.click(editBtn);
+      });
+
+      const countrySelect = containerNode!.querySelector('#edit-profile-country') as HTMLSelectElement;
+      const cityInput = containerNode!.querySelector('#edit-profile-city') as HTMLInputElement;
+
+      expect(countrySelect).toBeTruthy();
+      expect(cityInput).toBeTruthy();
+      expect(cityInput.value).toBe('Kampala');
+    });
+
+    it('b) Render: About team card does NOT contain the text of member.title or member.line1, and DOES contain name and line2', async () => {
+      const { act, render, screen } = await import('@testing-library/react');
+      const { AboutView } = await import('../src/components/AboutView');
+
+      await act(async () => {
+        render(
+          React.createElement(AboutView, {
+            onNavigateHome: vi.fn()
+          })
+        );
+      });
+
+      expect(screen.getByText('Saifuddin Ahmed')).toBeTruthy();
+      expect(screen.getByText('Future Stars Center for Development and Capacity Building')).toBeTruthy();
+
+      expect(screen.queryByText('Team lead and engineering')).toBeNull();
+      expect(screen.queryByText('Software and AI Engineer • Systems Architect')).toBeNull();
+    });
+
+    it('c) Server: PATCH with {country:"UG", city:"Kampala"} → location "Kampala, Uganda"; {country:"ZZ"} → country ""', async () => {
+      const postRes = await fetch(`${baseUrl}/api/data/profiles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-patch-1' },
+        body: JSON.stringify({ name: 'Patch User', role: 'Developer' })
+      });
+      expect(postRes.status).toBe(200);
+      const user = await postRes.json();
+
+      const patchRes1 = await fetch(`${baseUrl}/api/data/profiles/${user.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-patch-1' },
+        body: JSON.stringify({ country: 'UG', city: 'Kampala' })
+      });
+      expect(patchRes1.status).toBe(200);
+      const data1 = await patchRes1.json();
+      expect(data1.country).toBe('UG');
+      expect(data1.city).toBe('Kampala');
+      expect(data1.location).toBe('Kampala, Uganda');
+
+      const patchRes2 = await fetch(`${baseUrl}/api/data/profiles/${user.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-patch-1' },
+        body: JSON.stringify({ country: 'ZZ', city: 'Entebbe' })
+      });
+      expect(patchRes2.status).toBe(200);
+      const data2 = await patchRes2.json();
+      expect(data2.country).toBe('');
+      expect(data2.city).toBe('Entebbe');
+      expect(data2.location).toBe('Entebbe');
     });
   });
 });

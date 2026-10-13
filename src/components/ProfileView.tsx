@@ -49,6 +49,7 @@ import {
 import { generateQrCodeDataUrl, formatWhatsAppUrl, resizeImageFile } from '../utils';
 import { Avatar } from './Avatar';
 import { SocialLinksRow } from './SocialLinksRow';
+import { getSortedCountries, deriveLocation } from '../lib/countries';
 import { auth, addPasswordToAccount, validatePasswordStrength, formatAuthError } from '../services/firebase';
 import { EmailAuthProvider, linkWithCredential } from 'firebase/auth';
 
@@ -125,6 +126,32 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [editStatus, setEditStatus] = useState(profile.status || 'Open to projects');
   const [editWhatsApp, setEditWhatsApp] = useState(profile.whatsapp || '');
   const [editHideWhatsApp, setEditHideWhatsApp] = useState(profile.hide_whatsapp || false);
+  const [editCountry, setEditCountry] = useState(profile.country || '');
+  const [editCity, setEditCity] = useState(() => {
+    if (profile.city) return profile.city;
+    if (!profile.country && profile.location) return profile.location;
+    return '';
+  });
+
+  useEffect(() => {
+    setEditHeadline(profile.headline || '');
+    setEditBio(profile.bio || '');
+    setEditOffers(profile.offers || '');
+    setEditNeeds(profile.needs || '');
+    setEditTeaches(profile.teaches || '');
+    setEditLearns(profile.learns || '');
+    setEditStatus(profile.status || 'Open to projects');
+    setEditWhatsApp(profile.whatsapp || '');
+    setEditHideWhatsApp(profile.hide_whatsapp || false);
+    setEditCountry(profile.country || '');
+    setEditCity(
+      profile.city
+        ? profile.city
+        : (!profile.country && profile.location)
+        ? profile.location
+        : ''
+    );
+  }, [profile]);
 
   // Social & Academic links edit state
   const [editLinkedin, setEditLinkedin] = useState(profile.linkedin || '');
@@ -200,10 +227,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   const handleSaveProfile = async () => {
     try {
+      const cleanCity = editCity.trim().slice(0, 100);
+      const cleanCountry = editCountry;
+      const derivedLoc = deriveLocation(cleanCity, cleanCountry);
+
       const updated: Profile = {
         ...profile,
         headline: editHeadline.slice(0, 100),
         bio: editBio.slice(0, 400),
+        country: cleanCountry,
+        city: cleanCity,
+        location: derivedLoc,
         offers: editOffers.slice(0, 400),
         needs: editNeeds.slice(0, 400),
         teaches: editTeaches.slice(0, 400),
@@ -233,8 +267,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           .slice(0, 3)
       };
 
-      await db.update('profiles', profile.id, updated);
-      onUpdateProfile(updated);
+      const res = await db.update('profiles', profile.id, updated);
+      const savedProfile = {
+        ...updated,
+        ...(res && typeof res === 'object' ? res : {})
+      };
+      onUpdateProfile(savedProfile);
       setIsEditing(false);
       onToast('Profile updated successfully');
     } catch (err) {
@@ -646,6 +684,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               {profile.github && (
                 <div className="text-[13px] text-[var(--muted)] font-normal mt-0.5">@{profile.github}</div>
               )}
+              {(profile.location || deriveLocation(profile.city, profile.country)) ? (
+                <div className="flex items-center gap-1 text-[13px] text-[var(--muted)] mt-1 justify-center md:justify-start">
+                  <MapPin className="w-3.5 h-3.5 flex-shrink-0 text-[var(--muted)]" />
+                  <span>{profile.location || deriveLocation(profile.city, profile.country)}</span>
+                </div>
+              ) : null}
               <div className="flex flex-wrap gap-1.5 mt-2 justify-center md:justify-start">
                 <span className="primer-label primer-label-blue text-[13px]">{profile.role}</span>
                 {profile.status && (
@@ -1147,6 +1191,41 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </h3>
 
               <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label htmlFor="edit-profile-country" className="block text-xs font-semibold text-[var(--fg)] mb-1">
+                      Country
+                    </label>
+                    <select
+                      id="edit-profile-country"
+                      value={editCountry}
+                      onChange={e => setEditCountry(e.target.value)}
+                      className="primer-select text-xs w-full bg-[var(--bg-subtle)] border border-[var(--card-border)] rounded-xl px-3 py-2 text-[var(--fg)] focus:outline-none focus:border-[var(--gold)]"
+                    >
+                      <option value="">Select country...</option>
+                      {getSortedCountries().map(c => (
+                        <option key={c.code} value={c.code}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="edit-profile-city" className="block text-xs font-semibold text-[var(--fg)] mb-1">
+                      City
+                    </label>
+                    <input
+                      id="edit-profile-city"
+                      type="text"
+                      placeholder="Your city"
+                      value={editCity}
+                      onChange={e => setEditCity(e.target.value)}
+                      className="primer-input text-xs w-full"
+                      maxLength={100}
+                    />
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-[var(--fg)] mb-1">
                     Headline (max 8 words)

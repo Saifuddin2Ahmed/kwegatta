@@ -1,5 +1,6 @@
 # Kwegatta 🤝
 
+[![CI](https://github.com/Saifuddin2Ahmed/kwegatta/actions/workflows/ci.yml/badge.svg)](https://github.com/Saifuddin2Ahmed/kwegatta/actions/workflows/ci.yml)
 [![Hacktoberfest 2026](https://img.shields.io/badge/Hacktoberfest-2026-ff7a00.svg?style=flat-square&logo=hacktoberfest)](https://hacktoberfest.com/)
 [![Award: 1st Place Hack Day Kampala](https://img.shields.io/badge/Award-1st_Place_·_Hack_Day_Kampala-ffd700.svg?style=flat-square&logo=trophy)](https://github.com/Saifuddin2Ahmed/kwegatta)
 [![Entry: Best Open-Source AI Project](https://img.shields.io/badge/Entry-Best_Open--Source_AI_Project-238636.svg?style=flat-square)](https://www.mlh.com/opensource-ai)
@@ -89,15 +90,15 @@ Traditional networking fails because:
 
 The team behind Kwegatta:
 
-| Name | Affiliation | Background | Role in Kwegatta | GitHub |
-| ---- | ----------- | ---------- | ---------------- | ------ |
-| **Saifuddin Ahmed** | Future Stars Center for Development and Capacity Building | Software and AI Engineer • Systems Architect | Team lead and engineering | [@Saifuddin2Ahmed](https://github.com/Saifuddin2Ahmed) |
-| **Abubaker Mohamed Adam** | Sub-Saharan College | NGO volunteer | Community and NGO partnerships | [@abubakermohammed092077-bit](https://github.com/abubakermohammed092077-bit) |
-| **Adinan Juuko** | Victoria University | Software Engineering | Testing and quality | [@Aditech-191](https://github.com/Aditech-191) |
-| **Amme Patience Esther** | Makerere University Business School | Bachelor of Marketing | Marketing and communications | none yet |
-| **Mupole Uwizeye Alexis** | Bugema University | Business Computing | Product and data | [@Alexis-Mupole](https://github.com/Alexis-Mupole) |
-| **Nabagulanyi Prossy Sherry** | Makerere University Business School | Student | User research and outreach | none yet |
-| **Ojambo Emmanuel** | Makerere University Business School | Accounting | Business model and sustainability | none yet |
+| Name | University | GitHub |
+| ---- | ---------- | ------ |
+| Saifuddin Ahmed | Al Neelain University | @Saifuddin2Ahmed |
+| Abubaker Mohamed Adam | Sub-Saharan College | @abubakermohammed092077-bit |
+| Adinan Juuko | Victoria University | @Aditech-191 |
+| Amme Patience Esther | Makerere University Business School | — |
+| Mupole Uwizeye Alexis | Bugema University | @Alexis-Mupole |
+| Nabagulanyi Prossy Sherry | Makerere University Business School | — |
+| Ojambo Emmanuel | Makerere University Business School | — |
 
 ---
 

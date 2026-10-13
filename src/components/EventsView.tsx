@@ -183,9 +183,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [formEndTime, setFormEndTime] = useState('');
   const [formTimezone, setFormTimezone] = useState(() => {
     try {
-      return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Africa/Kampala';
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     } catch {
-      return 'Africa/Kampala';
+      return 'UTC';
     }
   });
   const [formCoverImage, setFormCoverImage] = useState('');
@@ -389,9 +389,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
     setFormEndDate('');
     setFormEndTime('');
     try {
-      setFormTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'Africa/Kampala');
+      setFormTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
     } catch {
-      setFormTimezone('Africa/Kampala');
+      setFormTimezone('UTC');
     }
     setFormCoverImage('');
     setFormRegLink('');

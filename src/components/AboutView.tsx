@@ -327,7 +327,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
               The Team
             </h2>
             <p className="text-xs sm:text-sm text-[var(--fg-muted)] mt-1">
-              Founders, creators, researchers, and community organizers from Kampala, Uganda.
+              The people who built Kwegatta at Hack Day Kampala x MUBS.
             </p>
           </div>
         </div>
@@ -362,8 +362,6 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           {team.map((member) => {
             const photoUrl = member.photo || member.linked_avatar || (member.linked_profile_id ? `/api/avatar/${member.linked_profile_id}` : null);
-            const title = member.title || (member as any).role || '';
-            const line1 = member.line1 || (member as any).background || '';
             const line2 = member.line2 || (member as any).affiliation || '';
 
             return (
@@ -400,7 +398,6 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
                             {member.name}
                           </h4>
                         )}
-                        <p className="text-xs text-[var(--teal-text)] font-medium">{title}</p>
                       </div>
                     </div>
 
@@ -416,25 +413,8 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
                           <Github className="w-4 h-4" />
                         </a>
                       )}
-                      {member.linkedin && (
-                        <a
-                          href={member.linkedin.startsWith('http') ? member.linkedin : `https://linkedin.com/in/${member.linkedin}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[var(--fg-subtle)] hover:text-[var(--gold-text)] p-1 transition-colors"
-                          aria-label={`${member.name} on LinkedIn`}
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                        </a>
-                      )}
                     </div>
                   </div>
-
-                  {line1 && (
-                    <p className="text-xs text-[var(--fg-muted)] leading-relaxed">
-                      {line1}
-                    </p>
-                  )}
                 </div>
 
                 {line2 && (
