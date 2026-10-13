@@ -4,6 +4,15 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.8] - 2026-10-13
+
+### Fixed (Release 1.5.8)
+- **Fix: profile photo now appears on the downloaded share card**:
+  - Updated `ShareCardModal.tsx` `avatarSrc` helper to support same-origin paths (`/api/avatar/...`).
+  - Added 5-second timeout for image loading with initial letter fallback.
+  - Implemented aspect-ratio cover cropping inside the avatar circle.
+  - Added automatic fallback and redraw if drawing taints the canvas and `toDataURL` throws.
+
 ## [1.5.7] - 2026-10-13
 
 ### Fixed (Release 1.5.7)

@@ -1,5 +1,5 @@
 // Kwegatta PWA Service Worker
-const CACHE_NAME = 'kwegatta-1.5.7';
+const CACHE_NAME = 'kwegatta-1.5.8';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',

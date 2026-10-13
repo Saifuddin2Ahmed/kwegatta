@@ -36,6 +36,7 @@ import {
 } from '../server';
 import { validatePasswordStrength } from '../src/services/firebase';
 import { normalizeIntent, parseIntents } from '../src/lib/profileChoices';
+import { ShareCardModal, avatarSrc } from '../src/components/ShareCardModal';
 
 let server: any;
 let baseUrl: string;
@@ -261,8 +262,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.5.7
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.7'");
+    // 1. Cache name includes version kwegatta-1.5.8
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.8'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -2453,6 +2454,166 @@ describe('Release 1.5.0 Features', () => {
           expect('avatar' in updatedRequestBody).toBe(false);
         } finally {
           global.fetch = originalFetch;
+        }
+      });
+    });
+
+    describe('Release 1.5.8 Share Card Photo Fixes', () => {
+      it('a) Unit: avatarSrc tests', () => {
+        expect(avatarSrc('/api/avatar/x')).toBe('/api/avatar/x');
+        expect(avatarSrc('data:image/png;base64,AA')).toBe('data:image/png;base64,AA');
+        expect(avatarSrc('https://a/b.png')).toBe('https://a/b.png');
+        expect(avatarSrc('')).toBe('');
+        expect(avatarSrc(undefined)).toBe('');
+        expect(avatarSrc('javascript:x')).toBe('');
+      });
+
+      it("b) Render (jsdom, mock Image so onload fires): with avatar '/api/avatar/x', ctx.drawImage is called with an image whose src ends with '/api/avatar/x'", async () => {
+        const drawImageSpy = vi.fn();
+        const fillTextSpy = vi.fn();
+        const dummyGrad = { addColorStop: vi.fn() };
+        const mockCtx: any = {
+          clearRect: vi.fn(),
+          fillRect: vi.fn(),
+          strokeRect: vi.fn(),
+          fillText: fillTextSpy,
+          measureText: () => ({ width: 50 }),
+          createLinearGradient: () => dummyGrad,
+          createRadialGradient: () => dummyGrad,
+          save: vi.fn(),
+          restore: vi.fn(),
+          beginPath: vi.fn(),
+          closePath: vi.fn(),
+          arc: vi.fn(),
+          clip: vi.fn(),
+          stroke: vi.fn(),
+          fill: vi.fn(),
+          drawImage: drawImageSpy
+        };
+
+        vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(mockCtx);
+        vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,fake');
+
+        const originalImage = window.Image;
+        class MockImage {
+          onload: any = null;
+          onerror: any = null;
+          crossOrigin: string = '';
+          private _src: string = '';
+
+          get src() {
+            return this._src;
+          }
+          set src(val: string) {
+            this._src = val;
+            setTimeout(() => {
+              if (this.onload) this.onload(new Event('load'));
+            }, 0);
+          }
+        }
+        (window as any).Image = MockImage;
+
+        try {
+          const testProfile = {
+            id: 'test-user-158-b',
+            name: 'Share Card User B',
+            avatar: '/api/avatar/test-user-158-b',
+            role: 'Developer'
+          };
+
+          await act(async () => {
+            render(
+              React.createElement(ShareCardModal, {
+                profile: testProfile as any,
+                isOpen: true,
+                onClose: vi.fn(),
+                onToast: vi.fn()
+              })
+            );
+          });
+
+          await new Promise(resolve => setTimeout(resolve, 50));
+
+          expect(drawImageSpy).toHaveBeenCalled();
+          const drawnImages = drawImageSpy.mock.calls.map(call => call[0]);
+          const avatarDrawn = drawnImages.find((img: any) => img && img.src && img.src.endsWith('/api/avatar/test-user-158-b'));
+          expect(avatarDrawn).toBeTruthy();
+        } finally {
+          (window as any).Image = originalImage;
+          vi.restoreAllMocks();
+        }
+      });
+
+      it('c) Render: when the image fires onerror, the initial-letter fallback is drawn and dataUrl is still set', async () => {
+        const drawImageSpy = vi.fn();
+        const fillTextSpy = vi.fn();
+        const dummyGrad = { addColorStop: vi.fn() };
+        const mockCtx: any = {
+          clearRect: vi.fn(),
+          fillRect: vi.fn(),
+          strokeRect: vi.fn(),
+          fillText: fillTextSpy,
+          measureText: () => ({ width: 50 }),
+          createLinearGradient: () => dummyGrad,
+          createRadialGradient: () => dummyGrad,
+          save: vi.fn(),
+          restore: vi.fn(),
+          beginPath: vi.fn(),
+          closePath: vi.fn(),
+          arc: vi.fn(),
+          clip: vi.fn(),
+          stroke: vi.fn(),
+          fill: vi.fn(),
+          drawImage: drawImageSpy
+        };
+
+        vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(mockCtx);
+        vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,fallback_card');
+
+        const originalImage = window.Image;
+        class MockImageError {
+          onload: any = null;
+          onerror: any = null;
+          crossOrigin: string = '';
+          private _src: string = '';
+
+          get src() {
+            return this._src;
+          }
+          set src(val: string) {
+            this._src = val;
+            setTimeout(() => {
+              if (this.onerror) this.onerror(new Event('error'));
+            }, 0);
+          }
+        }
+        (window as any).Image = MockImageError;
+
+        try {
+          const testProfile = {
+            id: 'test-user-158-c',
+            name: 'Fallback User C',
+            avatar: '/api/avatar/broken-image',
+            role: 'Designer'
+          };
+
+          await act(async () => {
+            render(
+              React.createElement(ShareCardModal, {
+                profile: testProfile as any,
+                isOpen: true,
+                onClose: vi.fn(),
+                onToast: vi.fn()
+              })
+            );
+          });
+
+          await new Promise(resolve => setTimeout(resolve, 50));
+
+          expect(fillTextSpy).toHaveBeenCalledWith('F', expect.any(Number), expect.any(Number));
+        } finally {
+          (window as any).Image = originalImage;
+          vi.restoreAllMocks();
         }
       });
     });

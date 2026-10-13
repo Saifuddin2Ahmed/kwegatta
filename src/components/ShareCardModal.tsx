@@ -10,6 +10,9 @@ interface ShareCardModalProps {
   onToast: (msg: string) => void;
 }
 
+export const avatarSrc = (a?: string): string =>
+  !a ? '' : (a.startsWith('data:') || a.startsWith('http') || a.startsWith('/')) ? a : '';
+
 export const ShareCardModal: React.FC<ShareCardModalProps> = ({
   profile,
   isOpen,
@@ -36,155 +39,47 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({
       canvas.width = width;
       canvas.height = height;
 
-      // 1. Background (Obsidian deep dark gradient)
-      const bgGrad = ctx.createLinearGradient(0, 0, width, height);
-      bgGrad.addColorStop(0, '#090D16');
-      bgGrad.addColorStop(0.5, '#0E1424');
-      bgGrad.addColorStop(1, '#080B12');
-      ctx.fillStyle = bgGrad;
-      ctx.fillRect(0, 0, width, height);
+      // 1. Pre-load avatar image if valid avatarSrc
+      const src = avatarSrc(profile.avatar);
+      let loadedImg: HTMLImageElement | null = null;
 
-      // Gold Glow in top-right
-      const glowGrad = ctx.createRadialGradient(900, 150, 20, 900, 150, 450);
-      glowGrad.addColorStop(0, 'rgba(245, 183, 0, 0.18)');
-      glowGrad.addColorStop(1, 'rgba(245, 183, 0, 0)');
-      ctx.fillStyle = glowGrad;
-      ctx.fillRect(0, 0, width, height);
-
-      // Decorative border
-      ctx.strokeStyle = 'rgba(245, 183, 0, 0.3)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(24, 24, width - 48, height - 48);
-
-      // 2. Kwegatta Brand Header
-      ctx.fillStyle = '#F5B700';
-      ctx.font = 'bold 28px "Space Grotesk", sans-serif';
-      ctx.fillText('KWEGATTA', 64, 80);
-
-      ctx.fillStyle = 'rgba(240, 243, 246, 0.6)';
-      ctx.font = '16px "Inter", sans-serif';
-      ctx.fillText('1st place · Hacktoberfest 2026 Hack Day Kampala', 230, 80);
-
-      // 3. Member Avatar
-      const avatarSize = 150;
-      const avatarX = 64;
-      const avatarY = 130;
-
-      // Draw Avatar Photo or Fallback Initial
-      if (profile.avatar && (profile.avatar.startsWith('data:') || profile.avatar.startsWith('http'))) {
+      if (src) {
         try {
           const img = new Image();
           img.crossOrigin = 'anonymous';
-          img.src = profile.avatar;
-          await new Promise((resolve) => {
-            img.onload = resolve;
-            img.onerror = resolve;
+          img.src = src;
+          const loaded = await new Promise<boolean>((resolve) => {
+            let settled = false;
+            const timer = setTimeout(() => {
+              if (!settled) {
+                settled = true;
+                resolve(false);
+              }
+            }, 5000);
+            img.onload = () => {
+              if (!settled) {
+                settled = true;
+                clearTimeout(timer);
+                resolve(true);
+              }
+            };
+            img.onerror = () => {
+              if (!settled) {
+                settled = true;
+                clearTimeout(timer);
+                resolve(false);
+              }
+            };
           });
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
-          ctx.closePath();
-          ctx.clip();
-          ctx.drawImage(img, avatarX, avatarY, avatarSize, avatarSize);
-          ctx.restore();
+          if (loaded) {
+            loadedImg = img;
+          }
         } catch (_) {
-          // fallback circle
-          ctx.fillStyle = '#1D2433';
-          ctx.beginPath();
-          ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
-          ctx.fill();
+          loadedImg = null;
         }
-      } else {
-        ctx.fillStyle = '#1E293B';
-        ctx.beginPath();
-        ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#F5B700';
-        ctx.font = 'bold 64px "Space Grotesk", sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        const initial = (profile.name || 'K').charAt(0).toUpperCase();
-        ctx.fillText(initial, avatarX + avatarSize / 2, avatarY + avatarSize / 2);
-        ctx.textAlign = 'start';
-        ctx.textBaseline = 'alphabetic';
       }
 
-      // Avatar gold ring
-      ctx.strokeStyle = '#F5B700';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2 + 2, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // 4. Member Info (Name, Role, Location)
-      const textX = avatarX + avatarSize + 36;
-      ctx.fillStyle = '#F0F3F6';
-      ctx.font = 'bold 44px "Space Grotesk", sans-serif';
-      ctx.fillText(profile.name, textX, 175);
-
-      // Role Pill
-      const roleText = (profile.roles && profile.roles.length ? profile.roles.join(' · ') : profile.role) || 'Member';
-      ctx.font = 'bold 18px "Inter", sans-serif';
-      const roleWidth = ctx.measureText(roleText).width + 24;
-      ctx.fillStyle = 'rgba(245, 183, 0, 0.15)';
-      ctx.fillRect(textX, 200, roleWidth, 34);
-      ctx.strokeStyle = '#F5B700';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(textX, 200, roleWidth, 34);
-      ctx.fillStyle = '#F5B700';
-      ctx.fillText(roleText, textX + 12, 224);
-
-      if (profile.location) {
-        ctx.fillStyle = '#8B949E';
-        ctx.font = '16px "Inter", sans-serif';
-        ctx.fillText(`📍 ${profile.location}`, textX + roleWidth + 18, 223);
-      }
-
-      // 5. Headline & Bio
-      ctx.fillStyle = '#E2E8F0';
-      ctx.font = '22px "Inter", sans-serif';
-      const headline = profile.headline || profile.bio || (profile.offers ? `Offers: ${profile.offers}` : 'Collaborator on Kwegatta');
-      const truncatedHeadline = headline.length > 80 ? headline.slice(0, 77) + '...' : headline;
-      ctx.fillText(truncatedHeadline, 64, 340);
-
-      // Offers / Needs Summary
-      if (profile.offers) {
-        ctx.fillStyle = '#F5B700';
-        ctx.font = 'bold 16px "Inter", sans-serif';
-        ctx.fillText('OFFERS:', 64, 385);
-        ctx.fillStyle = '#94A3B8';
-        ctx.font = '16px "Inter", sans-serif';
-        const offText = profile.offers.length > 70 ? profile.offers.slice(0, 67) + '...' : profile.offers;
-        ctx.fillText(offText, 145, 385);
-      }
-
-      if (profile.needs) {
-        ctx.fillStyle = '#38BDF8';
-        ctx.font = 'bold 16px "Inter", sans-serif';
-        ctx.fillText('NEEDS:', 64, 420);
-        ctx.fillStyle = '#94A3B8';
-        ctx.font = '16px "Inter", sans-serif';
-        const needText = profile.needs.length > 70 ? profile.needs.slice(0, 67) + '...' : profile.needs;
-        ctx.fillText(needText, 135, 420);
-      }
-
-      // 6. Tags Pills
-      const tags = (profile.tags || []).slice(0, 4);
-      let tagX = 64;
-      for (const tag of tags) {
-        ctx.font = '14px "Inter", sans-serif';
-        const tagW = ctx.measureText(`#${tag}`).width + 20;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-        ctx.fillRect(tagX, 465, tagW, 28);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(tagX, 465, tagW, 28);
-        ctx.fillStyle = '#E2E8F0';
-        ctx.fillText(`#${tag}`, tagX + 10, 484);
-        tagX += tagW + 10;
-      }
-
-      // 7. QR Code (Right Side)
+      // Pre-load QR Code
       const qrSize = 170;
       const qrX = width - qrSize - 64;
       const qrY = height - qrSize - 64;
@@ -192,31 +87,220 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({
       const profileUrl = `https://kwegatta.ai.studio/#/u/${profile.id}`;
       const qrData = await generateQrCodeDataUrl(profileUrl, 240);
 
-      const qrImg = new Image();
-      qrImg.src = qrData;
-      await new Promise((resolve) => {
-        qrImg.onload = resolve;
-        qrImg.onerror = resolve;
-      });
+      let qrImg: HTMLImageElement | null = null;
+      try {
+        const qImg = new Image();
+        qImg.src = qrData;
+        await new Promise((resolve) => {
+          qImg.onload = resolve;
+          qImg.onerror = resolve;
+        });
+        qrImg = qImg;
+      } catch (_) {
+        qrImg = null;
+      }
 
-      // White background card for QR Code
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillRect(qrX - 12, qrY - 12, qrSize + 24, qrSize + 24);
-      ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+      const drawCard = (allowPhoto: boolean) => {
+        if (ctx.clearRect) ctx.clearRect(0, 0, width, height);
 
-      ctx.fillStyle = '#F0F3F6';
-      ctx.font = 'bold 14px "Space Grotesk", sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('Scan to Connect', qrX + qrSize / 2, qrY + qrSize + 28);
-      ctx.textAlign = 'start';
+        // Background (Obsidian deep dark gradient)
+        const bgGrad = ctx.createLinearGradient(0, 0, width, height);
+        bgGrad.addColorStop(0, '#090D16');
+        bgGrad.addColorStop(0.5, '#0E1424');
+        bgGrad.addColorStop(1, '#080B12');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, width, height);
 
-      // Footer notice
-      ctx.fillStyle = 'rgba(240, 243, 246, 0.4)';
-      ctx.font = '13px "Inter", sans-serif';
-      ctx.fillText('kwegatta.ai.studio · Kampala, Uganda · 1st place · Hacktoberfest 2026 Hack Day Kampala', 64, height - 48);
+        // Gold Glow in top-right
+        const glowGrad = ctx.createRadialGradient(900, 150, 20, 900, 150, 450);
+        glowGrad.addColorStop(0, 'rgba(245, 183, 0, 0.18)');
+        glowGrad.addColorStop(1, 'rgba(245, 183, 0, 0)');
+        ctx.fillStyle = glowGrad;
+        ctx.fillRect(0, 0, width, height);
+
+        // Decorative border
+        ctx.strokeStyle = 'rgba(245, 183, 0, 0.3)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(24, 24, width - 48, height - 48);
+
+        // Brand Header
+        ctx.fillStyle = '#F5B700';
+        ctx.font = 'bold 28px "Space Grotesk", sans-serif';
+        ctx.fillText('KWEGATTA', 64, 80);
+
+        ctx.fillStyle = 'rgba(240, 243, 246, 0.6)';
+        ctx.font = '16px "Inter", sans-serif';
+        ctx.fillText('1st place · Hacktoberfest 2026 Hack Day Kampala', 230, 80);
+
+        // Member Avatar
+        const avatarSize = 150;
+        const avatarX = 64;
+        const avatarY = 130;
+
+        if (allowPhoto && loadedImg) {
+          try {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
+            ctx.closePath();
+            ctx.clip();
+
+            const imgW = loadedImg.naturalWidth || loadedImg.width || avatarSize;
+            const imgH = loadedImg.naturalHeight || loadedImg.height || avatarSize;
+            let sx = 0, sy = 0, sWidth = imgW, sHeight = imgH;
+            if (imgW > imgH) {
+              sWidth = imgH;
+              sHeight = imgH;
+              sx = (imgW - imgH) / 2;
+              sy = 0;
+            } else {
+              sWidth = imgW;
+              sHeight = imgW;
+              sx = 0;
+              sy = (imgH - imgW) / 2;
+            }
+
+            ctx.drawImage(loadedImg, sx, sy, sWidth, sHeight, avatarX, avatarY, avatarSize, avatarSize);
+            ctx.restore();
+          } catch (_) {
+            ctx.fillStyle = '#1E293B';
+            ctx.beginPath();
+            ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#F5B700';
+            ctx.font = 'bold 64px "Space Grotesk", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const initial = (profile.name || 'K').charAt(0).toUpperCase();
+            ctx.fillText(initial, avatarX + avatarSize / 2, avatarY + avatarSize / 2);
+            ctx.textAlign = 'start';
+            ctx.textBaseline = 'alphabetic';
+          }
+        } else {
+          ctx.fillStyle = '#1E293B';
+          ctx.beginPath();
+          ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#F5B700';
+          ctx.font = 'bold 64px "Space Grotesk", sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const initial = (profile.name || 'K').charAt(0).toUpperCase();
+          ctx.fillText(initial, avatarX + avatarSize / 2, avatarY + avatarSize / 2);
+          ctx.textAlign = 'start';
+          ctx.textBaseline = 'alphabetic';
+        }
+
+        // Avatar gold ring
+        ctx.strokeStyle = '#F5B700';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(avatarX + avatarSize / 2, avatarY + avatarSize / 2, avatarSize / 2 + 2, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Member Info (Name, Role, Location)
+        const textX = avatarX + avatarSize + 36;
+        ctx.fillStyle = '#F0F3F6';
+        ctx.font = 'bold 44px "Space Grotesk", sans-serif';
+        ctx.fillText(profile.name, textX, 175);
+
+        // Role Pill
+        const roleText = (profile.roles && profile.roles.length ? profile.roles.join(' · ') : profile.role) || 'Member';
+        ctx.font = 'bold 18px "Inter", sans-serif';
+        const roleWidth = ctx.measureText(roleText).width + 24;
+        ctx.fillStyle = 'rgba(245, 183, 0, 0.15)';
+        ctx.fillRect(textX, 200, roleWidth, 34);
+        ctx.strokeStyle = '#F5B700';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(textX, 200, roleWidth, 34);
+        ctx.fillStyle = '#F5B700';
+        ctx.fillText(roleText, textX + 12, 224);
+
+        if (profile.location) {
+          ctx.fillStyle = '#8B949E';
+          ctx.font = '16px "Inter", sans-serif';
+          ctx.fillText(`📍 ${profile.location}`, textX + roleWidth + 18, 223);
+        }
+
+        // Headline & Bio
+        ctx.fillStyle = '#E2E8F0';
+        ctx.font = '22px "Inter", sans-serif';
+        const headline = profile.headline || profile.bio || (profile.offers ? `Offers: ${profile.offers}` : 'Collaborator on Kwegatta');
+        const truncatedHeadline = headline.length > 80 ? headline.slice(0, 77) + '...' : headline;
+        ctx.fillText(truncatedHeadline, 64, 340);
+
+        // Offers / Needs Summary
+        if (profile.offers) {
+          ctx.fillStyle = '#F5B700';
+          ctx.font = 'bold 16px "Inter", sans-serif';
+          ctx.fillText('OFFERS:', 64, 385);
+          ctx.fillStyle = '#94A3B8';
+          ctx.font = '16px "Inter", sans-serif';
+          const offText = profile.offers.length > 70 ? profile.offers.slice(0, 67) + '...' : profile.offers;
+          ctx.fillText(offText, 145, 385);
+        }
+
+        if (profile.needs) {
+          ctx.fillStyle = '#38BDF8';
+          ctx.font = 'bold 16px "Inter", sans-serif';
+          ctx.fillText('NEEDS:', 64, 420);
+          ctx.fillStyle = '#94A3B8';
+          ctx.font = '16px "Inter", sans-serif';
+          const needText = profile.needs.length > 70 ? profile.needs.slice(0, 67) + '...' : profile.needs;
+          ctx.fillText(needText, 135, 420);
+        }
+
+        // Tags Pills
+        const tags = (profile.tags || []).slice(0, 4);
+        let tagX = 64;
+        for (const tag of tags) {
+          ctx.font = '14px "Inter", sans-serif';
+          const tagW = ctx.measureText(`#${tag}`).width + 20;
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+          ctx.fillRect(tagX, 465, tagW, 28);
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(tagX, 465, tagW, 28);
+          ctx.fillStyle = '#E2E8F0';
+          ctx.fillText(`#${tag}`, tagX + 10, 484);
+          tagX += tagW + 10;
+        }
+
+        // QR Code
+        if (qrImg) {
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(qrX - 12, qrY - 12, qrSize + 24, qrSize + 24);
+          ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+        }
+
+        ctx.fillStyle = '#F0F3F6';
+        ctx.font = 'bold 14px "Space Grotesk", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Scan to Connect', qrX + qrSize / 2, qrY + qrSize + 28);
+        ctx.textAlign = 'start';
+
+        // Footer notice
+        ctx.fillStyle = 'rgba(240, 243, 246, 0.4)';
+        ctx.font = '13px "Inter", sans-serif';
+        ctx.fillText('kwegatta.ai.studio · Kampala, Uganda · 1st place · Hacktoberfest 2026 Hack Day Kampala', 64, height - 48);
+      };
+
+      drawCard(true);
+
+      let url = '';
+      try {
+        url = canvas.toDataURL('image/png');
+      } catch (_) {
+        drawCard(false);
+        try {
+          url = canvas.toDataURL('image/png');
+        } catch (_) {
+          url = '';
+        }
+      }
 
       if (isMounted) {
-        setDataUrl(canvas.toDataURL('image/png'));
+        setDataUrl(url);
         setIsGenerating(false);
       }
     };
