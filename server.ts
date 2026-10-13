@@ -8,6 +8,22 @@ import { initializeApp, getApps, type App } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { getAuth as getAdminAuth, type Auth as AdminAuth } from 'firebase-admin/auth';
 import { ISO_COUNTRIES, deriveLocation } from './src/lib/countries';
+import { ROLE_CHOICES, STAGE_CHOICES, INTENT_CHOICES } from './src/lib/profileChoices';
+
+export function filterRoles(inputRoles: any, existingRoles: string[] = []): string[] {
+  if (!Array.isArray(inputRoles)) return existingRoles;
+  const filtered: string[] = [];
+  for (const item of inputRoles) {
+    if (typeof item === 'string') {
+      const trimmed = item.trim();
+      if (ROLE_CHOICES.includes(trimmed) && !filtered.includes(trimmed)) {
+        filtered.push(trimmed);
+        if (filtered.length === 2) break;
+      }
+    }
+  }
+  return filtered.length > 0 ? filtered : existingRoles;
+}
 
 export const PRIVACY_VERSION = '2026-10';
 
@@ -3378,7 +3394,18 @@ app.post('/api/admin/import', async (req: Request, res: Response) => {
       if (!raw || typeof raw !== 'object') continue;
       const id = String(raw.id || '').trim();
       const rawName = String(raw.name || '').trim();
-      const role = sanitizeText(raw.role, 50) || (Array.isArray(raw.roles) && raw.roles[0]) || 'Developer';
+      let roles = filterRoles(raw.roles, []);
+      if (roles.length === 0) {
+        if (typeof raw.role === 'string' && ROLE_CHOICES.includes(raw.role.trim())) {
+          roles = [raw.role.trim()];
+        } else {
+          roles = ['Developer'];
+        }
+      }
+      const role = roles[0];
+      const stage = typeof raw.stage === 'string' && (raw.stage === '' || STAGE_CHOICES.includes(raw.stage.trim())) ? raw.stage.trim() : '';
+      const intent = typeof raw.intent === 'string' && (raw.intent === '' || INTENT_CHOICES.includes(raw.intent.trim())) ? raw.intent.trim() : '';
+
       const rawCountry = sanitizeText(raw.country, 10).toUpperCase();
       const country = ISO_COUNTRIES.includes(rawCountry) ? rawCountry : '';
       const city = sanitizeText(raw.city, 100);
@@ -3389,9 +3416,9 @@ app.post('/api/admin/import', async (req: Request, res: Response) => {
         id, // Preserved exact same ID!
         name: sanitizeText(rawName, 100),
         role,
-        roles: sanitizeArray(raw.roles, 2, 40),
-        intent: sanitizeText(raw.intent, 100),
-        stage: sanitizeText(raw.stage, 100),
+        roles,
+        intent,
+        stage,
         country,
         city,
         location,
@@ -6655,7 +6682,34 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
     const derivedLoc = deriveLocation(city, country);
     const location = (country || city) ? derivedLoc : (raw.location !== undefined ? sanitizeText(raw.location, 100) : (existingProfile?.location || ''));
 
-    const role = sanitizeText(raw.role, 50) || (Array.isArray(raw.roles) && raw.roles[0]) || 'Developer';
+    const existingRoles = Array.isArray(existingProfile?.roles) && existingProfile.roles.length > 0
+      ? existingProfile.roles
+      : (existingProfile?.role ? [existingProfile.role] : []);
+
+    let roles = filterRoles(raw.roles, existingRoles);
+    if (roles.length === 0) {
+      if (typeof raw.role === 'string' && ROLE_CHOICES.includes(raw.role.trim())) {
+        roles = [raw.role.trim()];
+      } else {
+        roles = ['Developer'];
+      }
+    }
+    const role = roles[0];
+
+    let stage = '';
+    if (typeof raw.stage === 'string' && (raw.stage === '' || STAGE_CHOICES.includes(raw.stage.trim()))) {
+      stage = raw.stage.trim();
+    } else if (existingProfile?.stage) {
+      stage = existingProfile.stage;
+    }
+
+    let intent = '';
+    if (typeof raw.intent === 'string' && (raw.intent === '' || INTENT_CHOICES.includes(raw.intent.trim()))) {
+      intent = raw.intent.trim();
+    } else if (existingProfile?.intent) {
+      intent = existingProfile.intent;
+    }
+
     const id = existingProfile ? existingProfile.id : (requestedId || authUserId || ('user-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex')));
     const account_uid = authUserId || existingProfile?.account_uid || null;
 
@@ -6669,10 +6723,10 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
       email: userEmail || existingProfile?.email || '',
       name: sanitizeText(rawName, 100),
       role,
-      roles: sanitizeArray(raw.roles, 2, 40),
-      intent: sanitizeText(raw.intent, 100),
+      roles,
+      intent,
       intents: sanitizeArray(raw.intents, 5, 100),
-      stage: sanitizeText(raw.stage, 100),
+      stage,
       country,
       city,
       location,
@@ -6904,6 +6958,8 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
     patch.body = sanitizeText(rawBody, 2000);
   }
   if (col === 'profiles') {
+    delete patch.role; // Ignore any client-sent role alone
+
     if (patch.avatar !== undefined) {
       patch.avatar = sanitizeAvatar(patch.avatar);
     }
@@ -6911,13 +6967,28 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
       patch.blocked_ids = sanitizeArray(patch.blocked_ids, 200, 64);
     }
     if (patch.roles !== undefined) {
-      patch.roles = sanitizeArray(patch.roles, 2, 40);
+      const existingRoles = Array.isArray(existing?.roles) && existing.roles.length > 0
+        ? existing.roles
+        : (existing?.role ? [existing.role] : ['Developer']);
+      const newRoles = filterRoles(patch.roles, existingRoles);
+      patch.roles = newRoles;
+      patch.role = newRoles[0];
     }
     if (patch.intent !== undefined) {
-      patch.intent = sanitizeText(patch.intent, 100);
+      const rawIntent = typeof patch.intent === 'string' ? patch.intent.trim() : '';
+      if (rawIntent === '' || INTENT_CHOICES.includes(rawIntent)) {
+        patch.intent = rawIntent;
+      } else {
+        delete patch.intent;
+      }
     }
     if (patch.stage !== undefined) {
-      patch.stage = sanitizeText(patch.stage, 100);
+      const rawStage = typeof patch.stage === 'string' ? patch.stage.trim() : '';
+      if (rawStage === '' || STAGE_CHOICES.includes(rawStage)) {
+        patch.stage = rawStage;
+      } else {
+        delete patch.stage;
+      }
     }
     if (patch.country !== undefined) {
       const rawC = sanitizeText(patch.country, 10).toUpperCase();

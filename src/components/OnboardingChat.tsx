@@ -23,39 +23,12 @@ import { auth } from '../services/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { AuthModal } from './AuthModal';
 import { ISO_COUNTRIES, getSortedCountries, guessCountry, deriveLocation } from '../lib/countries';
+import { INTENT_CHOICES, ROLE_CHOICES, STAGE_CHOICES } from '../lib/profileChoices';
 
 interface OnboardingChatProps {
   onCompleted: (profile: Profile) => void;
   onCancel?: () => void;
 }
-
-const INTENT_CHOICES = [
-  'Find a co-founder',
-  'Find a technical partner',
-  'Find a business partner',
-  'Join a project',
-  'Find a mentor or be one',
-  'Learn a skill',
-  'Find a research collaborator',
-  'Find participants or data'
-];
-
-const ROLE_CHOICES = [
-  'Founder',
-  'Business',
-  'Developer',
-  'Designer',
-  'Domain expert',
-  'Mentor',
-  'Student',
-  'Researcher'
-];
-
-const STAGE_CHOICES = [
-  'I have an idea',
-  'I have a project running',
-  'I have skills and want to join one'
-];
 
 const HOURS_CHOICES = [
   '5-10 hrs/week',

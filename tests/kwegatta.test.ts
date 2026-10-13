@@ -260,8 +260,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.5.4
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.4'");
+    // 1. Cache name includes version kwegatta-1.5.5
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.5'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -1989,6 +1989,163 @@ describe('Release 1.5.0 Features', () => {
       expect(data2.country).toBe('');
       expect(data2.city).toBe('Entebbe');
       expect(data2.location).toBe('Entebbe');
+    });
+  });
+
+  describe('Release 1.5.5 Role, Stage & Intent Edits', () => {
+    it('a) Server: PATCH roles ["Developer","Mentor"] → roles ["Developer","Mentor"], role "Developer"', async () => {
+      const userRes = await fetch(`${baseUrl}/api/data/profiles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-role-1' },
+        body: JSON.stringify({ name: 'Role User 1', role: 'Student' })
+      });
+      expect(userRes.status).toBe(200);
+      const user = await userRes.json();
+
+      const patchRes = await fetch(`${baseUrl}/api/data/profiles/${user.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-role-1' },
+        body: JSON.stringify({ roles: ['Developer', 'Mentor'] })
+      });
+      expect(patchRes.status).toBe(200);
+      const data = await patchRes.json();
+      expect(data.roles).toEqual(['Developer', 'Mentor']);
+      expect(data.role).toBe('Developer');
+    });
+
+    it('b) Server: PATCH roles ["Hacker","Developer","Founder","Mentor"] → roles ["Developer","Founder"] (invalid dropped, max 2), role "Developer"', async () => {
+      const userRes = await fetch(`${baseUrl}/api/data/profiles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-role-2' },
+        body: JSON.stringify({ name: 'Role User 2', role: 'Student' })
+      });
+      expect(userRes.status).toBe(200);
+      const user = await userRes.json();
+
+      const patchRes = await fetch(`${baseUrl}/api/data/profiles/${user.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-role-2' },
+        body: JSON.stringify({ roles: ['Hacker', 'Developer', 'Founder', 'Mentor'] })
+      });
+      expect(patchRes.status).toBe(200);
+      const data = await patchRes.json();
+      expect(data.roles).toEqual(['Developer', 'Founder']);
+      expect(data.role).toBe('Developer');
+    });
+
+    it('c) Server: PATCH role "CEO" alone → role unchanged', async () => {
+      const userRes = await fetch(`${baseUrl}/api/data/profiles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-role-3' },
+        body: JSON.stringify({ name: 'Role User 3', role: 'Founder' })
+      });
+      expect(userRes.status).toBe(200);
+      const user = await userRes.json();
+
+      const patchRes = await fetch(`${baseUrl}/api/data/profiles/${user.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-role-3' },
+        body: JSON.stringify({ role: 'CEO' })
+      });
+      expect(patchRes.status).toBe(200);
+      const data = await patchRes.json();
+      expect(data.role).toBe('Founder');
+    });
+
+    it('d) Server: PATCH stage "xyz" → stage unchanged; stage "" → "". Same two checks for intent', async () => {
+      const userRes = await fetch(`${baseUrl}/api/data/profiles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-role-4' },
+        body: JSON.stringify({
+          name: 'Role User 4',
+          role: 'Developer',
+          stage: 'I have an idea',
+          intent: 'Learn a skill'
+        })
+      });
+      expect(userRes.status).toBe(200);
+      const user = await userRes.json();
+
+      // Invalid stage & intent -> unchanged
+      const patch1 = await fetch(`${baseUrl}/api/data/profiles/${user.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-role-4' },
+        body: JSON.stringify({ stage: 'xyz', intent: 'invalid intent' })
+      });
+      expect(patch1.status).toBe(200);
+      const data1 = await patch1.json();
+      expect(data1.stage).toBe('I have an idea');
+      expect(data1.intent).toBe('Learn a skill');
+
+      // Empty string stage & intent -> ''
+      const patch2 = await fetch(`${baseUrl}/api/data/profiles/${user.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-role-4' },
+        body: JSON.stringify({ stage: '', intent: '' })
+      });
+      expect(patch2.status).toBe(200);
+      const data2 = await patch2.json();
+      expect(data2.stage).toBe('');
+      expect(data2.intent).toBe('');
+    });
+
+    it('e) Render: Edit Profile shows the role chips, stage and intent options, prefilled from the profile; selecting Developer first and saving shows "Developer" as the header label', async () => {
+      const { act, render, screen, fireEvent } = await import('@testing-library/react');
+      const { ProfileView } = await import('../src/components/ProfileView');
+
+      const testProfile: any = {
+        id: 'test-user-edit-roles-1',
+        name: 'Role Test Member',
+        role: 'Founder',
+        roles: ['Founder', 'Developer'],
+        stage: 'I have an idea',
+        intent: 'Learn a skill'
+      };
+
+      let updatedProfileState: any = null;
+
+      await act(async () => {
+        render(
+          React.createElement(ProfileView, {
+            profile: testProfile,
+            currentProfile: testProfile,
+            followersCount: 0,
+            followingCount: 0,
+            isFollowing: false,
+            onToggleFollow: vi.fn(),
+            onUpdateProfile: (updated: any) => {
+              updatedProfileState = updated;
+            },
+            onToast: vi.fn()
+          })
+        );
+      });
+
+      // Open Edit Profile
+      const editBtns = screen.getAllByRole('button', { name: /edit profile/i });
+      await act(async () => {
+        fireEvent.click(editBtns[editBtns.length - 1]);
+      });
+
+      // Role chips exist
+      expect(screen.getAllByText('How you appear').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Your role (up to 2)').length).toBeGreaterThan(0);
+
+      // Tap Developer (which is currently second role) to make it first
+      const devBtns = screen.getAllByRole('button', { name: /Developer/i });
+      await act(async () => {
+        fireEvent.click(devBtns[devBtns.length - 1]);
+      });
+
+      // Click Save changes
+      const saveBtns = screen.getAllByRole('button', { name: /save changes/i });
+      await act(async () => {
+        fireEvent.click(saveBtns[saveBtns.length - 1]);
+      });
+
+      expect(updatedProfileState).toBeTruthy();
+      expect(updatedProfileState.role).toBe('Developer');
+      expect(updatedProfileState.roles[0]).toBe('Developer');
     });
   });
 });

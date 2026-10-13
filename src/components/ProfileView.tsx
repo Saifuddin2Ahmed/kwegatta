@@ -50,6 +50,7 @@ import { generateQrCodeDataUrl, formatWhatsAppUrl, resizeImageFile } from '../ut
 import { Avatar } from './Avatar';
 import { SocialLinksRow } from './SocialLinksRow';
 import { getSortedCountries, deriveLocation } from '../lib/countries';
+import { ROLE_CHOICES, STAGE_CHOICES, INTENT_CHOICES } from '../lib/profileChoices';
 import { auth, addPasswordToAccount, validatePasswordStrength, formatAuthError } from '../services/firebase';
 import { EmailAuthProvider, linkWithCredential } from 'firebase/auth';
 
@@ -133,6 +134,31 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     return '';
   });
 
+  const [editRoles, setEditRoles] = useState<string[]>(() => {
+    if (Array.isArray(profile.roles) && profile.roles.length > 0) {
+      const valid = profile.roles.filter(r => ROLE_CHOICES.includes(r)).slice(0, 2);
+      if (valid.length > 0) return valid;
+    }
+    if (profile.role && ROLE_CHOICES.includes(profile.role)) {
+      return [profile.role];
+    }
+    return ['Developer'];
+  });
+
+  const [editStage, setEditStage] = useState<string>(() => {
+    if (profile.stage && STAGE_CHOICES.includes(profile.stage)) {
+      return profile.stage;
+    }
+    return '';
+  });
+
+  const [editIntent, setEditIntent] = useState<string>(() => {
+    if (profile.intent && INTENT_CHOICES.includes(profile.intent)) {
+      return profile.intent;
+    }
+    return '';
+  });
+
   useEffect(() => {
     setEditHeadline(profile.headline || '');
     setEditBio(profile.bio || '');
@@ -151,7 +177,29 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         ? profile.location
         : ''
     );
+    const initialRoles = (Array.isArray(profile.roles) && profile.roles.length > 0)
+      ? profile.roles.filter(r => ROLE_CHOICES.includes(r)).slice(0, 2)
+      : (profile.role && ROLE_CHOICES.includes(profile.role) ? [profile.role] : ['Developer']);
+    setEditRoles(initialRoles.length > 0 ? initialRoles : ['Developer']);
+    setEditStage(profile.stage && STAGE_CHOICES.includes(profile.stage) ? profile.stage : '');
+    setEditIntent(profile.intent && INTENT_CHOICES.includes(profile.intent) ? profile.intent : '');
   }, [profile]);
+
+  const handleToggleRole = (r: string) => {
+    if (editRoles.includes(r)) {
+      if (editRoles[0] === r) {
+        if (editRoles.length > 1) {
+          setEditRoles([editRoles[1]]);
+        }
+      } else {
+        setEditRoles([r, editRoles[0]]);
+      }
+    } else {
+      if (editRoles.length < 2) {
+        setEditRoles([...editRoles, r]);
+      }
+    }
+  };
 
   // Social & Academic links edit state
   const [editLinkedin, setEditLinkedin] = useState(profile.linkedin || '');
@@ -231,8 +279,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       const cleanCountry = editCountry;
       const derivedLoc = deriveLocation(cleanCity, cleanCountry);
 
+      const finalRoles = editRoles.length > 0 ? editRoles : (profile.roles?.length ? profile.roles : [profile.role || 'Developer']);
+
       const updated: Profile = {
         ...profile,
+        roles: finalRoles,
+        role: finalRoles[0],
+        stage: editStage,
+        intent: editIntent,
         headline: editHeadline.slice(0, 100),
         bio: editBio.slice(0, 400),
         country: cleanCountry,
@@ -1191,6 +1245,130 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               </h3>
 
               <div className="space-y-3">
+                {/* How you appear */}
+                <div className="space-y-3 p-3.5 bg-[var(--bg)] rounded-xl border border-[var(--card-border)]">
+                  <span className="text-xs font-bold text-[var(--fg)] block">
+                    How you appear
+                  </span>
+
+                  {/* Your role (up to 2) */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-[var(--fg)]">
+                      Your role (up to 2)
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {ROLE_CHOICES.map(r => {
+                        const isSelected = editRoles.includes(r);
+                        const isFirst = editRoles[0] === r;
+                        const isSecond = editRoles[1] === r;
+                        const isDisabled = !isSelected && editRoles.length >= 2;
+
+                        return (
+                          <button
+                            type="button"
+                            key={r}
+                            onClick={() => handleToggleRole(r)}
+                            disabled={isDisabled}
+                            className={`text-xs px-2.5 py-1 rounded-full border transition-all cursor-pointer flex items-center gap-1.5 ${
+                              isSelected
+                                ? 'bg-[var(--gold-subtle)] border-[var(--gold)] text-[var(--fg)] font-semibold'
+                                : isDisabled
+                                ? 'opacity-40 cursor-not-allowed bg-[var(--bg-subtle)] border-[var(--card-border)] text-[var(--fg-muted)]'
+                                : 'bg-[var(--card)] border-[var(--card-border)] text-[var(--fg-muted)] hover:border-[var(--gold)]'
+                            }`}
+                          >
+                            <span>{r}</span>
+                            {isFirst && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--gold)] text-[#090D16] font-bold">
+                                shown on profile
+                              </span>
+                            )}
+                            {isSecond && (
+                              <span className="text-[10px] text-[var(--muted)] font-normal">
+                                (2nd)
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Your stage */}
+                  <div className="space-y-1.5 pt-1">
+                    <label className="block text-xs font-semibold text-[var(--fg)]">
+                      Your stage
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setEditStage('')}
+                        className={`text-xs px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
+                          editStage === ''
+                            ? 'bg-[var(--accent-subtle)] border-[var(--accent)] text-[var(--fg)] font-semibold'
+                            : 'bg-[var(--card)] border-[var(--card-border)] text-[var(--fg-muted)] hover:border-[var(--card-border)]'
+                        }`}
+                      >
+                        None
+                      </button>
+                      {STAGE_CHOICES.map(stg => {
+                        const isSelected = editStage === stg;
+                        return (
+                          <button
+                            type="button"
+                            key={stg}
+                            onClick={() => setEditStage(stg)}
+                            className={`text-xs px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-[var(--accent-subtle)] border-[var(--accent)] text-[var(--fg)] font-semibold'
+                                : 'bg-[var(--card)] border-[var(--card-border)] text-[var(--fg-muted)] hover:border-[var(--card-border)]'
+                            }`}
+                          >
+                            {stg}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* What brings you here */}
+                  <div className="space-y-1.5 pt-1">
+                    <label className="block text-xs font-semibold text-[var(--fg)]">
+                      What brings you here
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setEditIntent('')}
+                        className={`text-xs px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
+                          editIntent === ''
+                            ? 'bg-[var(--teal-subtle)] border-[var(--teal)] text-[var(--fg)] font-semibold'
+                            : 'bg-[var(--card)] border-[var(--card-border)] text-[var(--fg-muted)] hover:border-[var(--card-border)]'
+                        }`}
+                      >
+                        None
+                      </button>
+                      {INTENT_CHOICES.map(intnt => {
+                        const isSelected = editIntent === intnt;
+                        return (
+                          <button
+                            type="button"
+                            key={intnt}
+                            onClick={() => setEditIntent(intnt)}
+                            className={`text-xs px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-[var(--teal-subtle)] border-[var(--teal)] text-[var(--fg)] font-semibold'
+                                : 'bg-[var(--card)] border-[var(--card-border)] text-[var(--fg-muted)] hover:border-[var(--card-border)]'
+                            }`}
+                          >
+                            {intnt}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
                     <label htmlFor="edit-profile-country" className="block text-xs font-semibold text-[var(--fg)] mb-1">

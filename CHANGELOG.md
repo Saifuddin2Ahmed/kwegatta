@@ -4,6 +4,14 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.5] - 2026-10-13
+
+### Added (Release 1.5.5)
+- **Edit Role, Stage and Intent**: Members can now edit their role, stage and intent from Edit Profile.
+  - Extracted shared choices (`ROLE_CHOICES`, `STAGE_CHOICES`, `INTENT_CHOICES`) into `src/lib/profileChoices.ts`.
+  - Enforced server-side validation for `roles` (max 2 valid roles, `role` synchronized to `roles[0]`), `stage`, and `intent`.
+  - Added "How you appear" section in Edit Profile form with interactive role chip reordering and single-select stage and intent options.
+
 ## [1.5.4] - 2026-10-13
 
 ### Fixed & Polish (Release 1.5.4)
