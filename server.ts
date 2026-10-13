@@ -860,6 +860,16 @@ function sanitizeAvatar(val: any): string {
   return '';
 }
 
+function resolveAvatar(incoming: any, existing: string = ''): string {
+  if (incoming === undefined) return existing;
+  if (typeof incoming === 'string' && incoming.trim().startsWith('/api/avatar/')) {
+    return existing;
+  }
+  const sanitized = sanitizeAvatar(incoming);
+  if (sanitized) return sanitized;
+  return existing;
+}
+
 function sanitizeArray(arr: any, maxItems = 15, maxItemLength = 50): string[] {
   if (!Array.isArray(arr)) return [];
   return arr
@@ -6762,7 +6772,7 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
       custom_links: sanitizeCustomLinks(raw.custom_links),
       whatsapp: sanitizeText(raw.whatsapp, 30).replace(/[^0-9+]/g, ''),
       hide_whatsapp: Boolean(raw.hide_whatsapp),
-      avatar: sanitizeAvatar(raw.avatar),
+      avatar: resolveAvatar(raw.avatar, existingProfile?.avatar || ''),
       status: sanitizeText(raw.status, 100),
       is_demo: Boolean(raw.is_demo),
       created_at: sanitizeText(raw.created_at, 50) || existingProfile?.created_at || new Date().toISOString(),
@@ -6961,7 +6971,7 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
     delete patch.role; // Ignore any client-sent role alone
 
     if (patch.avatar !== undefined) {
-      patch.avatar = sanitizeAvatar(patch.avatar);
+      patch.avatar = resolveAvatar(patch.avatar, existing?.avatar || '');
     }
     if (patch.blocked_ids !== undefined) {
       patch.blocked_ids = sanitizeArray(patch.blocked_ids, 200, 64);

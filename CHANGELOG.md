@@ -4,6 +4,13 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.7] - 2026-10-13
+
+### Fixed (Release 1.5.7)
+- **Fix: saving profile edits no longer removes the profile photo**:
+  - Updated client `handleSaveProfile` in `ProfileView.tsx` to send only user-edited form fields without spreading `...profile` (omitting `avatar`, `id`, `account_uid`, `email`, etc.).
+  - Added `resolveAvatar` server helper in `server.ts` for profile create/save and PATCH endpoints to safely retain existing profile photo when receiving `/api/avatar/...` or empty values.
+
 ## [1.5.6] - 2026-10-13
 
 ### Fixed (Release 1.5.6)

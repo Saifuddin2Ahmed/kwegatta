@@ -261,8 +261,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.5.6
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.6'");
+    // 1. Cache name includes version kwegatta-1.5.7
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.7'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -2267,6 +2267,193 @@ describe('Release 1.5.0 Features', () => {
 
         expect(updatedProfileState).toBeTruthy();
         expect(updatedProfileState.intent).toBe('Find a co-founder, Learn a skill');
+      });
+    });
+
+    describe('Release 1.5.7 Avatar Protection Fixes', () => {
+      const testAvatar = 'data:image/png;base64,AAAA';
+      const newAvatar = 'data:image/png;base64,BBBB';
+
+      it('a) Server: profile with avatar "data:image/png;base64,AAAA"; PATCH {headline:"x", avatar:"/api/avatar/<id>"} -> avatar unchanged', async () => {
+        await fetch(`${baseUrl}/api/data/profiles`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-157-a' },
+          body: JSON.stringify({
+            id: 'test-user-157-a',
+            name: 'Avatar User A',
+            avatar: testAvatar
+          })
+        });
+
+        const res = await fetch(`${baseUrl}/api/data/profiles/test-user-157-a`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-157-a' },
+          body: JSON.stringify({
+            headline: 'x',
+            avatar: '/api/avatar/test-user-157-a'
+          })
+        });
+        expect(res.status).toBe(200);
+
+        const avatarRes = await fetch(`${baseUrl}/api/avatar/test-user-157-a`);
+        expect(avatarRes.status).toBe(200);
+      });
+
+      it('b) Server: PATCH {headline:"x"} without avatar -> avatar unchanged', async () => {
+        await fetch(`${baseUrl}/api/data/profiles`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-157-b' },
+          body: JSON.stringify({
+            id: 'test-user-157-b',
+            name: 'Avatar User B',
+            avatar: testAvatar
+          })
+        });
+
+        const res = await fetch(`${baseUrl}/api/data/profiles/test-user-157-b`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-157-b' },
+          body: JSON.stringify({
+            headline: 'x'
+          })
+        });
+        expect(res.status).toBe(200);
+
+        const avatarRes = await fetch(`${baseUrl}/api/avatar/test-user-157-b`);
+        expect(avatarRes.status).toBe(200);
+      });
+
+      it('c) Server: PATCH {avatar:""} -> avatar unchanged', async () => {
+        await fetch(`${baseUrl}/api/data/profiles`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-157-c' },
+          body: JSON.stringify({
+            id: 'test-user-157-c',
+            name: 'Avatar User C',
+            avatar: testAvatar
+          })
+        });
+
+        const res = await fetch(`${baseUrl}/api/data/profiles/test-user-157-c`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-157-c' },
+          body: JSON.stringify({
+            avatar: ''
+          })
+        });
+        expect(res.status).toBe(200);
+
+        const avatarRes = await fetch(`${baseUrl}/api/avatar/test-user-157-c`);
+        expect(avatarRes.status).toBe(200);
+      });
+
+      it('d) Server: PATCH {avatar:"data:image/png;base64,BBBB"} -> avatar updated', async () => {
+        await fetch(`${baseUrl}/api/data/profiles`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-157-d' },
+          body: JSON.stringify({
+            id: 'test-user-157-d',
+            name: 'Avatar User D',
+            avatar: testAvatar
+          })
+        });
+
+        const res = await fetch(`${baseUrl}/api/data/profiles/test-user-157-d`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-157-d' },
+          body: JSON.stringify({
+            avatar: newAvatar
+          })
+        });
+        expect(res.status).toBe(200);
+
+        const avatarRes = await fetch(`${baseUrl}/api/avatar/test-user-157-d`);
+        expect(avatarRes.status).toBe(200);
+      });
+
+      it('e) Server: create/save path with avatar "/api/avatar/<id>" for an existing profile -> avatar unchanged', async () => {
+        await fetch(`${baseUrl}/api/data/profiles`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-157-e' },
+          body: JSON.stringify({
+            id: 'test-user-157-e',
+            name: 'Avatar User E',
+            avatar: testAvatar
+          })
+        });
+
+        const res = await fetch(`${baseUrl}/api/data/profiles`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-user-157-e' },
+          body: JSON.stringify({
+            id: 'test-user-157-e',
+            name: 'Avatar User E Updated',
+            avatar: '/api/avatar/test-user-157-e'
+          })
+        });
+        expect(res.status).toBe(200);
+
+        const avatarRes = await fetch(`${baseUrl}/api/avatar/test-user-157-e`);
+        expect(avatarRes.status).toBe(200);
+      });
+
+      it('f) Render/unit: handleSaveProfile request body does not contain the key "avatar"', async () => {
+        const { ProfileView } = await import('../src/components/ProfileView');
+        const testProfile = {
+          id: 'test-user-157-f',
+          name: 'Avatar Protection Member',
+          role: 'Developer',
+          roles: ['Developer'],
+          avatar: '/api/avatar/test-user-157-f',
+          country: 'UG',
+          city: 'Kampala'
+        };
+
+        let updatedRequestBody: any = null;
+        const originalFetch = global.fetch;
+        global.fetch = vi.fn().mockImplementation((url, init) => {
+          if (typeof url === 'string' && url.includes('/api/data/profiles') && init?.method === 'PATCH') {
+            updatedRequestBody = JSON.parse(init.body as string);
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({ id: 'test-user-157-f', ...updatedRequestBody })
+            });
+          }
+          return originalFetch(url, init);
+        });
+
+        try {
+          await act(async () => {
+            render(
+              React.createElement(ProfileView, {
+                profile: testProfile as any,
+                currentProfile: testProfile as any,
+                followersCount: 0,
+                followingCount: 0,
+                isFollowing: false,
+                onToggleFollow: vi.fn(),
+                onUpdateProfile: vi.fn(),
+                onToast: vi.fn()
+              })
+            );
+          });
+
+          const editBtns = screen.getAllByRole('button', { name: /edit profile/i });
+          await act(async () => {
+            fireEvent.click(editBtns[editBtns.length - 1]);
+          });
+
+          const saveBtns = screen.getAllByRole('button', { name: /save changes/i });
+          await act(async () => {
+            fireEvent.click(saveBtns[saveBtns.length - 1]);
+          });
+
+          expect(updatedRequestBody).toBeTruthy();
+          expect('avatar' in updatedRequestBody).toBe(false);
+        } finally {
+          global.fetch = originalFetch;
+        }
       });
     });
   });

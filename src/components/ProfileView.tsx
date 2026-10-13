@@ -286,17 +286,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
       const finalRoles = editRoles.length > 0 ? editRoles : (profile.roles?.length ? profile.roles : [profile.role || 'Developer']);
 
-      const updated: Profile = {
-        ...profile,
+      const payload = {
         roles: finalRoles,
-        role: finalRoles[0],
         stage: editStage,
         intent: editIntents.join(', '),
         headline: editHeadline.slice(0, 100),
         bio: editBio.slice(0, 400),
         country: cleanCountry,
         city: cleanCity,
-        location: derivedLoc,
         offers: editOffers.slice(0, 400),
         needs: editNeeds.slice(0, 400),
         teaches: editTeaches.slice(0, 400),
@@ -326,10 +323,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           .slice(0, 3)
       };
 
-      const res = await db.update('profiles', profile.id, updated);
-      const savedProfile = {
-        ...updated,
-        ...(res && typeof res === 'object' ? res : {})
+      const res = await db.update('profiles', profile.id, payload);
+      const savedProfile: Profile = {
+        ...profile,
+        ...payload,
+        role: finalRoles[0],
+        roles: finalRoles,
+        ...(res && typeof res === 'object' ? res : {}),
+        avatar: profile.avatar
       };
       onUpdateProfile(savedProfile);
       setIsEditing(false);
