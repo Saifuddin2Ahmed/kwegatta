@@ -7448,9 +7448,7 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
     delete patch.reactions_by;
     delete patch.comments;
     delete patch.reaction_counts;
-    delete existing.reactions;
-    delete existing.reactions_by;
-    delete existing.reaction_counts;
+    delete patch.my_reaction;
     if (patch.body !== undefined) {
       const rawBody = typeof patch.body === 'string' ? patch.body.trim() : '';
       if (!rawBody) return res.status(400).json({ error: 'Post body cannot be empty' });
@@ -7608,6 +7606,9 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
   }
   if (col === 'events') {
     return res.json(sanitizeEventForPublic((store[colKey] as any[])[index]));
+  }
+  if (col === 'posts') {
+    return res.json(sanitizePostForPublic((store[colKey] as any[])[index], req));
   }
   return res.json((store[colKey] as any[])[index]);
 });

@@ -268,8 +268,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.5.11
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.12'");
+    // 1. Cache name includes version kwegatta-1.5.13
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.13'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -3502,9 +3502,11 @@ describe('Release 1.5.0 Features', () => {
           body: JSON.stringify({ reactions: { like: 999 }, body: 'Updated body' })
         });
         expect(patchRes.status).toBe(200);
+        const patchData = await patchRes.json();
+        expect(patchData.reaction_counts.like).toBe(1);
         const updatedPost = store.posts.find(p => p.id === postId);
         expect(updatedPost.body).toBe('Updated body');
-        expect(updatedPost.reactions).toBeUndefined();
+        expect(updatedPost.reactions).toEqual({ '👍': 1 });
       });
 
       it('f) Non-author comments -> 201/200, author_name from session ignored', async () => {
@@ -3675,6 +3677,119 @@ describe('Release 1.5.0 Features', () => {
         const svgEl = likeButton.querySelector('svg');
         expect(svgEl).toBeTruthy();
         expect(likeButton.textContent).not.toMatch(/[👍🚀❤️💡]/);
+      });
+    });
+
+    describe('Release 1.5.13 — Fix: editing a post wipes its reactions', () => {
+      it('a) A post with 2 member reactions and a legacy { "👍": 3 } -> author PATCHes { body: "edited" } -> stored post keeps reactions_by and legacy map, counts show like 5', async () => {
+        const postId = 'post-1513-a';
+        const authorId = 'author-1513';
+        if (!store.profiles.some(p => p.id === authorId)) {
+          store.profiles.push({
+            id: authorId,
+            account_uid: authorId,
+            name: 'Author 1513',
+            role: 'Developer',
+            headline: 'Dev',
+            bio: 'Bio',
+            offers: '',
+            needs: '',
+            tags: [],
+            skills: [],
+            created_at: new Date().toISOString()
+          });
+        }
+        store.posts.push({
+          id: postId,
+          author_id: authorId,
+          body: 'Initial body before edit',
+          kind: 'idea',
+          tags: [],
+          reactions: { '👍': 3 },
+          reactions_by: { 'user-a-1513': 'like', 'user-b-1513': 'like' },
+          comments: [{ id: 'c-1513-1', author_id: 'user-a-1513', author_name: 'User A', text: 'Nice!', created_at: new Date().toISOString() }],
+          created_at: new Date().toISOString()
+        });
+
+        const patchRes = await fetch(`${baseUrl}/api/data/posts/${postId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authorId}` },
+          body: JSON.stringify({ body: 'edited' })
+        });
+        expect(patchRes.status).toBe(200);
+        const patchJson = await patchRes.json();
+        expect(patchJson.body).toBe('edited');
+        expect(patchJson.reaction_counts.like).toBe(5);
+
+        const storedPost = store.posts.find(p => p.id === postId);
+        expect(storedPost.body).toBe('edited');
+        expect(storedPost.reactions).toEqual({ '👍': 3 });
+        expect(storedPost.reactions_by).toEqual({ 'user-a-1513': 'like', 'user-b-1513': 'like' });
+        expect(storedPost.comments).toHaveLength(1);
+      });
+
+      it('b) An admin PATCH on the same post -> reactions unchanged', async () => {
+        const postId = 'post-1513-a';
+        const adminEmail = 'admin-1513@kwegatta.test';
+        if (!store.admin_emails.includes(adminEmail)) {
+          store.admin_emails.push(adminEmail);
+        }
+        const adminId = 'admin-1513';
+
+        const patchRes = await fetch(`${baseUrl}/api/data/posts/${postId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminId}` },
+          body: JSON.stringify({ body: 'edited by admin' })
+        });
+        expect(patchRes.status).toBe(200);
+        const patchJson = await patchRes.json();
+        expect(patchJson.body).toBe('edited by admin');
+        expect(patchJson.reaction_counts.like).toBe(5);
+
+        const storedPost = store.posts.find(p => p.id === postId);
+        expect(storedPost.reactions).toEqual({ '👍': 3 });
+        expect(storedPost.reactions_by).toEqual({ 'user-a-1513': 'like', 'user-b-1513': 'like' });
+      });
+
+      it('c) A PATCH with { reactions_by: {...}, comments: [] } -> ignored, stored data unchanged', async () => {
+        const postId = 'post-1513-a';
+        const authorId = 'author-1513';
+
+        const patchRes = await fetch(`${baseUrl}/api/data/posts/${postId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authorId}` },
+          body: JSON.stringify({
+            reactions_by: { 'forged-user': 'love' },
+            reactions: { '👍': 999 },
+            reaction_counts: { like: 999, launch: 0, love: 0, idea: 0 },
+            comments: []
+          })
+        });
+        expect(patchRes.status).toBe(200);
+
+        const storedPost = store.posts.find(p => p.id === postId);
+        expect(storedPost.reactions).toEqual({ '👍': 3 });
+        expect(storedPost.reactions_by).toEqual({ 'user-a-1513': 'like', 'user-b-1513': 'like' });
+        expect(storedPost.comments).toHaveLength(1);
+        expect(storedPost.comments[0].id).toBe('c-1513-1');
+      });
+
+      it('d) The PATCH response contains no "reactions_by"', async () => {
+        const postId = 'post-1513-a';
+        const authorId = 'author-1513';
+
+        const patchRes = await fetch(`${baseUrl}/api/data/posts/${postId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authorId}` },
+          body: JSON.stringify({ body: 'final edit check' })
+        });
+        expect(patchRes.status).toBe(200);
+        const rawText = await patchRes.text();
+        expect(rawText).not.toContain('reactions_by');
+        const json = JSON.parse(rawText);
+        expect(json.reactions_by).toBeUndefined();
+        expect(json.reaction_counts).toEqual({ like: 5, launch: 0, love: 0, idea: 0 });
+        expect(json).toHaveProperty('my_reaction');
       });
     });
   });
