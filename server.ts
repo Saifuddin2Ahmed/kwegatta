@@ -2155,11 +2155,41 @@ export function validateGemmaModelId(modelId: string): string {
   return modelId;
 }
 
-// Pair Match Cache: key(`${idA}_${idB}`) -> { versionA, versionB, result, updatedAt }
-const matchPairCache = new Map<string, { versionA: string; versionB: string; result: any; updatedAt: string }>();
+// Pair Match Cache: key(`${idA}_${idB}`) -> { versionA, versionB, result: { score: number; reason: string }, updatedAt }
+export const matchPairCache = new Map<string, { versionA: string; versionB: string; result: { score: number; reason: string }; updatedAt: string }>();
+export const MAX_PAIR_CACHE_SIZE = 5000;
 
-function getPairCacheKey(idA: string, idB: string): string {
+export function getPairCacheKey(idA: string, idB: string): string {
   return [idA, idB].sort().join('_');
+}
+
+export function setPairCacheEntry(
+  idA: string,
+  idB: string,
+  versionA: string,
+  versionB: string,
+  result: { score: number; reason: string },
+  updatedAt?: string
+) {
+  const key = getPairCacheKey(idA, idB);
+  if (!matchPairCache.has(key) && matchPairCache.size >= MAX_PAIR_CACHE_SIZE) {
+    let oldestKey: string | null = null;
+    let oldestTime = Infinity;
+    for (const [k, v] of matchPairCache.entries()) {
+      const t = new Date(v.updatedAt).getTime() || 0;
+      if (t < oldestTime) {
+        oldestTime = t;
+        oldestKey = k;
+      }
+    }
+    if (oldestKey) matchPairCache.delete(oldestKey);
+  }
+  matchPairCache.set(key, {
+    versionA: String(versionA || ''),
+    versionB: String(versionB || ''),
+    result,
+    updatedAt: updatedAt || new Date().toISOString()
+  });
 }
 
 /**
@@ -2958,10 +2988,29 @@ JSON Output:`;
 
 // MATCH PAIR CACHING ENDPOINTS
 app.get('/api/matches/pair-cache', (req: Request, res: Response) => {
+  const authUserId = resolveAuthUserId(req);
+  const { isAdmin } = resolveAdminInfo(req);
+  if (!authUserId && !isAdmin) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
   const { a, b, verA, verB } = req.query as { a?: string; b?: string; verA?: string; verB?: string };
   if (!a || !b) {
     return res.status(400).json({ error: 'Parameters a and b required' });
   }
+
+  if (!isAdmin) {
+    const callerProfile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
+    const callerProfileId = callerProfile?.id;
+    const isCallerInPair = Boolean(
+      (authUserId && (a === authUserId || b === authUserId)) ||
+      (callerProfileId && (a === callerProfileId || b === callerProfileId))
+    );
+    if (!isCallerInPair) {
+      return res.status(403).json({ error: 'Forbidden: You must be one of the members in the pair' });
+    }
+  }
+
   const key = getPairCacheKey(a, b);
   const cached = matchPairCache.get(key);
   if (cached && cached.versionA === verA && cached.versionB === verB) {
@@ -2971,17 +3020,49 @@ app.get('/api/matches/pair-cache', (req: Request, res: Response) => {
 });
 
 app.post('/api/matches/pair-cache', (req: Request, res: Response) => {
+  const authUserId = resolveAuthUserId(req);
+  const { isAdmin } = resolveAdminInfo(req);
+  if (!authUserId && !isAdmin) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
   const { a, b, verA, verB, result } = req.body || {};
   if (!a || !b || !result) {
     return res.status(400).json({ error: 'Missing required parameters' });
   }
-  const key = getPairCacheKey(a, b);
-  matchPairCache.set(key, {
-    versionA: String(verA || ''),
-    versionB: String(verB || ''),
-    result,
-    updatedAt: new Date().toISOString()
-  });
+
+  if (!isAdmin) {
+    const callerProfile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
+    const callerProfileId = callerProfile?.id;
+    const isCallerInPair = Boolean(
+      (authUserId && (a === authUserId || b === authUserId)) ||
+      (callerProfileId && (a === callerProfileId || b === callerProfileId))
+    );
+    if (!isCallerInPair) {
+      return res.status(403).json({ error: 'Forbidden: You must be one of the members in the pair' });
+    }
+  }
+
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) {
+    return res.status(400).json({ error: 'Invalid result format' });
+  }
+  const resultKeys = Object.keys(result);
+  if (resultKeys.length !== 2 || !resultKeys.includes('score') || !resultKeys.includes('reason')) {
+    return res.status(400).json({ error: 'Result must contain exactly score and reason fields, with no extra fields' });
+  }
+  if (typeof result.score !== 'number' || !Number.isFinite(result.score) || result.score < 0 || result.score > 100) {
+    return res.status(400).json({ error: 'Score must be a number between 0 and 100' });
+  }
+  if (typeof result.reason !== 'string' || result.reason.length > 300) {
+    return res.status(400).json({ error: 'Reason must be a string up to 300 characters' });
+  }
+
+  const cleanResult = {
+    score: result.score,
+    reason: sanitizeText(result.reason, 300)
+  };
+
+  setPairCacheEntry(a, b, String(verA || ''), String(verB || ''), cleanResult);
   return res.json({ success: true });
 });
 
@@ -3517,10 +3598,17 @@ app.post('/api/admin/import', async (req: Request, res: Response) => {
   }
 });
 
+// Track connect request rate limits and duplicate requests (per requester ID)
+export interface ConnectHistoryEntry {
+  targetId: string;
+  timestamp: number;
+}
+export const connectRequestsMap = new Map<string, ConnectHistoryEntry[]>();
+
 // Explicit connect endpoint (records notification to peer - requires session)
 app.post('/api/connect', async (req: Request, res: Response) => {
   const authUserId = resolveAuthUserId(req);
-  const isAdmin = checkAdmin(req);
+  const { isAdmin } = resolveAdminInfo(req);
 
   if (!authUserId && !isAdmin) {
     return res.status(401).json({ error: 'Authentication required to send a connection request' });
@@ -3538,9 +3626,43 @@ app.post('/api/connect', async (req: Request, res: Response) => {
 
   const requester = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
   const requesterName = requester ? requester.name : 'A member';
+  const requesterId = requester?.id || authUserId;
 
   if (target_id === authUserId || (requester && target_id === requester.id)) {
     return res.status(400).json({ error: 'Cannot connect with yourself' });
+  }
+
+  // Rate limits & duplicate checks (no limit for admins)
+  if (!isAdmin && requesterId) {
+    const now = Date.now();
+    const oneMinuteAgo = now - 60 * 1000;
+    const oneDayAgo = now - 24 * 60 * 60 * 1000;
+    const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+
+    let history = connectRequestsMap.get(requesterId) || [];
+    history = history.filter(h => h.timestamp > sevenDaysAgo);
+    connectRequestsMap.set(requesterId, history);
+
+    // Duplicate request to the same person within 7 days -> 409
+    const duplicateInHistory = history.some(h => h.targetId === target_id && h.timestamp > sevenDaysAgo);
+    const duplicateInNotifications = (store.notifications || []).some((n: any) =>
+      n.type === 'connect' &&
+      (n.from_id === requesterId || (requester && n.from_id === requester.id) || n.from_id === authUserId) &&
+      n.to_id === target_id &&
+      new Date(n.created_at).getTime() > sevenDaysAgo
+    );
+
+    if (duplicateInHistory || duplicateInNotifications) {
+      return res.status(409).json({ error: "You already sent a request to this person." });
+    }
+
+    // Rate limits: Max 5 a minute and 20 a day per member
+    const lastMinuteCount = history.filter(h => h.timestamp > oneMinuteAgo).length;
+    const lastDayCount = history.filter(h => h.timestamp > oneDayAgo).length;
+
+    if (lastMinuteCount >= 5 || lastDayCount >= 20) {
+      return res.status(429).json({ error: "You've reached today's limit for connection requests. Try again tomorrow." });
+    }
   }
 
   // Dispatch a notification to the target member
@@ -3557,6 +3679,13 @@ app.post('/api/connect', async (req: Request, res: Response) => {
   store.notifications.unshift(notif);
   await persistDoc('notifications', notif.id, notif);
 
+  // Track connect request history if member
+  if (requesterId) {
+    const list = connectRequestsMap.get(requesterId) || [];
+    list.push({ targetId: target_id, timestamp: Date.now() });
+    connectRequestsMap.set(requesterId, list);
+  }
+
   return res.json({
     success: true,
     target_id: target.id,
@@ -3566,44 +3695,133 @@ app.post('/api/connect', async (req: Request, res: Response) => {
   });
 });
 
+export async function cascadeDeleteMemberData(memberId: string, memberUid?: string | null) {
+  const matchesMember = (val?: string | null) =>
+    Boolean(val && (val === memberId || (memberUid && val === memberUid)));
+
+  // 1. Posts authored by member
+  const deletedPosts = (store.posts || []).filter((p: any) => matchesMember(p.author_id)).map(p => p.id);
+  store.posts = (store.posts || []).filter((p: any) => !matchesMember(p.author_id));
+
+  // 2. Follows involving member
+  const deletedFollows = (store.follows || []).filter((f: any) => matchesMember(f.follower_id) || matchesMember(f.following_id)).map(f => f.id);
+  store.follows = (store.follows || []).filter((f: any) => !matchesMember(f.follower_id) && !matchesMember(f.following_id));
+
+  // 3. Matches involving member
+  const deletedMatches = (store.matches || []).filter((m: any) => matchesMember(m.a_id) || matchesMember(m.b_id)).map(m => m.id);
+  store.matches = (store.matches || []).filter((m: any) => !matchesMember(m.a_id) && !matchesMember(m.b_id));
+
+  // 4. Notifications involving member
+  const deletedNotifs = (store.notifications || []).filter((n: any) => matchesMember(n.to_id) || matchesMember(n.from_id)).map(n => n.id);
+  store.notifications = (store.notifications || []).filter((n: any) => !matchesMember(n.to_id) && !matchesMember(n.from_id));
+
+  // 5. Events authored by the member: delete them, plus their event_guests, event_questions and uploaded event images
+  const authoredEvents = (store.events || []).filter((e: any) => matchesMember(e.author_id));
+  const authoredEventIds = new Set(authoredEvents.map((e: any) => e.id));
+  store.events = (store.events || []).filter((e: any) => !authoredEventIds.has(e.id));
+
+  // Event guests: belonging to authored events OR registered by the member
+  const deletedGuests = (store.event_guests || []).filter((g: any) => authoredEventIds.has(g.event_id) || matchesMember(g.user_id) || matchesMember(g.profile_id)).map(g => g.id);
+  store.event_guests = (store.event_guests || []).filter((g: any) => !authoredEventIds.has(g.event_id) && !matchesMember(g.user_id) && !matchesMember(g.profile_id));
+
+  // Event questions: belonging to authored events OR asked by the member
+  const deletedQuestions = (store.event_questions || []).filter((q: any) => authoredEventIds.has(q.event_id) || matchesMember(q.author_id)).map(q => q.id);
+  store.event_questions = (store.event_questions || []).filter((q: any) => !authoredEventIds.has(q.event_id) && !matchesMember(q.author_id));
+
+  // 6. Delete replies the member posted on questions of other events
+  for (const q of (store.event_questions || [])) {
+    if (q.reply && matchesMember(q.reply.author_id)) {
+      delete q.reply;
+      await persistDoc('event_questions', q.id, q);
+    }
+  }
+
+  // 7. Remove the member's id and uid from attendee_ids in all other events
+  for (const ev of (store.events || [])) {
+    let changed = false;
+    if (Array.isArray(ev.attendee_ids)) {
+      const origLen = ev.attendee_ids.length;
+      ev.attendee_ids = ev.attendee_ids.filter((attId: string) => !matchesMember(attId));
+      if (ev.attendee_ids.length !== origLen) {
+        changed = true;
+      }
+    }
+    if (Array.isArray(ev.reports)) {
+      for (const r of ev.reports) {
+        if (matchesMember(r.reporter_id)) {
+          r.reporter_id = 'deleted-member';
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      await persistDoc('events', ev.id, ev);
+    }
+  }
+
+  // 8. Reports the member filed: keep them for moderation, but set reporter_id to 'deleted-member'
+  for (const rep of (store.reports || [])) {
+    if (matchesMember(rep.reporter_id)) {
+      rep.reporter_id = 'deleted-member';
+      await persistDoc('reports', rep.id, rep);
+    }
+  }
+
+  // 9. Team entries with linked_profile_id = this member: set linked_profile_id to null
+  for (const tm of (store.team || [])) {
+    if (matchesMember(tm.linked_profile_id)) {
+      tm.linked_profile_id = null;
+      await persistDoc('team', tm.id, tm);
+    }
+  }
+
+  // 10. The pair cache: remove entries that include this member
+  for (const [key] of matchPairCache.entries()) {
+    const parts = key.split('_');
+    if (parts.some((p: string) => matchesMember(p))) {
+      matchPairCache.delete(key);
+    }
+  }
+
+  // Remove from connectRequestsMap
+  connectRequestsMap.delete(memberId);
+  if (memberUid) connectRequestsMap.delete(memberUid);
+
+  // Persistence
+  if (storageMode === 'firestore' && firestoreDb) {
+    await removeDoc('profiles', memberId);
+    if (deletedPosts.length > 0) await batchRemoveDocs('posts', deletedPosts);
+    if (deletedFollows.length > 0) await batchRemoveDocs('follows', deletedFollows);
+    if (deletedMatches.length > 0) await batchRemoveDocs('matches', deletedMatches);
+    if (deletedNotifs.length > 0) await batchRemoveDocs('notifications', deletedNotifs);
+    if (authoredEvents.length > 0) await batchRemoveDocs('events', Array.from(authoredEventIds));
+    if (deletedGuests.length > 0) await batchRemoveDocs('event_guests', deletedGuests);
+    if (deletedQuestions.length > 0) await batchRemoveDocs('event_questions', deletedQuestions);
+  } else {
+    saveStore(store);
+  }
+}
+
 // Delete member profile permanently (Authentication required: self or admin)
 app.delete('/api/profiles/:id', async (req: Request, res: Response) => {
   const id = req.params.id;
   const authUserId = resolveAuthUserId(req);
-  const isAdmin = checkAdmin(req);
+  const { isAdmin } = resolveAdminInfo(req);
 
   if (!authUserId && !isAdmin) {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
   const existing = store.profiles.find((p: any) => p.id === id);
-  const isOwner = authUserId && (id === authUserId || existing?.account_uid === authUserId);
+  const isOwner = Boolean(authUserId && (id === authUserId || existing?.account_uid === authUserId));
 
   if (!isAdmin && !isOwner) {
     return res.status(403).json({ error: 'Forbidden: You can only delete your own profile' });
   }
 
   const initialCount = store.profiles.length;
-  const deletedPosts = store.posts.filter((p: any) => p.author_id === id).map(p => p.id);
-  const deletedFollows = store.follows.filter((f: any) => f.follower_id === id || f.following_id === id).map(f => f.id);
-  const deletedMatches = store.matches.filter((m: any) => m.a_id === id || m.b_id === id).map(m => m.id);
-  const deletedNotifs = store.notifications.filter((n: any) => n.to_id === id || n.from_id === id).map(n => n.id);
-
+  await cascadeDeleteMemberData(id, existing?.account_uid);
   store.profiles = store.profiles.filter((p: any) => p.id !== id);
-  store.posts = store.posts.filter((p: any) => p.author_id !== id);
-  store.follows = store.follows.filter((f: any) => f.follower_id !== id && f.following_id !== id);
-  store.matches = store.matches.filter((m: any) => m.a_id !== id && m.b_id !== id);
-  store.notifications = store.notifications.filter((n: any) => n.to_id !== id && n.from_id !== id);
-
-  if (storageMode === 'firestore' && firestoreDb) {
-    await removeDoc('profiles', id);
-    if (deletedPosts.length > 0) await batchRemoveDocs('posts', deletedPosts);
-    if (deletedFollows.length > 0) await batchRemoveDocs('follows', deletedFollows);
-    if (deletedMatches.length > 0) await batchRemoveDocs('matches', deletedMatches);
-    if (deletedNotifs.length > 0) await batchRemoveDocs('notifications', deletedNotifs);
-  } else {
-    saveStore(store);
-  }
 
   // Requirement 9: Deleting a profile also deletes the Firebase user account
   const firebaseUidToDelete = existing?.account_uid || (id.startsWith('user-') || id.startsWith('demo-') ? null : id) || authUserId;
@@ -7246,6 +7464,10 @@ app.delete('/api/data/:collection/:id', async (req: Request, res: Response) => {
     if (!isOwner) {
       return res.status(403).json({ error: 'Forbidden: You can only delete your own submissions' });
     }
+  }
+
+  if (col === 'profiles') {
+    await cascadeDeleteMemberData(id, existing.account_uid);
   }
 
   (store as any)[colKey] = (store[colKey] as any[]).filter((item: any) => item.id !== id);

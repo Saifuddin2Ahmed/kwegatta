@@ -32,6 +32,11 @@ import {
   SAIFUDDIN_PROFILE_MIGRATION_V3_FLAG,
   cleanupExpiredGuestRecords,
   resetGuestCleanupTimerForTest,
+  matchPairCache,
+  getPairCacheKey,
+  setPairCacheEntry,
+  connectRequestsMap,
+  cascadeDeleteMemberData,
   store
 } from '../server';
 import { validatePasswordStrength } from '../src/services/firebase';
@@ -262,8 +267,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.5.10
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.10'");
+    // 1. Cache name includes version kwegatta-1.5.11
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.11'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -3014,6 +3019,310 @@ describe('Release 1.5.0 Features', () => {
           window.confirm = originalConfirm;
           global.fetch = originalFetch;
         }
+      });
+    });
+
+    describe('Release 1.5.11 Security Fixes', () => {
+      it('a) pair-cache GET/POST without auth -> 401; signed-in not in pair -> 403; in pair -> 200; invalid result -> 400; stored result has only score and reason', async () => {
+        // Unauthenticated
+        const getNoAuth = await fetch(`${baseUrl}/api/matches/pair-cache?a=user-1&b=user-2`);
+        expect(getNoAuth.status).toBe(401);
+
+        const postNoAuth = await fetch(`${baseUrl}/api/matches/pair-cache`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ a: 'user-1', b: 'user-2', result: { score: 80, reason: 'Good' } })
+        });
+        expect(postNoAuth.status).toBe(401);
+
+        // Signed in but not in pair (caller is user-3)
+        const getNotPair = await fetch(`${baseUrl}/api/matches/pair-cache?a=user-1&b=user-2`, {
+          headers: { Authorization: 'Bearer user-3' }
+        });
+        expect(getNotPair.status).toBe(403);
+
+        const postNotPair = await fetch(`${baseUrl}/api/matches/pair-cache`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer user-3' },
+          body: JSON.stringify({ a: 'user-1', b: 'user-2', result: { score: 80, reason: 'Good' } })
+        });
+        expect(postNotPair.status).toBe(403);
+
+        // Invalid result: score 150
+        const postInvalidScore = await fetch(`${baseUrl}/api/matches/pair-cache`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer user-1' },
+          body: JSON.stringify({ a: 'user-1', b: 'user-2', result: { score: 150, reason: 'Too high' } })
+        });
+        expect(postInvalidScore.status).toBe(400);
+
+        // Invalid result: extra fields
+        const postExtraFields = await fetch(`${baseUrl}/api/matches/pair-cache`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer user-1' },
+          body: JSON.stringify({ a: 'user-1', b: 'user-2', result: { score: 85, reason: 'Good', extraField: 'bad' } })
+        });
+        expect(postExtraFields.status).toBe(400);
+
+        // Valid member in pair: POST -> 200
+        const postValid = await fetch(`${baseUrl}/api/matches/pair-cache`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer user-1' },
+          body: JSON.stringify({
+            a: 'user-1',
+            b: 'user-2',
+            verA: 'v1',
+            verB: 'v2',
+            result: { score: 85, reason: 'Great complementary match' }
+          })
+        });
+        expect(postValid.status).toBe(200);
+
+        // Valid member in pair: GET -> 200
+        const getValid = await fetch(`${baseUrl}/api/matches/pair-cache?a=user-1&b=user-2&verA=v1&verB=v2`, {
+          headers: { Authorization: 'Bearer user-1' }
+        });
+        expect(getValid.status).toBe(200);
+        const getData = await getValid.json();
+        expect(getData.cached).toBe(true);
+        expect(getData.result.score).toBe(85);
+        expect(getData.result.reason).toBe('Great complementary match');
+
+        // Stored result has ONLY score and reason
+        const stored = matchPairCache.get(getPairCacheKey('user-1', 'user-2'));
+        expect(stored).toBeDefined();
+        expect(Object.keys(stored!.result).sort()).toEqual(['reason', 'score']);
+      });
+
+      it('b) Cache never exceeds 5,000 entries', () => {
+        matchPairCache.clear();
+        for (let i = 0; i < 5005; i++) {
+          setPairCacheEntry(
+            `user-a-${i}`,
+            `user-b-${i}`,
+            'v1',
+            'v2',
+            { score: 50, reason: `Pair ${i}` },
+            new Date(1000000 + i * 1000).toISOString()
+          );
+        }
+        expect(matchPairCache.size).toBe(5000);
+        expect(matchPairCache.size).toBeLessThanOrEqual(5000);
+        // Oldest evicted
+        expect(matchPairCache.has(getPairCacheKey('user-a-0', 'user-b-0'))).toBe(false);
+        expect(matchPairCache.has(getPairCacheKey('user-a-5004', 'user-b-5004'))).toBe(true);
+      });
+
+      it('c) Delete a member who authored 1 event (with 1 guest and 1 question), RSVP\'d another event, asked a question elsewhere, filed a report, and is linked in team -> afterwards none of that data references the member, the report has reporter_id \'deleted-member\', and team linked_profile_id is null', async () => {
+        const testMemberId = 'del-member-1511';
+        store.profiles.push({
+          id: testMemberId,
+          account_uid: testMemberId,
+          name: 'Delete Test Member',
+          email: `${testMemberId}@kwegatta.test`,
+          role: 'Developer'
+        });
+
+        // 1. Authored event
+        const authoredEventId = 'ev-authored-1511';
+        store.events.push({
+          id: authoredEventId,
+          author_id: testMemberId,
+          title: 'Authored Event by Test Member',
+          published: true,
+          attendee_ids: [testMemberId]
+        });
+
+        // 2. Guest for authored event
+        const guestId = 'guest-authored-1511';
+        store.event_guests.push({
+          id: guestId,
+          event_id: authoredEventId,
+          name: 'Guest on Authored Event',
+          email: 'guest@kwegatta.test'
+        });
+
+        // 3. Question on authored event
+        const questionOnAuthoredId = 'q-on-authored-1511';
+        store.event_questions.push({
+          id: questionOnAuthoredId,
+          event_id: authoredEventId,
+          author_id: 'visitor-user',
+          content: 'When does it start?'
+        });
+
+        // 4. RSVP on another event
+        const otherEventId = 'ev-other-1511';
+        store.events.push({
+          id: otherEventId,
+          author_id: 'other-host-1511',
+          title: 'Community Meetup',
+          published: true,
+          attendee_ids: [testMemberId, 'retained-member-1511']
+        });
+
+        // 5. Question asked elsewhere
+        const questionAskedElsewhereId = 'q-asked-elsewhere-1511';
+        store.event_questions.push({
+          id: questionAskedElsewhereId,
+          event_id: otherEventId,
+          author_id: testMemberId,
+          content: 'Will there be mentors?'
+        });
+
+        // 6. Report filed by member
+        const reportId = 'rep-member-1511';
+        store.reports.push({
+          id: reportId,
+          reporter_id: testMemberId,
+          reported_id: 'flagged-user-1511',
+          reason: 'Spam'
+        });
+
+        // 7. Linked in team
+        const teamMemberId = 'team-member-1511';
+        store.team.push({
+          id: teamMemberId,
+          name: 'Linked Team Contributor',
+          linked_profile_id: testMemberId,
+          order: 99
+        } as any);
+
+        // 8. Pair cache entry
+        setPairCacheEntry(testMemberId, 'peer-user-1511', 'v1', 'v2', { score: 95, reason: 'Great match' });
+        const pairCacheKey = getPairCacheKey(testMemberId, 'peer-user-1511');
+        expect(matchPairCache.has(pairCacheKey)).toBe(true);
+
+        // Call DELETE /api/profiles/:id
+        const res = await fetch(`${baseUrl}/api/profiles/${testMemberId}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${testMemberId}` }
+        });
+        expect(res.status).toBe(200);
+
+        // Assertions:
+        // Profile deleted
+        expect(store.profiles.find((p: any) => p.id === testMemberId)).toBeUndefined();
+        // Authored event deleted
+        expect(store.events.find((e: any) => e.id === authoredEventId)).toBeUndefined();
+        // Authored event guest deleted
+        expect(store.event_guests.find((g: any) => g.id === guestId)).toBeUndefined();
+        // Authored event question deleted
+        expect(store.event_questions.find((q: any) => q.id === questionOnAuthoredId)).toBeUndefined();
+        // Other event attendee_ids updated
+        const otherEvent = store.events.find((e: any) => e.id === otherEventId);
+        expect(otherEvent).toBeDefined();
+        expect(otherEvent!.attendee_ids).toContain('retained-member-1511');
+        expect(otherEvent!.attendee_ids).not.toContain(testMemberId);
+        // Question asked elsewhere deleted
+        expect(store.event_questions.find((q: any) => q.id === questionAskedElsewhereId)).toBeUndefined();
+        // Report has reporter_id 'deleted-member'
+        const report = store.reports.find((r: any) => r.id === reportId);
+        expect(report).toBeDefined();
+        expect(report!.reporter_id).toBe('deleted-member');
+        // Team linked_profile_id is null
+        const teamEntry = store.team.find((t: any) => t.id === teamMemberId);
+        expect(teamEntry).toBeDefined();
+        expect(teamEntry!.linked_profile_id).toBeNull();
+        // Pair cache entry removed
+        expect(matchPairCache.has(pairCacheKey)).toBe(false);
+      });
+
+      it('d) The 21st connect in a day -> 429; the same target twice -> 409; admin -> no limit', async () => {
+        const senderId = 'connect-tester-1511';
+        store.profiles.push({
+          id: senderId,
+          account_uid: senderId,
+          name: 'Connect Sender',
+          email: `${senderId}@kwegatta.test`,
+          role: 'Founder'
+        });
+
+        // Populate 25 distinct target profiles
+        for (let i = 1; i <= 25; i++) {
+          const tId = `target-user-1511-${i}`;
+          if (!store.profiles.some((p: any) => p.id === tId)) {
+            store.profiles.push({
+              id: tId,
+              name: `Target User ${i}`,
+              email: `${tId}@kwegatta.test`,
+              role: 'Developer'
+            });
+          }
+        }
+
+        connectRequestsMap.delete(senderId);
+
+        // First connect to target 1 -> 200
+        const res1 = await fetch(`${baseUrl}/api/connect`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${senderId}`
+          },
+          body: JSON.stringify({ target_id: 'target-user-1511-1', note: 'First hello' })
+        });
+        expect(res1.status).toBe(200);
+
+        // Same target twice -> 409
+        const resDup = await fetch(`${baseUrl}/api/connect`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${senderId}`
+          },
+          body: JSON.stringify({ target_id: 'target-user-1511-1', note: 'Second hello' })
+        });
+        expect(resDup.status).toBe(409);
+        const dupData = await resDup.json();
+        expect(dupData.error).toBe('You already sent a request to this person.');
+
+        // Fill up to 20 connects for today (spaced out > 1 min ago to test 20/day limit)
+        for (let i = 2; i <= 20; i++) {
+          const history = connectRequestsMap.get(senderId) || [];
+          history.push({ targetId: `target-user-1511-${i}`, timestamp: Date.now() - 120 * 1000 });
+          connectRequestsMap.set(senderId, history);
+        }
+
+        // The 21st connect in a day -> 429
+        const res21 = await fetch(`${baseUrl}/api/connect`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${senderId}`
+          },
+          body: JSON.stringify({ target_id: 'target-user-1511-21', note: '21st connect' })
+        });
+        expect(res21.status).toBe(429);
+        const limitData = await res21.json();
+        expect(limitData.error).toBe("You've reached today's limit for connection requests. Try again tomorrow.");
+
+        // Admin -> no limit
+        if (!store.admin_emails.includes('admin-limits@kwegatta.test')) {
+          store.admin_emails.push('admin-limits@kwegatta.test');
+        }
+        const adminId = 'admin-limits';
+
+        // Admin sending to target 1 (duplicate and beyond limit) -> 200
+        const adminRes1 = await fetch(`${baseUrl}/api/connect`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${adminId}`
+          },
+          body: JSON.stringify({ target_id: 'target-user-1511-1', note: 'Admin connect 1' })
+        });
+        expect(adminRes1.status).toBe(200);
+
+        const adminRes2 = await fetch(`${baseUrl}/api/connect`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${adminId}`
+          },
+          body: JSON.stringify({ target_id: 'target-user-1511-1', note: 'Admin duplicate' })
+        });
+        expect(adminRes2.status).toBe(200);
       });
     });
   });

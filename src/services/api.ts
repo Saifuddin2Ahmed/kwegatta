@@ -332,6 +332,26 @@ export function getCachedPairMatch(me: Profile, candidate: Profile): MatchResult
   return null;
 }
 
+export async function fetchServerPairCache(
+  a: string,
+  b: string,
+  verA?: string,
+  verB?: string
+): Promise<{ cached: boolean; result?: { score: number; reason: string } }> {
+  try {
+    const params = new URLSearchParams({ a, b });
+    if (verA) params.set('verA', verA);
+    if (verB) params.set('verB', verB);
+    const res = await fetch(`/api/matches/pair-cache?${params.toString()}`, {
+      headers: getAuthHeaders()
+    });
+    if (!res.ok) return { cached: false };
+    return await res.json();
+  } catch (_) {
+    return { cached: false };
+  }
+}
+
 export function setCachedPairMatch(me: Profile, candidate: Profile, result: MatchResult) {
   try {
     const key = `kw_pair_${[me.id, candidate.id].sort().join('_')}`;
@@ -351,13 +371,16 @@ export function setCachedPairMatch(me: Profile, candidate: Profile, result: Matc
     localStorage.setItem(key, JSON.stringify(payload));
     fetch('/api/matches/pair-cache', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         a: me.id,
         b: candidate.id,
         verA: payload.verA,
         verB: payload.verB,
-        result: payload.result
+        result: {
+          score: Math.max(0, Math.min(100, Number(result.score) || 0)),
+          reason: String(result.reason || '').slice(0, 300)
+        }
       })
     }).catch(() => {});
   } catch (_) {}

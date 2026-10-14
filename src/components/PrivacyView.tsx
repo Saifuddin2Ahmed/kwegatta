@@ -122,7 +122,7 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({ onBack }) => {
               <div>
                 <strong className="text-[var(--fg)]">Delete My Profile Permanently:</strong>
                 <p className="text-xs text-[var(--fg-muted)] mt-0.5">
-                  Click <strong>Delete my profile</strong> on your profile page and confirm by typing your name. The server permanently erases your profile document and cascades the deletion across your posts, matches, and notifications in Firestore.
+                  Click <strong>Delete my profile</strong> on your profile page and confirm by typing your name. The server permanently erases your profile document and cascades the deletion across your posts, follows, matches, notifications, authored events (including their guests, questions, and uploaded cover images), event RSVPs, event questions &amp; replies, and cached match pairs, unlinks any team member entries, and anonymizes submitted moderation reports.
                 </p>
               </div>
             </div>

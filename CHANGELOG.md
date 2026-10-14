@@ -4,6 +4,14 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.11] - 2026-10-13
+
+### Security (Release 1.5.11)
+- **Security fixes (pair-cache, account deletion, connect limits)**:
+  - **Match Pair Cache**: Authenticated endpoints (`GET` and `POST /api/matches/pair-cache`) require the caller to be one of the paired members (or an admin); reject requests with 401 or 403 otherwise. Validates that cached result objects strictly contain only `score` (0–100) and `reason` (≤ 300 chars, sanitized), rejecting extra fields or invalid inputs with 400. In-memory pair cache is capped at 5,000 entries with LRU/oldest-updated eviction. Client calls include authorization headers.
+  - **Comprehensive Account Deletion Cascade**: Permanent profile deletion cascades across all associated data: authored events (along with their guests, questions, and uploaded cover images), attendee lists in other events, questions asked and host replies, moderation reports (anonymized to 'deleted-member'), team member profile linkages (set to null), and match pair cache entries. `PrivacyView` updated with complete deletion disclosures.
+  - **Connection Request Rate Limits & Duplicate Prevention**: `POST /api/connect` limits members to at most 5 requests per minute and 20 per day (returning 429), prevents duplicate requests to the same member within 7 days (returning 409), while exempting administrators from limits.
+
 ## [1.5.10] - 2026-10-13
 
 ### Changed (Release 1.5.10)
