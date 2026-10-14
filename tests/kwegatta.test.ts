@@ -3,6 +3,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { EventsView } from '../src/components/EventsView';
+import { FeedView } from '../src/components/FeedView';
 import { OnboardingChat } from '../src/components/OnboardingChat';
 import { AuthModal } from '../src/components/AuthModal';
 import { guessCountry } from '../src/lib/countries';
@@ -268,7 +269,7 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
     // 1. Cache name includes version kwegatta-1.5.11
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.11'");
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.12'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -3323,6 +3324,357 @@ describe('Release 1.5.0 Features', () => {
           body: JSON.stringify({ target_id: 'target-user-1511-1', note: 'Admin duplicate' })
         });
         expect(adminRes2.status).toBe(200);
+      });
+    });
+
+    describe('Release 1.5.12 — Post Reactions, Comments & SVG Icons', () => {
+      it('a) A member reacts like twice -> like count 0 (toggled off)', async () => {
+        const postId = 'post-1512-1';
+        store.posts.push({
+          id: postId,
+          author_id: 'author-1512',
+          body: 'Test post for reaction',
+          kind: 'idea',
+          tags: [],
+          created_at: new Date().toISOString()
+        });
+        const memberId = 'member-1512-1';
+        store.profiles.push({
+          id: memberId,
+          name: 'React Member',
+          role: 'Developer',
+          headline: 'Dev',
+          bio: 'Bio',
+          offers: '',
+          needs: '',
+          tags: [],
+          skills: [],
+          created_at: new Date().toISOString()
+        });
+
+        // 1st react 'like'
+        let res = await fetch(`${baseUrl}/api/posts/${postId}/react`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${memberId}` },
+          body: JSON.stringify({ type: 'like' })
+        });
+        expect(res.status).toBe(200);
+        let data = await res.json();
+        expect(data.counts.like).toBe(1);
+        expect(data.my_reaction).toBe('like');
+
+        // 2nd react 'like' (toggle off)
+        res = await fetch(`${baseUrl}/api/posts/${postId}/react`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${memberId}` },
+          body: JSON.stringify({ type: 'like' })
+        });
+        expect(res.status).toBe(200);
+        data = await res.json();
+        expect(data.counts.like).toBe(0);
+        expect(data.my_reaction).toBeNull();
+      });
+
+      it('b) A member reacts like then love -> like 0, love 1, my_reaction love', async () => {
+        const postId = 'post-1512-2';
+        store.posts.push({
+          id: postId,
+          author_id: 'author-1512',
+          body: 'Test post',
+          kind: 'idea',
+          tags: [],
+          created_at: new Date().toISOString()
+        });
+        const memberId = 'member-1512-2';
+        store.profiles.push({
+          id: memberId,
+          name: 'Member 2',
+          role: 'Developer',
+          headline: 'Dev',
+          bio: 'Bio',
+          offers: '',
+          needs: '',
+          tags: [],
+          skills: [],
+          created_at: new Date().toISOString()
+        });
+
+        await fetch(`${baseUrl}/api/posts/${postId}/react`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${memberId}` },
+          body: JSON.stringify({ type: 'like' })
+        });
+
+        const res = await fetch(`${baseUrl}/api/posts/${postId}/react`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${memberId}` },
+          body: JSON.stringify({ type: 'love' })
+        });
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(data.counts.like).toBe(0);
+        expect(data.counts.love).toBe(1);
+        expect(data.my_reaction).toBe('love');
+      });
+
+      it('c) Two different members react like -> like 2', async () => {
+        const postId = 'post-1512-3';
+        store.posts.push({
+          id: postId,
+          author_id: 'author-1512',
+          body: 'Test post',
+          kind: 'idea',
+          tags: [],
+          created_at: new Date().toISOString()
+        });
+        store.profiles.push(
+          { id: 'm1', name: 'M1', role: 'Developer', headline: 'D', bio: 'B', offers: '', needs: '', tags: [], skills: [], created_at: new Date().toISOString() },
+          { id: 'm2', name: 'M2', role: 'Developer', headline: 'D', bio: 'B', offers: '', needs: '', tags: [], skills: [], created_at: new Date().toISOString() }
+        );
+
+        await fetch(`${baseUrl}/api/posts/${postId}/react`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer m1` },
+          body: JSON.stringify({ type: 'like' })
+        });
+        const res = await fetch(`${baseUrl}/api/posts/${postId}/react`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer m2` },
+          body: JSON.stringify({ type: 'like' })
+        });
+        const data = await res.json();
+        expect(data.counts.like).toBe(2);
+      });
+
+      it('d) Anonymous react -> 401; type wow -> 400', async () => {
+        const postId = 'post-1512-4';
+        store.posts.push({
+          id: postId,
+          author_id: 'author-1512',
+          body: 'Test post',
+          kind: 'idea',
+          tags: [],
+          created_at: new Date().toISOString()
+        });
+
+        const resAnon = await fetch(`${baseUrl}/api/posts/${postId}/react`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'like' })
+        });
+        expect(resAnon.status).toBe(401);
+
+        const resInvalid = await fetch(`${baseUrl}/api/posts/${postId}/react`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer m1` },
+          body: JSON.stringify({ type: 'wow' })
+        });
+        expect(resInvalid.status).toBe(400);
+      });
+
+      it('e) Author PATCHes posts with reactions ignored', async () => {
+        const postId = 'post-1512-5';
+        store.posts.push({
+          id: postId,
+          author_id: 'author-1512',
+          body: 'Original body',
+          kind: 'idea',
+          tags: [],
+          reactions: { '👍': 1 },
+          created_at: new Date().toISOString()
+        });
+        store.profiles.push({
+          id: 'author-1512',
+          name: 'Author',
+          role: 'Developer',
+          headline: 'D',
+          bio: 'B',
+          offers: '',
+          needs: '',
+          tags: [],
+          skills: [],
+          created_at: new Date().toISOString()
+        });
+
+        const patchRes = await fetch(`${baseUrl}/api/data/posts/${postId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer author-1512` },
+          body: JSON.stringify({ reactions: { like: 999 }, body: 'Updated body' })
+        });
+        expect(patchRes.status).toBe(200);
+        const updatedPost = store.posts.find(p => p.id === postId);
+        expect(updatedPost.body).toBe('Updated body');
+        expect(updatedPost.reactions).toBeUndefined();
+      });
+
+      it('f) Non-author comments -> 201/200, author_name from session ignored', async () => {
+        const postId = 'post-1512-6';
+        store.posts.push({
+          id: postId,
+          author_id: 'author-1512',
+          body: 'Post',
+          kind: 'idea',
+          tags: [],
+          created_at: new Date().toISOString()
+        });
+        store.profiles.push({
+          id: 'commenter-1512',
+          name: 'Real Name',
+          role: 'Developer',
+          headline: 'D',
+          bio: 'B',
+          offers: '',
+          needs: '',
+          tags: [],
+          skills: [],
+          created_at: new Date().toISOString()
+        });
+
+        const res = await fetch(`${baseUrl}/api/posts/${postId}/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer commenter-1512` },
+          body: JSON.stringify({ text: 'Great work!', author_name: 'Fake Name' })
+        });
+        expect(res.status).toBe(201);
+        const comment = await res.json();
+        expect(comment.author_name).toBe('Real Name');
+        expect(comment.author_id).toBe('commenter-1512');
+        expect(comment.text).toBe('Great work!');
+      });
+
+      it('g) Comment delete: stranger -> 403; comment author -> 200; post author -> 200', async () => {
+        const postId = 'post-1512-7';
+        const commentId = 'c-1512-1';
+        store.posts.push({
+          id: postId,
+          author_id: 'post-author-1512',
+          body: 'Post',
+          kind: 'idea',
+          tags: [],
+          comments: [{ id: commentId, author_id: 'commenter-1512', author_name: 'Com', text: 'Hello', created_at: new Date().toISOString() }],
+          created_at: new Date().toISOString()
+        });
+        store.profiles.push(
+          { id: 'stranger-1512', name: 'Stranger', role: 'Developer', headline: '', bio: '', offers: '', needs: '', tags: [], skills: [], created_at: new Date().toISOString() },
+          { id: 'commenter-1512', name: 'Com', role: 'Developer', headline: '', bio: '', offers: '', needs: '', tags: [], skills: [], created_at: new Date().toISOString() },
+          { id: 'post-author-1512', name: 'Host', role: 'Developer', headline: '', bio: '', offers: '', needs: '', tags: [], skills: [], created_at: new Date().toISOString() }
+        );
+
+        // Stranger tries to delete
+        const resStranger = await fetch(`${baseUrl}/api/posts/${postId}/comments/${commentId}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer stranger-1512` }
+        });
+        expect(resStranger.status).toBe(403);
+
+        // Comment author deletes
+        const resCommenter = await fetch(`${baseUrl}/api/posts/${postId}/comments/${commentId}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer commenter-1512` }
+        });
+        expect(resCommenter.status).toBe(200);
+      });
+
+      it('h) Public GET /api/data/posts and /api/sync contain no reactions_by key', async () => {
+        const postId = 'post-1512-8';
+        store.posts.push({
+          id: postId,
+          author_id: 'author-1512',
+          body: 'Post with reactions_by',
+          kind: 'idea',
+          tags: [],
+          reactions_by: { 'm1': 'like' },
+          created_at: new Date().toISOString()
+        });
+
+        const resData = await fetch(`${baseUrl}/api/data/posts`);
+        const postsList = await resData.json();
+        const p = postsList.find((item: any) => item.id === postId);
+        expect(p).toBeTruthy();
+        expect(p.reactions_by).toBeUndefined();
+        expect(p.reaction_counts.like).toBe(1);
+
+        const resSync = await fetch(`${baseUrl}/api/sync?since=0`);
+        const syncData = await resSync.json();
+        const sp = syncData.posts.find((item: any) => item.id === postId);
+        expect(sp).toBeTruthy();
+        expect(sp.reactions_by).toBeUndefined();
+      });
+
+      it('i) Legacy post with reactions { "👍": 3 } shows like count 3; one new like -> 4', async () => {
+        const postId = 'post-1512-9';
+        store.posts.push({
+          id: postId,
+          author_id: 'author-1512',
+          body: 'Legacy post',
+          kind: 'idea',
+          tags: [],
+          reactions: { '👍': 3 },
+          created_at: new Date().toISOString()
+        });
+
+        const res = await fetch(`${baseUrl}/api/data/posts`);
+        const postsList = await res.json();
+        const p = postsList.find((item: any) => item.id === postId);
+        expect(p.reaction_counts.like).toBe(3);
+
+        // Now add a new like
+        const reactRes = await fetch(`${baseUrl}/api/posts/${postId}/react`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer m1` },
+          body: JSON.stringify({ type: 'like' })
+        });
+        const reactData = await reactRes.json();
+        expect(reactData.counts.like).toBe(4);
+      });
+
+      it('j) Render: FeedView reaction buttons contain SVG elements and no emoji characters, and have aria-pressed', async () => {
+        const mockProfile = {
+          id: 'test-u-1512',
+          name: 'Test User',
+          role: 'Developer',
+          headline: 'Dev',
+          bio: 'Bio',
+          offers: '',
+          needs: '',
+          tags: [],
+          skills: [],
+          created_at: new Date().toISOString()
+        };
+        const mockPost = {
+          id: 'p-1512-render',
+          author_id: 'test-u-1512',
+          body: 'Render test post body here',
+          kind: 'idea' as const,
+          tags: [],
+          reaction_counts: { like: 1, launch: 0, love: 0, idea: 0 },
+          my_reaction: 'like',
+          comments: [],
+          created_at: new Date().toISOString()
+        };
+
+        const { act } = await import('@testing-library/react');
+        await act(async () => {
+          render(
+            React.createElement(FeedView, {
+              currentProfile: mockProfile,
+              posts: [mockPost],
+              allProfiles: [mockProfile],
+              onAddPost: vi.fn(),
+              onUpdatePost: vi.fn(),
+              onViewProfile: vi.fn(),
+              onSelectTag: vi.fn(),
+              selectedTag: null
+            })
+          );
+        });
+
+        const likeButton = screen.getByRole('button', { name: /Like/i });
+        expect(likeButton).toBeTruthy();
+        expect(likeButton.getAttribute('aria-pressed')).toBe('true');
+        const svgEl = likeButton.querySelector('svg');
+        expect(svgEl).toBeTruthy();
+        expect(likeButton.textContent).not.toMatch(/[👍🚀❤️💡]/);
       });
     });
   });

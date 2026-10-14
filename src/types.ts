@@ -162,6 +162,9 @@ export interface Post {
   tags: string[];
   created_at: string;
   reactions?: Record<string, number>;
+  reactions_by?: Record<string, string>;
+  reaction_counts?: { like: number; launch: number; love: number; idea: number };
+  my_reaction?: string | null;
   comments?: PostComment[];
 }
 

@@ -906,6 +906,40 @@ export function sanitizePublicProfile(p: any, callerAuthUid: string | null, isAd
   };
 }
 
+export function sanitizePostForPublic(post: any, req: Request): any {
+  if (!post) return post;
+  const counts = { like: 0, launch: 0, love: 0, idea: 0 };
+  if (post.reactions && typeof post.reactions === 'object') {
+    for (const [k, v] of Object.entries(post.reactions)) {
+      const num = Number(v) || 0;
+      if (k === '👍' || k === 'like') counts.like += num;
+      else if (k === '🚀' || k === 'launch') counts.launch += num;
+      else if (k === '❤️' || k === 'love') counts.love += num;
+      else if (k === '💡' || k === 'idea') counts.idea += num;
+    }
+  }
+  const reactionsBy = post.reactions_by || {};
+  for (const [pId, type] of Object.entries(reactionsBy)) {
+    if (type === 'like') counts.like++;
+    else if (type === 'launch') counts.launch++;
+    else if (type === 'love') counts.love++;
+    else if (type === 'idea') counts.idea++;
+  }
+
+  const authUserId = resolveAuthUserId(req);
+  const myProfile = authUserId ? store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId) : null;
+  const callerProfileId = myProfile?.id || authUserId;
+  const my_reaction = callerProfileId ? (reactionsBy[callerProfileId] || null) : null;
+
+  const { reactions_by, reactions, ...rest } = post;
+  return {
+    ...rest,
+    reaction_counts: counts,
+    my_reaction,
+    comments: Array.isArray(post.comments) ? post.comments : []
+  };
+}
+
 // Server AI Performance Metrics
 const aiMetrics = {
   totalCalls: 0,
@@ -3255,6 +3289,169 @@ app.get('/api/admin/members', (req: Request, res: Response) => {
   return res.json(store.profiles);
 });
 
+const reactionLimiter = createRateLimiter({
+  windowMs: 60000,
+  max: 60,
+  message: 'Reaction rate limit reached. Please wait a moment.'
+});
+
+const commentLimiter = createRateLimiter({
+  windowMs: 60000,
+  max: 10,
+  message: 'Comment rate limit reached. Please wait a moment.'
+});
+
+app.post('/api/posts/:id/react', reactionLimiter, async (req: Request, res: Response) => {
+  const authUserId = resolveAuthUserId(req);
+  if (!authUserId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  const myProfile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
+  const profileId = myProfile?.id || authUserId;
+
+  const { type } = req.body || {};
+  if (!['like', 'launch', 'love', 'idea'].includes(type)) {
+    return res.status(400).json({ error: 'Invalid reaction type' });
+  }
+
+  const post = store.posts.find((p: any) => p.id === req.params.id);
+  if (!post) {
+    return res.status(404).json({ error: 'Post not found' });
+  }
+
+  if (!post.reactions_by) post.reactions_by = {};
+  if (post.reactions_by[profileId] === type) {
+    delete post.reactions_by[profileId];
+  } else {
+    post.reactions_by[profileId] = type;
+  }
+
+  if (storageMode === 'firestore' && firestoreDb) {
+    await persistDoc('posts', post.id, post);
+  } else if (storageMode === 'disk') {
+    saveStore(store);
+  }
+
+  const counts = { like: 0, launch: 0, love: 0, idea: 0 };
+  if (post.reactions && typeof post.reactions === 'object') {
+    for (const [k, v] of Object.entries(post.reactions)) {
+      const num = Number(v) || 0;
+      if (k === '👍' || k === 'like') counts.like += num;
+      else if (k === '🚀' || k === 'launch') counts.launch += num;
+      else if (k === '❤️' || k === 'love') counts.love += num;
+      else if (k === '💡' || k === 'idea') counts.idea += num;
+    }
+  }
+  for (const [pId, t] of Object.entries(post.reactions_by)) {
+    if (t === 'like') counts.like++;
+    else if (t === 'launch') counts.launch++;
+    else if (t === 'love') counts.love++;
+    else if (t === 'idea') counts.idea++;
+  }
+
+  return res.json({
+    counts,
+    my_reaction: post.reactions_by[profileId] || null
+  });
+});
+
+app.post('/api/posts/:id/comments', commentLimiter, async (req: Request, res: Response) => {
+  const authUserId = resolveAuthUserId(req);
+  if (!authUserId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  const myProfile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
+  const profileId = myProfile?.id || authUserId;
+  const authorName = myProfile?.name || 'Member';
+
+  const { text } = req.body || {};
+  const cleanText = typeof text === 'string' ? text.trim() : '';
+  if (!cleanText) {
+    return res.status(400).json({ error: 'Comment text cannot be empty' });
+  }
+
+  const post = store.posts.find((p: any) => p.id === req.params.id);
+  if (!post) {
+    return res.status(404).json({ error: 'Post not found' });
+  }
+
+  const comment = {
+    id: 'comment-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
+    author_id: profileId,
+    author_name: authorName,
+    text: sanitizeText(cleanText, 500),
+    created_at: new Date().toISOString()
+  };
+
+  if (!Array.isArray(post.comments)) post.comments = [];
+  post.comments.push(comment);
+
+  if (storageMode === 'firestore' && firestoreDb) {
+    await persistDoc('posts', post.id, post);
+  } else if (storageMode === 'disk') {
+    saveStore(store);
+  }
+
+  if (post.author_id && post.author_id !== profileId) {
+    const notif = {
+      id: 'notif-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
+      to_id: post.author_id,
+      from_id: profileId,
+      type: 'connect' as const,
+      body: `${authorName} commented on your post: "${sanitizeText(comment.text, 80)}"`,
+      read: false,
+      created_at: new Date().toISOString()
+    };
+    if (!store.notifications) store.notifications = [];
+    store.notifications.unshift(notif);
+    if (storageMode === 'firestore' && firestoreDb) {
+      persistDoc('notifications', notif.id, notif).catch(() => {});
+    }
+  }
+
+  return res.status(201).json(comment);
+});
+
+app.delete('/api/posts/:id/comments/:cid', async (req: Request, res: Response) => {
+  const authUserId = resolveAuthUserId(req);
+  const isAdmin = checkAdmin(req);
+  if (!authUserId && !isAdmin) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  const myProfile = authUserId ? store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId) : null;
+  const profileId = myProfile?.id || authUserId;
+
+  const post = store.posts.find((p: any) => p.id === req.params.id);
+  if (!post) {
+    return res.status(404).json({ error: 'Post not found' });
+  }
+
+  const comments = Array.isArray(post.comments) ? post.comments : [];
+  const commentIndex = comments.findIndex((c: any) => c.id === req.params.cid);
+  if (commentIndex === -1) {
+    return res.status(404).json({ error: 'Comment not found' });
+  }
+  const comment = comments[commentIndex];
+
+  const isCommentAuthor = comment.author_id === profileId || comment.author_id === authUserId;
+  const isPostAuthor = post.author_id === profileId || post.author_id === authUserId;
+
+  if (!isAdmin && !isCommentAuthor && !isPostAuthor) {
+    return res.status(403).json({ error: 'Forbidden: You cannot delete this comment' });
+  }
+
+  comments.splice(commentIndex, 1);
+  post.comments = comments;
+
+  if (storageMode === 'firestore' && firestoreDb) {
+    await persistDoc('posts', post.id, post);
+  } else if (storageMode === 'disk') {
+    saveStore(store);
+  }
+
+  return res.json({ success: true });
+});
+
 app.get('/api/admin/posts', (req: Request, res: Response) => {
   if (!verifyAdmin(req, res)) return;
   return res.json(store.posts);
@@ -4224,10 +4421,12 @@ app.get('/api/sync', (req: Request, res: Response) => {
     ? (store.notifications || []).filter(n => n.to_id === callerId && (sinceTime === 0 || new Date(n.created_at || 0).getTime() > sinceTime))
     : [];
 
+  const safePosts = changedPosts.map(p => sanitizePostForPublic(p, req));
+
   return res.json({
     timestamp: new Date().toISOString(),
     profiles: safeProfiles,
-    posts: changedPosts,
+    posts: safePosts,
     notifications: notifs,
     counts: {
       members: activeProfiles.length,
@@ -6843,6 +7042,12 @@ app.get('/api/data/:collection', (req: Request, res: Response) => {
   items.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   const sliced = items.slice(0, limit);
 
+  // POSTS SANITIZATION:
+  if (col === 'posts') {
+    const safePosts = sliced.map(p => sanitizePostForPublic(p, req));
+    return res.json(safePosts);
+  }
+
   // EVENTS SANITIZATION:
   if (col === 'events') {
     const isAdmin = checkAdmin(req);
@@ -7238,10 +7443,19 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
 
   // Validate patch fields
   const patch = req.body || {};
-  if (col === 'posts' && patch.body !== undefined) {
-    const rawBody = typeof patch.body === 'string' ? patch.body.trim() : '';
-    if (!rawBody) return res.status(400).json({ error: 'Post body cannot be empty' });
-    patch.body = sanitizeText(rawBody, 2000);
+  if (col === 'posts') {
+    delete patch.reactions;
+    delete patch.reactions_by;
+    delete patch.comments;
+    delete patch.reaction_counts;
+    delete existing.reactions;
+    delete existing.reactions_by;
+    delete existing.reaction_counts;
+    if (patch.body !== undefined) {
+      const rawBody = typeof patch.body === 'string' ? patch.body.trim() : '';
+      if (!rawBody) return res.status(400).json({ error: 'Post body cannot be empty' });
+      patch.body = sanitizeText(rawBody, 2000);
+    }
   }
   if (col === 'profiles') {
     delete patch.role; // Ignore any client-sent role alone

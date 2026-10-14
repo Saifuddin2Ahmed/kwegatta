@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Sparkles, Send, Users, X, MessageSquare, Lightbulb, MessageCircle } from 'lucide-react';
+import { Sparkles, Send, Users, X, MessageSquare, Lightbulb, MessageCircle, ThumbsUp, Rocket, Heart } from 'lucide-react';
 import { Profile, Post, PostComment } from '../types';
-import { classifyPostWithGemma, db, extractKeywords, intersection } from '../services/api';
+import { classifyPostWithGemma, db, extractKeywords, intersection, reactToPost, addPostComment, deletePostComment } from '../services/api';
 import { formatTimeAgo, formatWhatsAppUrl } from '../utils';
 import { Avatar } from './Avatar';
 
@@ -32,6 +32,13 @@ export const FeedView: React.FC<FeedViewProps> = ({
   const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null);
   const [commentText, setCommentText] = useState('');
 
+  const reactionConfigs = [
+    { type: 'like', label: 'Like', icon: ThumbsUp },
+    { type: 'launch', label: 'Launch', icon: Rocket },
+    { type: 'love', label: 'Love', icon: Heart },
+    { type: 'idea', label: 'Idea', icon: Lightbulb },
+  ] as const;
+
   const handleSubmitPost = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentProfile) return;
@@ -49,7 +56,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
         title: meta.title,
         kind: meta.kind,
         tags: meta.tags,
-        reactions: { '👍': 1 },
+        reaction_counts: { like: 0, launch: 0, love: 0, idea: 0 },
         comments: [],
         created_at: new Date().toISOString()
       };
@@ -64,38 +71,60 @@ export const FeedView: React.FC<FeedViewProps> = ({
     }
   };
 
-  const handleToggleReaction = async (post: Post, emoji: string) => {
-    const reactions = { ...(post.reactions || {}) };
-    reactions[emoji] = (reactions[emoji] || 0) + 1;
-    const updated = { ...post, reactions };
-    onUpdatePost(updated);
-    await db.update('posts', post.id, { reactions });
+  const handleToggleReaction = async (post: Post, type: string) => {
+    if (!currentProfile) return;
+    const prevCounts = post.reaction_counts ? { ...post.reaction_counts } : { like: 0, launch: 0, love: 0, idea: 0 };
+    const prevMyReaction = post.my_reaction || null;
+
+    const newCounts = { ...prevCounts };
+    let newMyReaction: string | null = type;
+    if (prevMyReaction === type) {
+      newMyReaction = null;
+      newCounts[type as keyof typeof newCounts] = Math.max(0, newCounts[type as keyof typeof newCounts] - 1);
+    } else {
+      if (prevMyReaction) {
+        newCounts[prevMyReaction as keyof typeof newCounts] = Math.max(0, newCounts[prevMyReaction as keyof typeof newCounts] - 1);
+      }
+      newCounts[type as keyof typeof newCounts] = (newCounts[type as keyof typeof newCounts] || 0) + 1;
+    }
+
+    const optimisticPost = { ...post, reaction_counts: newCounts, my_reaction: newMyReaction };
+    onUpdatePost(optimisticPost);
+
+    try {
+      const res = await reactToPost(post.id, type);
+      const updated = { ...post, reaction_counts: res.counts, my_reaction: res.my_reaction };
+      onUpdatePost(updated);
+    } catch (err) {
+      onUpdatePost({ ...post, reaction_counts: prevCounts, my_reaction: prevMyReaction });
+      console.error('Failed to react:', err);
+    }
   };
 
   const handleAddComment = async (post: Post) => {
     if (!currentProfile || !commentText.trim()) return;
-    const newComment: PostComment = {
-      id: 'c-' + Date.now(),
-      author_id: currentProfile.id,
-      author_name: currentProfile.name,
-      body: commentText.trim(),
-      created_at: new Date().toISOString()
-    };
-    const comments = [...(post.comments || []), newComment];
-    const updated = { ...post, comments };
-    onUpdatePost(updated);
+    const textToSubmit = commentText.trim();
     setCommentText('');
-    await db.update('posts', post.id, { comments });
 
-    if (post.author_id !== currentProfile.id) {
-      await db.insert('notifications', {
-        to_id: post.author_id,
-        from_id: currentProfile.id,
-        type: 'connect',
-        body: `${currentProfile.name} commented on your post "${post.title || post.kind}": "${newComment.body.slice(0, 80)}"`,
-        read: false,
-        created_at: new Date().toISOString()
-      });
+    try {
+      const resComment = await addPostComment(post.id, textToSubmit);
+      const comments = [...(post.comments || []), resComment];
+      const updated = { ...post, comments };
+      onUpdatePost(updated);
+    } catch (err) {
+      console.error('Failed to add comment:', err);
+    }
+  };
+
+  const handleDeleteComment = async (post: Post, commentId: string) => {
+    const prevComments = [...(post.comments || [])];
+    const comments = prevComments.filter(c => c.id !== commentId);
+    onUpdatePost({ ...post, comments });
+    try {
+      await deletePostComment(post.id, commentId);
+    } catch (err) {
+      onUpdatePost({ ...post, comments: prevComments });
+      console.error('Failed to delete comment', err);
     }
   };
 
@@ -319,17 +348,26 @@ export const FeedView: React.FC<FeedViewProps> = ({
                 {/* Reactions and Comments bar */}
                 <div className="flex items-center justify-between pt-2 text-xs">
                   <div className="flex items-center gap-1.5">
-                    {(['👍', '🚀', '❤️', '💡'] as const).map(emoji => {
-                      const count = post.reactions?.[emoji] || 0;
+                    {reactionConfigs.map(({ type, label, icon: Icon }) => {
+                      const count = post.reaction_counts?.[type as keyof typeof post.reaction_counts] || 0;
+                      const isSelected = post.my_reaction === type;
                       return (
                         <button
-                          key={emoji}
-                          onClick={() => handleToggleReaction(post, emoji)}
-                          className="kw-btn kw-btn-ghost text-xs py-1 px-2 h-7 rounded-md"
-                          title={`React with ${emoji}`}
+                          key={type}
+                          onClick={() => {
+                            if (!currentProfile) return;
+                            handleToggleReaction(post, type);
+                          }}
+                          disabled={!currentProfile}
+                          aria-label={label}
+                          aria-pressed={isSelected}
+                          className={`kw-btn kw-btn-ghost text-xs py-1 px-2 h-7 rounded-md flex items-center gap-1 transition-colors ${
+                            isSelected ? 'text-[var(--gold-text)] font-medium bg-[var(--gold-bg)]' : 'text-[var(--fg-subtle)] hover:text-[var(--fg)]'
+                          }`}
+                          title={!currentProfile ? "Sign in to react" : `React with ${label}`}
                         >
-                          <span>{emoji}</span>
-                          {count > 0 && <span className="ml-1 font-semibold text-[13px]">{count}</span>}
+                          <Icon className={`w-3.5 h-3.5 ${isSelected ? 'fill-current text-[var(--gold-text)]' : ''}`} />
+                          {count > 0 && <span className="font-semibold text-[13px]">{count}</span>}
                         </button>
                       );
                     })}
@@ -359,7 +397,18 @@ export const FeedView: React.FC<FeedViewProps> = ({
                           <div key={c.id} className="text-xs bg-[var(--card)] p-3 rounded-lg border border-[var(--card-border)]">
                             <div className="flex items-center justify-between text-[13px] text-[var(--fg-subtle)] mb-1">
                               <span className="font-semibold text-[var(--fg)]">{c.author_name}</span>
-                              <span>{formatTimeAgo(c.created_at)}</span>
+                              <div className="flex items-center gap-2">
+                                <span>{formatTimeAgo(c.created_at)}</span>
+                                {currentProfile && (currentProfile.id === c.author_id || currentProfile.id === post.author_id || currentProfile.is_admin) && (
+                                  <button
+                                    onClick={() => handleDeleteComment(post, c.id)}
+                                    className="text-[var(--fg-subtle)] hover:text-red-500 text-[11px] transition-colors"
+                                    title="Delete comment"
+                                  >
+                                    Delete
+                                  </button>
+                                )}
+                              </div>
                             </div>
                             <p className="text-[var(--fg-muted)]">{c.body}</p>
                           </div>

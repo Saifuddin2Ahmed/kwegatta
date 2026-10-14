@@ -4,7 +4,16 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.11] - 2026-10-13
+## [1.5.12] - 2026-10-14
+
+### Fixed (Release 1.5.12)
+- **Fix: one reaction per member, comments saved for everyone, SVG reaction icons**:
+  - Server-side reaction tracking (`POST /api/posts/:id/react`) enforces one reaction per member, toggling off on repeat and replacing on change.
+  - Server-side comments handling (`POST /api/posts/:id/comments`, `DELETE /api/posts/:id/comments/:cid`) protects against author spoofing and enforces deletion permissions.
+  - Public post responses exclude internal `reactions_by` and return computed `reaction_counts` and caller `my_reaction` (including legacy reaction mapping).
+  - FeedView updated with Lucide SVG reaction icons, accessibility (`aria-pressed`, `aria-label`), optimistic updates with rollback, and comment deletion.
+
+## [1.5.11] - 2026-10-14
 
 ### Security (Release 1.5.11)
 - **Security fixes (pair-cache, account deletion, connect limits)**:

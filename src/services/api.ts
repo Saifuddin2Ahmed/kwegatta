@@ -1592,5 +1592,41 @@ export async function deleteTeamMember(id: string): Promise<boolean> {
   return true;
 }
 
+export async function reactToPost(postId: string, type: string): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/posts/${encodeURIComponent(postId)}/react`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ type })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to react');
+  return data;
+}
+
+export async function addPostComment(postId: string, text: string): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/posts/${encodeURIComponent(postId)}/comments`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ text })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to add comment');
+  return data;
+}
+
+export async function deletePostComment(postId: string, commentId: string): Promise<any> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/posts/${encodeURIComponent(postId)}/comments/${encodeURIComponent(commentId)}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders()
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to delete comment');
+  return data;
+}
+
+
 
 
