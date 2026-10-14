@@ -29,7 +29,9 @@ import {
   Lock,
   UserPlus,
   UserCheck,
-  XCircle
+  XCircle,
+  Search,
+  Tag
 } from 'lucide-react';
 import { EventOpportunityItem, OpportunityType, Profile, EventQuestion, EventGuest } from '../types';
 import { Avatar } from './Avatar';
@@ -58,7 +60,7 @@ import {
   deleteEventQuestion,
   cancelEventGuest,
   fetchEventGuests,
-  removeEventGuest,
+  exportEventAttendeesCsv,
   PUBLIC_APP_URL
 } from '../services/api';
 
@@ -118,7 +120,7 @@ export const CoverImageUploader: React.FC<CoverImageUploaderProps> = ({ value, o
               onClick={() => onChange('')}
               className="kw-btn kw-btn-danger text-xs py-1.5 px-3 rounded-lg cursor-pointer"
             >
-              Remove
+              Clear image
             </button>
           </div>
         </div>
@@ -190,12 +192,24 @@ export const EventsView: React.FC<EventsViewProps> = ({
   });
   const [formCoverImage, setFormCoverImage] = useState('');
   const [formRegLink, setFormRegLink] = useState('');
+  const [formMapLink, setFormMapLink] = useState('');
+  const [formCapacity, setFormCapacity] = useState('');
+  const [formTagsInput, setFormTagsInput] = useState('');
   const [formContactPhone, setFormContactPhone] = useState('');
   const [formContactEmail, setFormContactEmail] = useState('');
   const [formOppType, setFormOppType] = useState<OpportunityType>('Hackathon');
   const [formDeadline, setFormDeadline] = useState('');
   const [formLink, setFormLink] = useState('');
   const [formSubmitting, setFormSubmitting] = useState(false);
+
+  // Events list search
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Host Attendees Panel State
+  const [showAttendeesPanel, setShowAttendeesPanel] = useState(true);
+  const [attendeeTab, setAttendeeTab] = useState<'all' | 'members' | 'guests'>('all');
+  const [attendeeSearch, setAttendeeSearch] = useState('');
+  const [exportingCsv, setExportingCsv] = useState(false);
 
   // Questions State
   const [questions, setQuestions] = useState<EventQuestion[]>([]);
@@ -221,6 +235,47 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [reportReason, setReportReason] = useState<string>('Not a real event');
   const [reportDetails, setReportDetails] = useState('');
   const [submittingReport, setSubmittingReport] = useState(false);
+
+  const parseTagsInput = (raw: string): string[] => {
+    const parts = raw.split(',');
+    const out: string[] = [];
+    for (const p of parts) {
+      const cleaned = p.trim().toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24);
+      if (cleaned && !out.includes(cleaned)) {
+        out.push(cleaned);
+        if (out.length >= 5) break;
+      }
+    }
+    return out;
+  };
+
+  const isValidMapLinkClient = (urlStr: string): boolean => {
+    if (!urlStr.trim()) return true;
+    try {
+      const parsed = new URL(urlStr.trim());
+      if (parsed.protocol !== 'https:') return false;
+      const host = parsed.hostname.toLowerCase();
+      const isGoogle =
+        host === 'maps.google.com' ||
+        host.startsWith('maps.google.') ||
+        host === 'maps.app.goo.gl' ||
+        (host === 'goo.gl' && parsed.pathname.startsWith('/maps')) ||
+        ((host === 'google.com' ||
+          host === 'www.google.com' ||
+          /^www\.google\.[a-z.]+$/.test(host) ||
+          /^google\.[a-z.]+$/.test(host)) &&
+          parsed.pathname.startsWith('/maps'));
+      const isOsm =
+        host === 'openstreetmap.org' ||
+        host === 'www.openstreetmap.org' ||
+        host.endsWith('.openstreetmap.org') ||
+        host === 'osm.org' ||
+        host === 'www.osm.org';
+      return isGoogle || isOsm;
+    } catch {
+      return false;
+    }
+  };
 
   // Helper to extract guest token from URL or localStorage
   const getGuestToken = (eventId: string) => {
@@ -395,6 +450,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
     }
     setFormCoverImage('');
     setFormRegLink('');
+    setFormMapLink('');
+    setFormCapacity('');
+    setFormTagsInput('');
     setFormContactPhone('');
     setFormContactEmail('');
     setFormOppType('Hackathon');
@@ -427,8 +485,11 @@ export const EventsView: React.FC<EventsViewProps> = ({
     setFormTitle(item.title);
     setFormDescription(item.description);
     setFormFormat(item.format || 'in_person');
-    setFormLocation(item.location || '');
+    setFormLocation(item.venue || item.location || '');
     setFormJoinLink(item.join_link || '');
+    setFormMapLink(item.map_link || '');
+    setFormCapacity(item.capacity ? String(item.capacity) : '');
+    setFormTagsInput(Array.isArray(item.tags) ? item.tags.join(', ') : '');
     setFormContactPhone(item.contact_phone || '');
     setFormContactEmail(item.contact_email || '');
     const tz = item.timezone || 'Africa/Kampala';
@@ -498,6 +559,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
       kind: formKind,
       title: formTitle.trim(),
       description: formDescription.trim(),
+      tags: parseTagsInput(formTagsInput),
       contact_phone: formContactPhone.trim() || undefined,
       contact_email: formContactEmail.trim() || undefined
     };
@@ -507,6 +569,23 @@ export const EventsView: React.FC<EventsViewProps> = ({
         onToast('Please specify a start date and time.');
         return;
       }
+      if ((formFormat === 'in_person' || formFormat === 'hybrid') && formLocation.trim().length < 5) {
+        onToast('Venue / address must be at least 5 characters for in-person and hybrid events.');
+        return;
+      }
+      if (formMapLink.trim() && !isValidMapLinkClient(formMapLink)) {
+        onToast('Map link must be an https:// Google Maps or OpenStreetMap link.');
+        return;
+      }
+      if (formCapacity.trim()) {
+        const capNum = Number(formCapacity.trim());
+        if (!Number.isInteger(capNum) || capNum < 1 || capNum > 5000) {
+          onToast('Capacity must be a whole number between 1 and 5000.');
+          return;
+        }
+        payload.capacity = capNum;
+      }
+
       const tz = formTimezone || 'Africa/Kampala';
       const startIso = zonedTimeToUtcIso(formStartDate, formStartTime, tz);
       payload.starts_at = startIso;
@@ -526,6 +605,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
       payload.format = formFormat;
       payload.timezone = formTimezone;
       payload.location = formLocation.trim();
+      payload.venue = formLocation.trim();
+      payload.map_link = formMapLink.trim() || undefined;
       payload.join_link = formJoinLink.trim() || undefined;
       payload.cover_image = formCoverImage.trim() || undefined;
       payload.registration_link = formRegLink.trim() || undefined;
@@ -579,11 +660,31 @@ export const EventsView: React.FC<EventsViewProps> = ({
     const patch: any = {
       title: formTitle.trim(),
       description: formDescription.trim(),
+      tags: parseTagsInput(formTagsInput),
       contact_phone: formContactPhone.trim() || undefined,
       contact_email: formContactEmail.trim() || undefined
     };
 
     if (editingItem.kind === 'event') {
+      if ((formFormat === 'in_person' || formFormat === 'hybrid') && formLocation.trim().length < 5) {
+        onToast('Venue / address must be at least 5 characters for in-person and hybrid events.');
+        return;
+      }
+      if (formMapLink.trim() && !isValidMapLinkClient(formMapLink)) {
+        onToast('Map link must be an https:// Google Maps or OpenStreetMap link.');
+        return;
+      }
+      if (formCapacity.trim()) {
+        const capNum = Number(formCapacity.trim());
+        if (!Number.isInteger(capNum) || capNum < 1 || capNum > 5000) {
+          onToast('Capacity must be a whole number between 1 and 5000.');
+          return;
+        }
+        patch.capacity = capNum;
+      } else {
+        patch.capacity = null;
+      }
+
       const tz = formTimezone || editingItem.timezone || 'Africa/Kampala';
       if (formStartDate && formStartTime) {
         const startIso = zonedTimeToUtcIso(formStartDate, formStartTime, tz);
@@ -603,6 +704,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
       patch.format = formFormat;
       patch.timezone = formTimezone;
       patch.location = formLocation.trim();
+      patch.venue = formLocation.trim();
+      patch.map_link = formMapLink.trim() || null;
       patch.join_link = formJoinLink.trim() || undefined;
       patch.cover_image = formCoverImage.trim() || undefined;
       patch.registration_link = formRegLink.trim() || undefined;
@@ -749,15 +852,24 @@ export const EventsView: React.FC<EventsViewProps> = ({
     }
   };
 
-  const handleRemoveGuest = async (gid: string) => {
-    if (!selectedItemId) return;
-    if (!confirm('Remove this guest registration?')) return;
+  const handleExportAttendeesCsv = async (eventId: string) => {
+    setExportingCsv(true);
     try {
-      await removeEventGuest(selectedItemId, gid);
-      onToast('Guest removed.');
-      loadEventGuests(selectedItemId);
+      const csvText = await exportEventAttendeesCsv(eventId);
+      const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${eventId}-attendees.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      onToast('Attendees CSV exported.');
     } catch (err: any) {
-      onToast(err?.message || 'Failed to remove guest');
+      onToast(err?.message || 'Failed to export CSV');
+    } finally {
+      setExportingCsv(false);
     }
   };
 
@@ -821,17 +933,48 @@ export const EventsView: React.FC<EventsViewProps> = ({
     }
   };
 
+  // Filter items by search query (title, description, venue/location, or tags)
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const filteredItems = normalizedSearch
+    ? items.filter(it => {
+        const titleMatch = (it.title || '').toLowerCase().includes(normalizedSearch);
+        const descMatch = (it.description || '').toLowerCase().includes(normalizedSearch);
+        const locMatch = (it.venue || it.location || '').toLowerCase().includes(normalizedSearch);
+        const tagMatch = Array.isArray(it.tags) && it.tags.some(t => String(t).toLowerCase().includes(normalizedSearch));
+        return titleMatch || descMatch || locMatch || tagMatch;
+      })
+    : items;
+
   // Group items into Upcoming and Past
-  const upcomingItems = items.filter(it => it.phase !== 'past');
-  const pastItems = items.filter(it => it.phase === 'past');
+  const upcomingItems = filteredItems.filter(it => it.phase !== 'past');
+  const pastItems = filteredItems.filter(it => it.phase === 'past');
 
   // Render Detailed Item View
   if (selectedItemId && detailedItem) {
     const isEvent = detailedItem.kind === 'event';
     const isAuthor = Boolean(currentProfile && (detailedItem.author_id === currentProfile.id || detailedItem.author_id === currentProfile.account_uid));
+    const isAdminViewer = Boolean(currentProfile?.is_admin);
+    const canManageAttendees = isAuthor || isAdminViewer;
     const isAttending = Boolean(detailedItem.is_attending);
     const attendees = Array.isArray(detailedItem.attendees) ? detailedItem.attendees : [];
-    const attendeeCount = detailedItem.attendee_count ?? attendees.length;
+
+    // Combine guests from detailedItem.guests and eventGuests (deduplicated)
+    const guestMap = new Map<string, any>();
+    if (Array.isArray(detailedItem.guests)) {
+      for (const g of detailedItem.guests) {
+        if (g && g.id) guestMap.set(g.id, g);
+      }
+    }
+    for (const g of eventGuests) {
+      if (g && g.id) guestMap.set(g.id, { ...guestMap.get(g.id), ...g });
+    }
+    const combinedGuests = Array.from(guestMap.values());
+
+    const attendeeCount = detailedItem.attendee_count ?? (attendees.length + combinedGuests.length);
+    const hasCapacity = typeof detailedItem.capacity === 'number' && detailedItem.capacity > 0;
+    const spotsLeft = hasCapacity ? Math.max(0, detailedItem.capacity - attendeeCount) : null;
+    const isFull = hasCapacity && spotsLeft === 0;
+
     const isPast = detailedItem.phase === 'past';
     const isLive = detailedItem.phase === 'live';
     const isCancelled = Boolean(detailedItem.is_cancelled);
@@ -844,6 +987,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
     const hostProfile = allProfiles.find(p => p.id === detailedItem.author_id || p.account_uid === detailedItem.author_id);
     const hostName = detailedItem.author_name || hostProfile?.name || 'Community Member';
+    const detailTags: string[] = Array.isArray(detailedItem.tags) ? detailedItem.tags : [];
 
     return (
       <div className="kw-container max-w-4xl space-y-6 md:space-y-8 animate-in fade-in duration-200">
@@ -939,6 +1083,21 @@ export const EventsView: React.FC<EventsViewProps> = ({
               {detailedItem.title}
             </h1>
 
+            {/* Tags Chips */}
+            {detailTags.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {detailTags.map(tag => (
+                  <span
+                    key={tag}
+                    className="px-2.5 py-0.5 rounded-md text-xs font-medium bg-[var(--bg)] border border-[var(--card-border)] text-[var(--fg-muted)] inline-flex items-center gap-1"
+                  >
+                    <Tag className="w-3 h-3 text-[var(--gold-text)]" />
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+
             {/* Host Attribution */}
             <div className="flex items-center gap-3 py-1">
               <div
@@ -963,7 +1122,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
               </div>
             </div>
 
-            {/* Date, Time & Location */}
+            {/* Date, Time & Venue */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 rounded-xl bg-[var(--bg)] border border-[var(--card-border)] text-xs">
               <div className="flex items-start gap-2.5">
                 <Calendar className="w-4 h-4 text-[var(--gold-text)] flex-shrink-0 mt-0.5" />
@@ -981,13 +1140,24 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 ) : (
                   <MapPin className="w-4 h-4 text-[var(--gold-text)] flex-shrink-0 mt-0.5" />
                 )}
-                <div>
+                <div className="space-y-1">
                   <p className="font-semibold text-[var(--fg)]">
-                    {detailedItem.format === 'online' ? 'Online' : (detailedItem.location || '')}
+                    {detailedItem.format === 'online' ? 'Online' : (detailedItem.venue || detailedItem.location || '')}
                   </p>
-                  <p className="text-[13px] text-[var(--fg-subtle)] mt-0.5 capitalize">
+                  <p className="text-[13px] text-[var(--fg-subtle)] capitalize">
                     {detailedItem.format ? `${detailedItem.format.replace('_', ' ')} format` : 'In person'}
                   </p>
+                  {detailedItem.map_link && (
+                    <a
+                      href={detailedItem.map_link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--gold-text)] hover:underline pt-0.5"
+                    >
+                      <span>Open in Maps</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
                 </div>
               </div>
             </div>
@@ -1072,7 +1242,12 @@ export const EventsView: React.FC<EventsViewProps> = ({
             {/* Action Bar */}
             <div className="pt-4 border-t border-[var(--card-border)] flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-3">
-                {currentProfile ? (
+                {isAuthor ? (
+                  <span className="px-4 py-2.5 text-xs font-bold rounded-lg bg-amber-500/15 text-[var(--gold-text)] border border-amber-500/30 inline-flex items-center gap-1.5">
+                    <Award className="w-4 h-4" />
+                    <span>You're hosting</span>
+                  </span>
+                ) : currentProfile ? (
                   isEvent ? (
                     isCancelled ? (
                       <button
@@ -1087,6 +1262,13 @@ export const EventsView: React.FC<EventsViewProps> = ({
                         className="kw-btn px-6 py-2.5 text-xs font-bold rounded-lg bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
                       >
                         Event ended
+                      </button>
+                    ) : isFull && !isAttending ? (
+                      <button
+                        disabled
+                        className="kw-btn px-6 py-2.5 text-xs font-bold rounded-lg bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
+                      >
+                        Full
                       </button>
                     ) : (
                       <button
@@ -1163,6 +1345,18 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       );
                     }
 
+                    if (isFull) {
+                      return (
+                        <button
+                          type="button"
+                          disabled
+                          className="kw-btn px-6 py-2.5 text-xs font-bold rounded-lg bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
+                        >
+                          Full
+                        </button>
+                      );
+                    }
+
                     return (
                       <button
                         ref={registerBtnRef}
@@ -1177,10 +1371,27 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   })()
                 ) : null}
 
-                {/* Going Count */}
+                {/* Prominent Host / Admin Attendees (N) Button */}
+                {canManageAttendees && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAttendeesPanel(true)}
+                    className="kw-btn kw-btn-gold px-4 py-2.5 text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Users className="w-4 h-4" />
+                    {`Attendees (${attendeeCount})`}
+                  </button>
+                )}
+
+                {/* Going Count & Capacity */}
                 <span className="text-xs text-[var(--fg-muted)] flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--card-border)]">
                   <Users className="w-3.5 h-3.5 text-[var(--gold-text)]" />
                   <strong className="text-[var(--fg)]">{attendeeCount}</strong> going
+                  {hasCapacity && (
+                    <span className="ml-1 text-[11px] font-semibold text-[var(--gold-text)]">
+                      · {isFull ? 'Full' : `${spotsLeft} ${spotsLeft === 1 ? 'spot' : 'spots'} left`}
+                    </span>
+                  )}
                 </span>
 
                 {/* Add to Calendar */}
@@ -1399,60 +1610,157 @@ export const EventsView: React.FC<EventsViewProps> = ({
           )}
         </div>
 
-        {/* Guest registrations panel (Author & Admin) */}
-        {(isAuthor || currentProfile?.is_admin) && (
+        {/* Host & Admin Attendees Panel (Members + Guest registrations, View-Only) */}
+        {canManageAttendees && showAttendeesPanel && (
           <div className="kw-card p-6 space-y-4 border-[var(--gold)]/30">
-            <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
-              <h3 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">
-                <Users className="w-4 h-4 text-[var(--gold-text)]" />
-                Guest registrations ({eventGuests.length})
-              </h3>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--card-border)] pb-3">
+              <div>
+                <h3 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">
+                  <Users className="w-4 h-4 text-[var(--gold-text)]" />
+                  <span>{`Attendees (${attendees.length + combinedGuests.length})`}</span>
+                </h3>
+                <p className="text-[11px] text-[var(--fg-muted)] mt-0.5">
+                  {`Members (${attendees.length}) & Guest registrations (${combinedGuests.length})`}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleExportAttendeesCsv(detailedItem.id)}
+                  disabled={exportingCsv}
+                  className="kw-btn text-xs py-1.5 px-3 rounded-lg border border-[var(--card-border)] hover:border-[var(--gold)] flex items-center gap-1.5 font-semibold cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5 text-[var(--gold-text)]" />
+                  <span>{exportingCsv ? 'Exporting...' : 'Export CSV'}</span>
+                </button>
+              </div>
             </div>
 
-            {eventGuests.length === 0 ? (
-              <p className="text-xs text-[var(--fg-muted)] italic">No guest registrations yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {eventGuests.map(g => (
-                  <div key={g.id} className="p-3 rounded-xl bg-[var(--bg)] border border-[var(--card-border)] flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <div className="space-y-0.5">
-                      <p className="font-bold text-[var(--fg)]">{g.name}</p>
-                      <div className="flex flex-wrap items-center gap-3 text-[var(--fg-muted)] text-[13px]">
-                        {g.phone && (
-                          <a
-                            href={`https://wa.me/${g.phone.replace(/[^0-9]/g, '')}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="hover:underline text-emerald-400 flex items-center gap-1"
-                          >
-                            <Phone className="w-3 h-3" /> {g.phone}
-                          </a>
-                        )}
-                        {g.email && (
-                          <a
-                            href={`mailto:${g.email}`}
-                            className="hover:underline text-[var(--gold-text)] flex items-center gap-1"
-                          >
-                            <Mail className="w-3 h-3" /> {g.email}
-                          </a>
-                        )}
-                        <span>
-                          {g.created_at ? new Date(g.created_at).toLocaleDateString() : ''}
-                        </span>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveGuest(g.id)}
-                      className="kw-btn kw-btn-danger text-xs py-1 px-2.5 cursor-pointer"
-                    >
-                      Remove
-                    </button>
-                  </div>
+            {/* Tabs & Search Box */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="inline-flex rounded-lg border border-[var(--card-border)] bg-[var(--bg)] p-0.5">
+                {(
+                  [
+                    { key: 'all', label: `All (${attendees.length + combinedGuests.length})` },
+                    { key: 'members', label: `Members (${attendees.length})` },
+                    { key: 'guests', label: `Guests (${combinedGuests.length})` }
+                  ] as const
+                ).map(t => (
+                  <button
+                    key={t.key}
+                    type="button"
+                    onClick={() => setAttendeeTab(t.key)}
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${
+                      attendeeTab === t.key
+                        ? 'bg-[var(--gold)] text-[#090D16] font-bold'
+                        : 'text-[var(--fg-muted)] hover:text-[var(--fg)]'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
                 ))}
               </div>
-            )}
+
+              <div className="relative flex-1 sm:max-w-xs">
+                <Search className="w-3.5 h-3.5 text-[var(--fg-subtle)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="search"
+                  value={attendeeSearch}
+                  onChange={e => setAttendeeSearch(e.target.value)}
+                  placeholder="Search attendees by name..."
+                  aria-label="Search attendees by name"
+                  className="kw-input text-xs pl-8 py-1.5 w-full"
+                />
+              </div>
+            </div>
+
+            {(() => {
+              const memberRows = attendees.map((m: any) => ({
+                id: m.id,
+                name: m.name || 'Member',
+                avatar: m.avatar,
+                type: 'Member' as const,
+                email: undefined,
+                registered_at: m.registered_at || detailedItem.created_at || ''
+              }));
+              const guestRows = combinedGuests.map((g: any) => ({
+                id: g.id,
+                name: g.name || 'Guest',
+                avatar: undefined,
+                type: 'Guest' as const,
+                email: canManageAttendees ? g.email : undefined,
+                registered_at: g.registered_at || g.created_at || ''
+              }));
+
+              type AttendeeRowItem = {
+                id: string;
+                name: string;
+                avatar?: string;
+                type: 'Member' | 'Guest';
+                email?: string;
+                registered_at: string;
+              };
+
+              let rows: AttendeeRowItem[] =
+                attendeeTab === 'members'
+                  ? memberRows
+                  : attendeeTab === 'guests'
+                  ? guestRows
+                  : [...memberRows, ...guestRows];
+
+              const q = attendeeSearch.trim().toLowerCase();
+              if (q) {
+                rows = rows.filter((r: AttendeeRowItem) => r.name.toLowerCase().includes(q));
+              }
+
+              if (rows.length === 0) {
+                return (
+                  <p className="text-xs text-[var(--fg-muted)] italic py-2">
+                    No attendees match your filter.
+                  </p>
+                );
+              }
+
+              return (
+                <div className="space-y-2.5">
+                  {rows.map((row: AttendeeRowItem) => (
+                    <div
+                      key={`${row.type}-${row.id}`}
+                      onClick={row.type === 'Member' ? () => onViewProfile(row.id) : undefined}
+                      className={`p-3 rounded-xl bg-[var(--bg)] border border-[var(--card-border)] flex flex-wrap items-center justify-between gap-3 text-xs ${
+                        row.type === 'Member' ? 'hover:border-[var(--gold)] cursor-pointer transition-colors' : ''
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Avatar profile={{ id: row.id, name: row.name, avatar: row.avatar }} size="sm" />
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-bold text-[var(--fg)] truncate">{row.name}</span>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                                row.type === 'Member'
+                                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                  : 'bg-amber-500/15 text-[var(--gold-text)] border border-amber-500/30'
+                              }`}
+                            >
+                              {row.type}
+                            </span>
+                          </div>
+                          {row.type === 'Guest' && canManageAttendees && row.email && (
+                            <p className="text-[12px] text-[var(--gold-text)] truncate">{row.email}</p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="text-[11px] text-[var(--fg-subtle)]">
+                        {row.registered_at ? new Date(row.registered_at).toLocaleDateString() : ''}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -1608,24 +1916,69 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       />
                     </div>
 
-                    <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">Location</label>
-                      <input
-                        type="text"
-                        value={formLocation}
-                        onChange={e => setFormLocation(e.target.value)}
-                        className="kw-input text-xs"
-                      />
-                    </div>
+                    {(formFormat === 'in_person' || formFormat === 'hybrid') && (
+                      <>
+                        <div>
+                          <label className="font-semibold text-[var(--fg)] block mb-1">Venue / address *</label>
+                          <input
+                            type="text"
+                            value={formLocation}
+                            onChange={e => setFormLocation(e.target.value)}
+                            minLength={5}
+                            required
+                            placeholder="Venue name and street address (min 5 chars)"
+                            className="kw-input text-xs"
+                          />
+                        </div>
 
-                    <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">Join link (https://)</label>
-                      <input
-                        type="url"
-                        value={formJoinLink}
-                        onChange={e => setFormJoinLink(e.target.value)}
-                        className="kw-input text-xs"
-                      />
+                        <div>
+                          <label className="font-semibold text-[var(--fg)] block mb-1">Map link (optional)</label>
+                          <input
+                            type="url"
+                            value={formMapLink}
+                            onChange={e => setFormMapLink(e.target.value)}
+                            placeholder="https://maps.google.com/... or https://www.openstreetmap.org/..."
+                            className="kw-input text-xs"
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {(formFormat === 'online' || formFormat === 'hybrid') && (
+                      <div>
+                        <label className="font-semibold text-[var(--fg)] block mb-1">Join link (https://)</label>
+                        <input
+                          type="url"
+                          value={formJoinLink}
+                          onChange={e => setFormJoinLink(e.target.value)}
+                          className="kw-input text-xs"
+                        />
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="font-semibold text-[var(--fg)] block mb-1">Capacity (optional)</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={5000}
+                          value={formCapacity}
+                          onChange={e => setFormCapacity(e.target.value)}
+                          placeholder="Unlimited (1–5000)"
+                          className="kw-input text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="font-semibold text-[var(--fg)] block mb-1">Tags (optional, up to 5)</label>
+                        <input
+                          type="text"
+                          value={formTagsInput}
+                          onChange={e => setFormTagsInput(e.target.value)}
+                          placeholder="ai, flutter, kampala"
+                          className="kw-input text-xs"
+                        />
+                      </div>
                     </div>
 
                     {/* Contact for attendees */}
@@ -1817,6 +2170,19 @@ export const EventsView: React.FC<EventsViewProps> = ({
         </div>
       </div>
 
+      {/* Search Box */}
+      <div className="relative max-w-md">
+        <Search className="w-4 h-4 text-[var(--fg-subtle)] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder="Search events by title, venue, or tag..."
+          aria-label="Search events"
+          className="kw-input text-xs pl-9 py-2 w-full"
+        />
+      </div>
+
       {/* List items */}
       {loading ? (
         <div className="text-center py-12 text-xs text-[var(--fg-muted)]">
@@ -1848,10 +2214,18 @@ export const EventsView: React.FC<EventsViewProps> = ({
           {currentTabItems.map(item => {
             const isEvent = item.kind === 'event';
             const isAuthor = Boolean(currentProfile && (item.author_id === currentProfile.id || item.author_id === currentProfile.account_uid));
+            const isAdminViewer = Boolean(currentProfile?.is_admin);
+            const canSeeCardAttendees = isAuthor || isAdminViewer;
             const isAttending = Array.isArray(item.attendee_ids) && Boolean(currentProfile && item.attendee_ids.includes(currentProfile.id));
             const isPast = item.phase === 'past';
             const isLive = item.phase === 'live';
             const isCancelled = Boolean(item.is_cancelled);
+            const cardAttendeeCount = item.attendee_count ?? ((Array.isArray(item.attendee_ids) ? item.attendee_ids.length : 0) + (item.guest_count || 0));
+            const hasCapacity = typeof item.capacity === 'number' && item.capacity > 0;
+            const spotsLeft = hasCapacity ? Math.max(0, item.capacity! - cardAttendeeCount) : null;
+            const isFull = hasCapacity && spotsLeft === 0;
+            const cardTags: string[] = Array.isArray(item.tags) ? item.tags : [];
+
             const timeFormatted = formatEventDateTime(
               item.starts_at,
               item.ends_at,
@@ -1896,7 +2270,12 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
                     <span className="text-[11px] text-[var(--fg-muted)] flex items-center gap-1">
                       <Users className="w-3 h-3 text-[var(--gold-text)]" />
-                      <span>{item.attendee_count ?? (Array.isArray(item.attendee_ids) ? item.attendee_ids.length : 0)}</span>
+                      <span>{cardAttendeeCount}</span>
+                      {hasCapacity && (
+                        <span className="text-[10px] font-semibold text-[var(--gold-text)]">
+                          · {isFull ? 'Full' : `${spotsLeft} ${spotsLeft === 1 ? 'spot' : 'spots'} left`}
+                        </span>
+                      )}
                     </span>
                   </div>
 
@@ -1907,6 +2286,23 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   <p className="text-xs text-[var(--fg-muted)] line-clamp-2">
                     {item.description}
                   </p>
+
+                  {cardTags.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                      {cardTags.map(tag => (
+                        <span
+                          key={tag}
+                          onClick={e => {
+                            e.stopPropagation();
+                            setSearchQuery(tag);
+                          }}
+                          className="px-2 py-0.5 rounded text-[11px] font-medium bg-[var(--bg)] border border-[var(--card-border)] text-[var(--fg-muted)] hover:border-[var(--gold)]"
+                        >
+                          #{tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="pt-3 border-t border-[var(--card-border)] space-y-2 text-xs">
@@ -1924,7 +2320,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                           <MapPin className="w-3 h-3 text-[var(--gold-text)]" />
                         )
                       ) : null}
-                      <span>{isEvent ? (item.format === 'online' ? 'Online' : (item.location || '')) : 'Opportunity'}</span>
+                      <span>{isEvent ? (item.format === 'online' ? 'Online' : (item.venue || item.location || '')) : 'Opportunity'}</span>
                     </span>
                   </div>
 
@@ -1934,6 +2330,21 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     </span>
 
                     <div className="flex items-center gap-2 flex-shrink-0">
+                      {canSeeCardAttendees && (
+                        <button
+                          type="button"
+                          onClick={e => {
+                            e.stopPropagation();
+                            setSelectedItemId(item.id);
+                            setShowAttendeesPanel(true);
+                            window.location.hash = `#/events/${item.id}`;
+                          }}
+                          className="px-2.5 py-1 rounded-lg border border-[var(--gold)]/50 bg-amber-500/10 text-[var(--gold-text)] text-[11px] font-bold hover:bg-amber-500/20 cursor-pointer"
+                        >
+                          {`Attendees (${cardAttendeeCount})`}
+                        </button>
+                      )}
+
                       {isAuthor && !isCancelled && (
                         <button
                           onClick={e => openEditModal(item, e)}
@@ -1962,7 +2373,11 @@ export const EventsView: React.FC<EventsViewProps> = ({
                         <Share2 className="w-3.5 h-3.5" />
                       </button>
 
-                      {isEvent ? (
+                      {isAuthor ? (
+                        <span className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-500/15 text-[var(--gold-text)] border border-amber-500/30">
+                          You're hosting
+                        </span>
+                      ) : isEvent ? (
                         isCancelled ? (
                           <button
                             disabled
@@ -1976,6 +2391,13 @@ export const EventsView: React.FC<EventsViewProps> = ({
                             className="px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
                           >
                             Event ended
+                          </button>
+                        ) : isFull && !isAttending ? (
+                          <button
+                            disabled
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
+                          >
+                            Full
                           </button>
                         ) : (
                           <button
@@ -2170,17 +2592,31 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   </div>
 
                   {(formFormat === 'in_person' || formFormat === 'hybrid') && (
-                    <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">Location *</label>
-                      <input
-                        type="text"
-                        value={formLocation}
-                        onChange={e => setFormLocation(e.target.value)}
-                        placeholder="e.g. venue name, area, city"
-                        required
-                        className="kw-input text-xs"
-                      />
-                    </div>
+                    <>
+                      <div>
+                        <label className="font-semibold text-[var(--fg)] block mb-1">Venue / address *</label>
+                        <input
+                          type="text"
+                          value={formLocation}
+                          onChange={e => setFormLocation(e.target.value)}
+                          placeholder="e.g. venue name, street address, city (min 5 chars)"
+                          minLength={5}
+                          required
+                          className="kw-input text-xs"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="font-semibold text-[var(--fg)] block mb-1">Map link (optional)</label>
+                        <input
+                          type="url"
+                          value={formMapLink}
+                          onChange={e => setFormMapLink(e.target.value)}
+                          placeholder="https://maps.google.com/... or https://www.openstreetmap.org/..."
+                          className="kw-input text-xs"
+                        />
+                      </div>
+                    </>
                   )}
 
                   {(formFormat === 'online' || formFormat === 'hybrid') && (
@@ -2199,6 +2635,31 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       </p>
                     </div>
                   )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-semibold text-[var(--fg)] block mb-1">Capacity (optional)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={5000}
+                        value={formCapacity}
+                        onChange={e => setFormCapacity(e.target.value)}
+                        placeholder="Unlimited (1–5000)"
+                        className="kw-input text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-semibold text-[var(--fg)] block mb-1">Tags (optional, up to 5)</label>
+                      <input
+                        type="text"
+                        value={formTagsInput}
+                        onChange={e => setFormTagsInput(e.target.value)}
+                        placeholder="ai, flutter, kampala"
+                        className="kw-input text-xs"
+                      />
+                    </div>
+                  </div>
 
                   {/* Contact for attendees */}
                   <div className="space-y-3 pt-2 border-t border-[var(--card-border)]">
@@ -2409,24 +2870,69 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     />
                   </div>
 
-                  <div>
-                    <label className="font-semibold text-[var(--fg)] block mb-1">Location</label>
-                    <input
-                      type="text"
-                      value={formLocation}
-                      onChange={e => setFormLocation(e.target.value)}
-                      className="kw-input text-xs"
-                    />
-                  </div>
+                  {(formFormat === 'in_person' || formFormat === 'hybrid') && (
+                    <>
+                      <div>
+                        <label className="font-semibold text-[var(--fg)] block mb-1">Venue / address *</label>
+                        <input
+                          type="text"
+                          value={formLocation}
+                          onChange={e => setFormLocation(e.target.value)}
+                          minLength={5}
+                          required
+                          placeholder="Venue name and street address (min 5 chars)"
+                          className="kw-input text-xs"
+                        />
+                      </div>
 
-                  <div>
-                    <label className="font-semibold text-[var(--fg)] block mb-1">Join link (https://)</label>
-                    <input
-                      type="url"
-                      value={formJoinLink}
-                      onChange={e => setFormJoinLink(e.target.value)}
-                      className="kw-input text-xs"
-                    />
+                      <div>
+                        <label className="font-semibold text-[var(--fg)] block mb-1">Map link (optional)</label>
+                        <input
+                          type="url"
+                          value={formMapLink}
+                          onChange={e => setFormMapLink(e.target.value)}
+                          placeholder="https://maps.google.com/... or https://www.openstreetmap.org/..."
+                          className="kw-input text-xs"
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {(formFormat === 'online' || formFormat === 'hybrid') && (
+                    <div>
+                      <label className="font-semibold text-[var(--fg)] block mb-1">Join link (https://)</label>
+                      <input
+                        type="url"
+                        value={formJoinLink}
+                        onChange={e => setFormJoinLink(e.target.value)}
+                        className="kw-input text-xs"
+                      />
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-semibold text-[var(--fg)] block mb-1">Capacity (optional)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={5000}
+                        value={formCapacity}
+                        onChange={e => setFormCapacity(e.target.value)}
+                        placeholder="Unlimited (1–5000)"
+                        className="kw-input text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-semibold text-[var(--fg)] block mb-1">Tags (optional, up to 5)</label>
+                      <input
+                        type="text"
+                        value={formTagsInput}
+                        onChange={e => setFormTagsInput(e.target.value)}
+                        placeholder="ai, flutter, kampala"
+                        className="kw-input text-xs"
+                      />
+                    </div>
                   </div>
 
                   {/* Contact for attendees */}

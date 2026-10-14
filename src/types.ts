@@ -210,6 +210,9 @@ export interface EventOpportunityItem {
   contact_email?: string; // valid host email
   capacity?: number; // optional maximum attendees capacity
   guest_count?: number; // count of guest registrations
+  tags?: string[]; // up to 5 sanitized event tags
+  venue?: string; // physical venue/address for in_person or hybrid
+  map_link?: string; // optional https Google Maps or OpenStreetMap link
   hidden_reason?: string; // reason why event was hidden by admin or auto-moderation
   awaiting_review?: boolean; // true if author edited a hidden event
   // For Opportunity:
@@ -230,6 +233,9 @@ export interface EventOpportunityItem {
   published: boolean;
   attendee_ids: string[];
   attendee_count?: number;
+  attendees?: any[];
+  guests?: EventGuest[];
+  rsvp_times?: Record<string, string>;
 }
 
 export interface EventQuestionReply {

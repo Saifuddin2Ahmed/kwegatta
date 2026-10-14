@@ -4,6 +4,17 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-10-14
+
+### Added & Improved (Release 1.6.0)
+- **Complete event management (attendees panel, capacity, tags, venue)**:
+  - **Host "Attendees" panel**: Prominent `Attendees (N)` button on the event detail and host's event card (visible to event author and admins only, where `N = members + guests`). Opens a view-only panel with `All · Members · Guests` tabs, name search, avatar/initials, type badge (`Member` / `Guest`), registration timestamp, member profile links, host/admin-only guest emails, and `Export CSV` (`name, type, email (guests only), registered_at`).
+  - **Host status**: Event authors see a `You're hosting` badge in place of the RSVP button.
+  - **Capacity**: Optional capacity (1–5000, empty = unlimited) in create/edit forms, validated on the server. Displays `X spots left` when capacity is set and `Full` (with disabled RSVP/Register button) when full; server blocks both member RSVPs and guest registrations when full.
+  - **Event tags**: Up to 5 tags (≤ 24 chars, lowercase letters/numbers/hyphens) sanitized on the server, displayed as chips on cards and detail pages, and searchable from the events list.
+  - **Venue & Map link**: `Venue / address` (≥ 5 chars) required when saving `in_person` or `hybrid` events (existing events without a venue remain viewable). Optional `Map link` (`https://` Google Maps or OpenStreetMap only) displays `Open in Maps` on the event page.
+  - **API 404**: Unknown `/api/*` routes return `404` JSON `{ error: "Not found" }` instead of SPA HTML.
+
 ## [1.5.13] - 2026-10-14
 
 ### Fixed (Release 1.5.13)

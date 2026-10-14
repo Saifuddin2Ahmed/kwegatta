@@ -4734,6 +4734,66 @@ export function zonedTimeToUtcIso(date: string, time: string, timeZone: string):
   return new Date(utcMs).toISOString();
 }
 
+export function sanitizeEventTags(rawTags: any): string[] {
+  if (!rawTags) return [];
+  const arr = Array.isArray(rawTags)
+    ? rawTags
+    : typeof rawTags === 'string'
+    ? rawTags.split(',')
+    : [];
+  const result: string[] = [];
+  for (const raw of arr) {
+    const cleaned = String(raw || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '')
+      .slice(0, 24);
+    if (cleaned.length > 0 && !result.includes(cleaned)) {
+      result.push(cleaned);
+      if (result.length >= 5) break;
+    }
+  }
+  return result;
+}
+
+export function validateMapLink(rawUrl: any): { valid: boolean; url?: string; error?: string } {
+  if (rawUrl === undefined || rawUrl === null || String(rawUrl).trim() === '') {
+    return { valid: true, url: undefined };
+  }
+  const str = String(rawUrl).trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(str);
+  } catch {
+    return { valid: false, error: 'Map link must be a valid https:// Google Maps or OpenStreetMap URL.' };
+  }
+  if (parsed.protocol !== 'https:') {
+    return { valid: false, error: 'Map link must use https://.' };
+  }
+  const host = parsed.hostname.toLowerCase();
+  const isGoogleMaps =
+    host === 'maps.google.com' ||
+    host.startsWith('maps.google.') ||
+    host === 'maps.app.goo.gl' ||
+    (host === 'goo.gl' && parsed.pathname.startsWith('/maps')) ||
+    ((host === 'google.com' ||
+      host === 'www.google.com' ||
+      /^www\.google\.[a-z.]+$/.test(host) ||
+      /^google\.[a-z.]+$/.test(host)) &&
+      parsed.pathname.startsWith('/maps'));
+  const isOpenStreetMap =
+    host === 'openstreetmap.org' ||
+    host === 'www.openstreetmap.org' ||
+    host.endsWith('.openstreetmap.org') ||
+    host === 'osm.org' ||
+    host === 'www.osm.org';
+
+  if (!isGoogleMaps && !isOpenStreetMap) {
+    return { valid: false, error: 'Map link must be a Google Maps or OpenStreetMap URL.' };
+  }
+  return { valid: true, url: parsed.toString() };
+}
+
 export function validateEventTimesAndFormat(
   raw: any,
   isUpdate = false,
@@ -4767,13 +4827,16 @@ export function validateEventTimesAndFormat(
     timezone = 'Africa/Kampala';
   }
 
-  // Handle location and join_link
-  let location = raw.location !== undefined ? sanitizeText(raw.location, 200) : existingItem?.location;
+  // Handle location / venue and join_link
+  const rawLocationInput = raw.venue !== undefined ? raw.venue : raw.location;
+  let location = rawLocationInput !== undefined
+    ? sanitizeText(rawLocationInput, 200)
+    : (existingItem?.venue || existingItem?.location);
   let join_link = raw.join_link !== undefined ? sanitizeHttpsUrl(raw.join_link) : existingItem?.join_link;
 
   if (format === 'in_person' || format === 'hybrid') {
-    if (!location || !location.trim()) {
-      return { valid: false, error: 'A location is required for in-person and hybrid events.' };
+    if (!location || location.trim().length < 5) {
+      return { valid: false, error: 'A venue / address (at least 5 characters) is required for in-person and hybrid events.' };
     }
   }
 
@@ -4943,7 +5006,10 @@ export function sanitizeEventForPublic(
     title: item.title,
     description: item.description,
     format: item.format,
-    location: item.location,
+    location: item.location || item.venue,
+    venue: item.venue || item.location,
+    map_link: item.map_link,
+    tags: Array.isArray(item.tags) ? item.tags : [],
     starts_at: item.starts_at,
     ends_at: item.ends_at,
     timezone: item.timezone,
@@ -5001,6 +5067,24 @@ app.get('/api/events', (req: Request, res: Response) => {
 
   if (!isAdmin) {
     list = filterEventsForCaller(list, callerProfileId || callerId, false);
+  }
+
+  const searchQ = typeof req.query.q === 'string'
+    ? req.query.q.trim().toLowerCase()
+    : typeof req.query.search === 'string'
+    ? req.query.search.trim().toLowerCase()
+    : typeof req.query.tag === 'string'
+    ? req.query.tag.trim().toLowerCase()
+    : '';
+
+  if (searchQ) {
+    list = list.filter((ev: any) => {
+      const titleMatch = String(ev.title || '').toLowerCase().includes(searchQ);
+      const descMatch = String(ev.description || '').toLowerCase().includes(searchQ);
+      const locMatch = String(ev.location || ev.venue || '').toLowerCase().includes(searchQ);
+      const tagMatch = Array.isArray(ev.tags) && ev.tags.some((t: string) => String(t).toLowerCase().includes(searchQ));
+      return titleMatch || descMatch || locMatch || tagMatch;
+    });
   }
 
   // Sort:
@@ -5072,7 +5156,7 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
   let attendeeProfiles: any[] = [];
   let peopleToMeet: Array<{ profile: any; reason: string; score: number }> = [];
 
-  if (callerId) {
+  if (callerId || isAdmin) {
     attendeeProfiles = store.profiles
       .filter((p: any) => attendeeIds.includes(p.id) && !p.hidden && !p.suspended)
       .map((p: any) => ({
@@ -5080,7 +5164,9 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
         name: p.name,
         avatar: `/api/avatar/${p.id}`,
         role: p.role,
-        headline: p.headline
+        headline: p.headline,
+        type: 'member',
+        registered_at: (item.rsvp_times && item.rsvp_times[p.id]) || item.created_at || p.created_at
       }));
 
     if (callerProfile) {
@@ -5150,10 +5236,29 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
   }
 
   const canSeeAttendees = isAdmin || isAuthor || isAttending;
+  const rawGuests = (store.event_guests || []).filter((g: any) => g.event_id === id);
+  const guestsForCaller = ((callerId || isAdmin) && canSeeAttendees)
+    ? rawGuests.map((g: any) => {
+        const guestObj: any = {
+          id: g.id,
+          event_id: g.event_id,
+          name: g.name,
+          type: 'guest',
+          created_at: g.created_at,
+          registered_at: g.created_at
+        };
+        if (isAuthor || isAdmin) {
+          if (g.email !== undefined) guestObj.email = g.email;
+          if (g.phone !== undefined) guestObj.phone = g.phone;
+        }
+        return guestObj;
+      })
+    : undefined;
 
   return res.json({
     ...sanitized,
-    attendees: (callerId && canSeeAttendees) ? attendeeProfiles : undefined,
+    attendees: ((callerId || isAdmin) && canSeeAttendees) ? attendeeProfiles : undefined,
+    guests: guestsForCaller,
     people_to_meet: callerId ? peopleToMeet : undefined,
     is_attending: isAttending,
     guest_info: guestInfo
@@ -5194,19 +5299,34 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
 
   if (index >= 0) {
     item.attendee_ids.splice(index, 1);
+    if (item.rsvp_times && typeof item.rsvp_times === 'object') {
+      delete item.rsvp_times[memberId];
+    }
     isGoing = false;
   } else {
+    if (item.capacity && item.capacity > 0) {
+      const guestCount = (store.event_guests || []).filter((g: any) => g.event_id === id).length;
+      const currentTotal = item.attendee_ids.length + guestCount;
+      if (currentTotal >= item.capacity) {
+        return res.status(400).json({ error: 'Event is at full capacity.' });
+      }
+    }
     item.attendee_ids.push(memberId);
+    if (!item.rsvp_times || typeof item.rsvp_times !== 'object') {
+      item.rsvp_times = {};
+    }
+    item.rsvp_times[memberId] = new Date().toISOString();
     isGoing = true;
   }
 
   await persistDoc('events', item.id, item);
   if (storageMode === 'disk') saveStore(store);
 
+  const guestCount = (store.event_guests || []).filter((g: any) => g.event_id === id).length;
   return res.json({
     success: true,
     is_attending: isGoing,
-    attendee_count: item.attendee_ids.length
+    attendee_count: item.attendee_ids.length + guestCount
   });
 });
 
@@ -5281,6 +5401,24 @@ app.post('/api/events', async (req: Request, res: Response) => {
     contact_email = cleanEmail;
   }
 
+  let capacity: number | undefined = undefined;
+  if (raw.capacity !== undefined && raw.capacity !== null && raw.capacity !== '') {
+    const capNum = Number(raw.capacity);
+    if (!Number.isInteger(capNum) || capNum < 1 || capNum > 5000) {
+      return res.status(400).json({ error: 'Capacity must be an integer between 1 and 5000.' });
+    }
+    capacity = capNum;
+  }
+
+  const rawMapLink = raw.map_link !== undefined ? raw.map_link : (raw.mapLink !== undefined ? raw.mapLink : raw.map_url);
+  const mapValidation = validateMapLink(rawMapLink);
+  if (!mapValidation.valid) {
+    return res.status(400).json({ error: mapValidation.error });
+  }
+  const map_link = mapValidation.url;
+
+  const tags = sanitizeEventTags(raw.tags);
+
   const authorId = callerProfile?.id || callerId || 'admin';
   const authorName = isAdmin ? adminInfo.adminName : (callerProfile?.name || 'Member');
   const isOrganiser = Boolean(callerProfile?.is_organiser);
@@ -5310,6 +5448,7 @@ app.post('/api/events', async (req: Request, res: Response) => {
   // Direct publishing immediately (no admin approval step)
   const status = 'published';
   const published = true;
+  const resolvedVenue = timeValidation.location || (raw.venue ? sanitizeText(raw.venue, 200) : (raw.location ? sanitizeText(raw.location, 200) : undefined));
 
   const item: any = {
     id: (kind === 'event' ? 'event-' : 'opp-') + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
@@ -5321,7 +5460,11 @@ app.post('/api/events', async (req: Request, res: Response) => {
     ends_at: timeValidation.ends_at,
     timezone: timeValidation.timezone,
     format: timeValidation.format || (raw.format ? sanitizeText(raw.format, 20) : 'in_person'),
-    location: timeValidation.location || (raw.location ? sanitizeText(raw.location, 200) : undefined),
+    location: resolvedVenue,
+    venue: resolvedVenue,
+    map_link,
+    tags,
+    capacity,
     join_link: timeValidation.join_link,
     contact_phone,
     contact_email,
@@ -5425,8 +5568,8 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
 
   const raw = req.body || {};
 
-  // If times/format are provided, validate them
-  if (raw.starts_at || raw.ends_at || raw.format || raw.timezone || raw.location || raw.join_link) {
+  // If times/format/venue are provided, validate them
+  if (raw.starts_at || raw.ends_at || raw.format || raw.timezone || raw.location !== undefined || raw.venue !== undefined || raw.join_link) {
     const timeValidation = validateEventTimesAndFormat(raw, true, item);
     if (!timeValidation.valid) {
       return res.status(400).json({ error: timeValidation.error });
@@ -5435,9 +5578,41 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
     if (timeValidation.ends_at) item.ends_at = timeValidation.ends_at;
     if (timeValidation.timezone) item.timezone = timeValidation.timezone;
     if (timeValidation.format) item.format = timeValidation.format;
-    if (timeValidation.location) item.location = timeValidation.location;
+    if (timeValidation.location) {
+      item.location = timeValidation.location;
+      item.venue = timeValidation.location;
+    }
     if (timeValidation.join_link) item.join_link = timeValidation.join_link;
     if (timeValidation.time_needs_update !== undefined) item.time_needs_update = timeValidation.time_needs_update;
+  }
+
+  if (raw.capacity !== undefined) {
+    if (raw.capacity === null || raw.capacity === '') {
+      delete item.capacity;
+    } else {
+      const capNum = Number(raw.capacity);
+      if (!Number.isInteger(capNum) || capNum < 1 || capNum > 5000) {
+        return res.status(400).json({ error: 'Capacity must be an integer between 1 and 5000.' });
+      }
+      item.capacity = capNum;
+    }
+  }
+
+  if (raw.map_link !== undefined || raw.mapLink !== undefined || raw.map_url !== undefined) {
+    const rawMapLink = raw.map_link !== undefined ? raw.map_link : (raw.mapLink !== undefined ? raw.mapLink : raw.map_url);
+    const mapValidation = validateMapLink(rawMapLink);
+    if (!mapValidation.valid) {
+      return res.status(400).json({ error: mapValidation.error });
+    }
+    if (mapValidation.url) {
+      item.map_link = mapValidation.url;
+    } else {
+      delete item.map_link;
+    }
+  }
+
+  if (raw.tags !== undefined) {
+    item.tags = sanitizeEventTags(raw.tags);
   }
 
   if (raw.contact_phone !== undefined) {
@@ -5467,7 +5642,6 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
   if (raw.title !== undefined) item.title = sanitizeText(raw.title, 150);
   if (raw.description !== undefined) item.description = sanitizeText(raw.description, 2000);
   if (raw.datetime !== undefined) item.datetime = sanitizeText(raw.datetime, 60);
-  if (raw.location !== undefined) item.location = sanitizeText(raw.location, 200);
   if (raw.cover_image !== undefined) {
     item.cover_image = raw.cover_image ? validateAndSanitizeEventCoverImage(raw.cover_image) : undefined;
   }
@@ -6451,8 +6625,9 @@ app.post('/api/events/:id/update', async (req: Request, res: Response) => {
 });
 
 app.get('/api/events/:id/export', (req: Request, res: Response) => {
-  const admin = verifyAdmin(req, res);
-  if (!admin) return;
+  cleanupExpiredGuestRecords();
+  const isAdmin = checkAdmin(req);
+  const callerId = resolveAuthUserId(req);
 
   const { id } = req.params;
   const item = (store.events || []).find((e: any) => e.id === id);
@@ -6460,18 +6635,33 @@ app.get('/api/events/:id/export', (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Event or Opportunity not found' });
   }
 
-  const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
-  const attendeeProfiles = store.profiles.filter((p: any) => attendeeIds.includes(p.id));
+  if (!isAdmin && !callerId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
 
-  // CSV output: Name,Role,Headline,Email,Status
-  let csv = 'ID,Name,Role,Headline,Email,Status\n';
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
+  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
+
+  if (!isAdmin && !isAuthor) {
+    return res.status(403).json({ error: 'Forbidden: Only the event host or an admin can export attendees.' });
+  }
+
+  const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
+  const attendeeProfiles = store.profiles.filter((p: any) => attendeeIds.includes(p.id) && !p.hidden && !p.suspended);
+  const guests = (store.event_guests || []).filter((g: any) => g.event_id === id);
+
+  let csv = 'name,type,email,registered_at\n';
   for (const p of attendeeProfiles) {
     const cleanName = (p.name || '').replace(/"/g, '""');
-    const cleanRole = (p.role || '').replace(/"/g, '""');
-    const cleanHeadline = (p.headline || p.offers || '').replace(/"/g, '""');
-    const cleanEmail = (p.email || '').replace(/"/g, '""');
-    const status = item.kind === 'event' ? "Going" : "Interested";
-    csv += `"${p.id}","${cleanName}","${cleanRole}","${cleanHeadline}","${cleanEmail}","${status}"\n`;
+    const regAt = ((item.rsvp_times && item.rsvp_times[p.id]) || item.created_at || '').replace(/"/g, '""');
+    csv += `"${cleanName}","Member","","${regAt}"\n`;
+  }
+  for (const g of guests) {
+    const cleanName = (g.name || '').replace(/"/g, '""');
+    const cleanEmail = (g.email || '').replace(/"/g, '""');
+    const regAt = (g.created_at || '').replace(/"/g, '""');
+    csv += `"${cleanName}","Guest","${cleanEmail}","${regAt}"\n`;
   }
 
   res.setHeader('Content-Type', 'text/csv');
@@ -7786,6 +7976,11 @@ export function errorHandler(err: any, req: Request, res: Response, _next: expre
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 }
+
+// Catch-all for unknown /api/* routes: always return 404 JSON, never SPA HTML
+app.use('/api', (_req: Request, res: Response) => {
+  return res.status(404).json({ error: 'Not found' });
+});
 
 app.use(errorHandler);
 

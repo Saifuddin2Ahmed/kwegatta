@@ -1067,16 +1067,29 @@ export async function askKwegatta(query: string): Promise<AskKwegattaMatch[]> {
    EVENTS, OPPORTUNITIES & PINNED ANNOUNCEMENTS API
    ========================================================================= */
 
-export async function fetchEvents(): Promise<any[]> {
+export async function fetchEvents(search?: string): Promise<any[]> {
   try {
     await getFreshAuthToken();
-    const res = await fetch('/api/events', { headers: getAuthHeaders() });
+    const qParam = search && search.trim() ? `?q=${encodeURIComponent(search.trim())}` : '';
+    const res = await fetch(`/api/events${qParam}`, { headers: getAuthHeaders() });
     if (!res.ok) return [];
     return await res.json();
   } catch (err) {
     console.warn('[fetchEvents] error:', err);
     return [];
   }
+}
+
+export async function exportEventAttendeesCsv(eventId: string): Promise<string> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/export`, {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to export attendees CSV');
+  }
+  return await res.text();
 }
 
 export async function fetchEventById(id: string, guestToken?: string): Promise<any | null> {

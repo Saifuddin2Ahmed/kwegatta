@@ -268,8 +268,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.5.13
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.5.13'");
+    // 1. Cache name includes version kwegatta-1.6.0
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.6.0'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -3792,11 +3792,397 @@ describe('Release 1.5.0 Features', () => {
         expect(json).toHaveProperty('my_reaction');
       });
     });
+
+    describe('Release 1.6.0 — Complete event management (attendees panel, capacity, tags, venue)', () => {
+      const hostId = 'host-160';
+      const memberAttId = 'member-att-160';
+      const memberExtraId = 'member-extra-160';
+
+      beforeAll(() => {
+        for (const [id, name] of [
+          [hostId, 'Host 160'],
+          [memberAttId, 'Member Attendee 160'],
+          [memberExtraId, 'Member Extra 160']
+        ]) {
+          if (!store.profiles.some((p: any) => p.id === id)) {
+            store.profiles.push({
+              id,
+              account_uid: id,
+              name,
+              role: 'Developer',
+              headline: 'Builder in Kampala',
+              bio: 'Bio',
+              offers: 'TypeScript',
+              needs: 'Design',
+              tags: [],
+              skills: [],
+              created_at: new Date().toISOString()
+            } as any);
+          }
+        }
+      });
+
+      it('a) The author gets the attendees data (members + guests with emails); a non-author attendee gets members but no guest emails; anonymous gets no attendee list', async () => {
+        const createRes = await fetch(`${baseUrl}/api/events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hostId}` },
+          body: JSON.stringify({
+            kind: 'event',
+            title: 'Event 1.6.0 Attendees Privacy',
+            description: 'Testing attendee and guest email visibility.',
+            start_date: '2026-12-10',
+            start_time: '14:00',
+            timezone: 'Africa/Kampala',
+            format: 'in_person',
+            venue: 'Kampala Innovation Hub'
+          })
+        });
+        expect(createRes.status).toBe(200);
+        const eventId = (await createRes.json()).item.id;
+
+        // Member RSVPs
+        const rsvpRes = await fetch(`${baseUrl}/api/events/${eventId}/rsvp`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${memberAttId}` }
+        });
+        expect(rsvpRes.status).toBe(200);
+
+        // Guest registers with email
+        const guestRes = await fetch(`${baseUrl}/api/events/${eventId}/guest-register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '198.51.100.160' },
+          body: JSON.stringify({
+            name: 'Guest Alice 160',
+            email: 'guest.alice160@example.com',
+            agree: true
+          })
+        });
+        expect(guestRes.status).toBe(200);
+
+        // 1. Author gets members + guests with emails
+        const authorRes = await fetch(`${baseUrl}/api/events/${eventId}`, {
+          headers: { Authorization: `Bearer ${hostId}` }
+        });
+        expect(authorRes.status).toBe(200);
+        const authorData = await authorRes.json();
+        expect(Array.isArray(authorData.attendees)).toBe(true);
+        expect(authorData.attendees.some((m: any) => m.id === memberAttId)).toBe(true);
+        expect(Array.isArray(authorData.guests)).toBe(true);
+        expect(authorData.guests).toHaveLength(1);
+        expect(authorData.guests[0].email).toBe('guest.alice160@example.com');
+
+        // Also check CSV export for author: name,type,email (guests only),registered_at
+        const csvRes = await fetch(`${baseUrl}/api/events/${eventId}/export`, {
+          headers: { Authorization: `Bearer ${hostId}` }
+        });
+        expect(csvRes.status).toBe(200);
+        const csvText = await csvRes.text();
+        expect(csvText).toContain('name,type,email,registered_at');
+        expect(csvText).toContain('"Member Attendee 160","Member",""');
+        expect(csvText).toContain('"Guest Alice 160","Guest","guest.alice160@example.com"');
+
+        // 2. Non-author attendee gets members, but NO guest emails
+        const attRes = await fetch(`${baseUrl}/api/events/${eventId}`, {
+          headers: { Authorization: `Bearer ${memberAttId}` }
+        });
+        expect(attRes.status).toBe(200);
+        const attData = await attRes.json();
+        expect(Array.isArray(attData.attendees)).toBe(true);
+        expect(attData.attendees.some((m: any) => m.id === memberAttId)).toBe(true);
+        const attRaw = JSON.stringify(attData);
+        expect(attRaw).not.toContain('guest.alice160@example.com');
+        if (Array.isArray(attData.guests)) {
+          for (const g of attData.guests) {
+            expect(g.email).toBeUndefined();
+          }
+        }
+
+        // 3. Anonymous gets no attendee list
+        const anonRes = await fetch(`${baseUrl}/api/events/${eventId}`);
+        expect(anonRes.status).toBe(200);
+        const anonData = await anonRes.json();
+        expect(anonData.attendees).toBeUndefined();
+        expect(anonData.attendee_ids).toBeUndefined();
+        expect(anonData.guests).toBeUndefined();
+      });
+
+      it('b) Capacity 2 with 2 attendees -> RSVP rejected as full; guest registration also blocked', async () => {
+        const createRes = await fetch(`${baseUrl}/api/events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hostId}` },
+          body: JSON.stringify({
+            kind: 'event',
+            title: 'Capacity 2 Event 160',
+            description: 'Testing strict capacity limit of 2.',
+            start_date: '2026-12-11',
+            start_time: '15:00',
+            timezone: 'Africa/Kampala',
+            format: 'in_person',
+            venue: 'Makerere Innovation Lab',
+            capacity: 2
+          })
+        });
+        expect(createRes.status).toBe(200);
+        const eventId = (await createRes.json()).item.id;
+
+        // Attendee 1 (member)
+        const rsvp1 = await fetch(`${baseUrl}/api/events/${eventId}/rsvp`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${memberAttId}` }
+        });
+        expect(rsvp1.status).toBe(200);
+
+        // Attendee 2 (guest)
+        const guest1 = await fetch(`${baseUrl}/api/events/${eventId}/guest-register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '198.51.100.161' },
+          body: JSON.stringify({
+            name: 'Second Spot Guest',
+            email: 'secondspot@example.com',
+            agree: true
+          })
+        });
+        expect(guest1.status).toBe(200);
+
+        // Now at 2/2 capacity -> another member RSVP is rejected as full
+        const rsvpFull = await fetch(`${baseUrl}/api/events/${eventId}/rsvp`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${memberExtraId}` }
+        });
+        expect(rsvpFull.status).toBe(400);
+        const rsvpFullJson = await rsvpFull.json();
+        expect(rsvpFullJson.error.toLowerCase()).toContain('full');
+
+        // Guest registration is also blocked when full
+        const guestFull = await fetch(`${baseUrl}/api/events/${eventId}/guest-register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '198.51.100.162' },
+          body: JSON.stringify({
+            name: 'Third Spot Guest',
+            email: 'thirdspot@example.com',
+            agree: true
+          })
+        });
+        expect(guestFull.status).toBe(400);
+        const guestFullJson = await guestFull.json();
+        expect(guestFullJson.error.toLowerCase()).toContain('full');
+      });
+
+      it('c) Tags: 6 tags -> only 5 kept; invalid characters stripped; search by tag finds the event', async () => {
+        const createRes = await fetch(`${baseUrl}/api/events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hostId}` },
+          body: JSON.stringify({
+            kind: 'event',
+            title: 'Tagged Tech Meetup 160',
+            description: 'Testing tag sanitization and search.',
+            start_date: '2026-12-12',
+            start_time: '16:00',
+            timezone: 'Africa/Kampala',
+            format: 'in_person',
+            venue: 'Ntinda Complex Kampala',
+            tags: ['Gemma_4!', 'Open-Source@AI', 'Kampala#Builders', 'Tag$Four', 'Tag%Five', 'TagSixDropped']
+          })
+        });
+        expect(createRes.status).toBe(200);
+        const createdItem = (await createRes.json()).item;
+        expect(createdItem.tags).toHaveLength(5);
+        expect(createdItem.tags).toEqual([
+          'gemma4',
+          'open-sourceai',
+          'kampalabuilders',
+          'tagfour',
+          'tagfive'
+        ]);
+
+        // Search by tag on GET /api/events?q=open-sourceai finds the event
+        const searchRes = await fetch(`${baseUrl}/api/events?q=open-sourceai`);
+        expect(searchRes.status).toBe(200);
+        const searchList = await searchRes.json();
+        expect(searchList.some((e: any) => e.id === createdItem.id)).toBe(true);
+      });
+
+      it('d) New in_person event without a venue -> 400; a map link with http:// or a non-maps domain -> 400; an existing event without a venue still loads', async () => {
+        const adminEmail = 'admin-160@kwegatta.test';
+        if (!store.admin_emails.includes(adminEmail)) store.admin_emails.push(adminEmail);
+
+        // 1. New in_person event without a venue (or < 5 chars) -> 400
+        const noVenueRes = await fetch(`${baseUrl}/api/events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer admin-160' },
+          body: JSON.stringify({
+            kind: 'event',
+            title: 'Missing Venue Event',
+            description: 'Should fail validation.',
+            start_date: '2026-12-15',
+            start_time: '10:00',
+            timezone: 'Africa/Kampala',
+            format: 'in_person',
+            venue: ''
+          })
+        });
+        expect(noVenueRes.status).toBe(400);
+
+        // 2. Map link with http:// -> 400
+        const httpMapRes = await fetch(`${baseUrl}/api/events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer admin-160' },
+          body: JSON.stringify({
+            kind: 'event',
+            title: 'Insecure Map Link Event',
+            description: 'Should reject http map link.',
+            start_date: '2026-12-15',
+            start_time: '10:00',
+            timezone: 'Africa/Kampala',
+            format: 'in_person',
+            venue: 'Kampala Central Hub',
+            map_link: 'http://maps.google.com/?q=Kampala'
+          })
+        });
+        expect(httpMapRes.status).toBe(400);
+
+        // 3. Map link with non-maps domain -> 400
+        const badDomainMapRes = await fetch(`${baseUrl}/api/events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer admin-160' },
+          body: JSON.stringify({
+            kind: 'event',
+            title: 'Non-Maps Domain Event',
+            description: 'Should reject non-maps domain.',
+            start_date: '2026-12-15',
+            start_time: '10:00',
+            timezone: 'Africa/Kampala',
+            format: 'in_person',
+            venue: 'Kampala Central Hub',
+            map_link: 'https://example.com/maps/kampala'
+          })
+        });
+        expect(badDomainMapRes.status).toBe(400);
+
+        // 4. Existing event without a venue still loads
+        const legacyNoVenueId = 'legacy-no-venue-160';
+        store.events.push({
+          id: legacyNoVenueId,
+          kind: 'event',
+          title: 'Legacy Event Without Venue',
+          description: 'Stored before venue validation.',
+          starts_at: '2026-12-20T10:00:00.000Z',
+          ends_at: '2026-12-20T12:00:00.000Z',
+          timezone: 'Africa/Kampala',
+          format: 'in_person',
+          author_id: hostId,
+          status: 'published',
+          published: true,
+          attendee_ids: [],
+          created_at: new Date().toISOString()
+        } as any);
+
+        const loadLegacyRes = await fetch(`${baseUrl}/api/events/${legacyNoVenueId}`);
+        expect(loadLegacyRes.status).toBe(200);
+        const loadLegacyJson = await loadLegacyRes.json();
+        expect(loadLegacyJson.id).toBe(legacyNoVenueId);
+      });
+
+      it('e) GET /api/does-not-exist -> 404 JSON', async () => {
+        const res = await fetch(`${baseUrl}/api/does-not-exist`);
+        expect(res.status).toBe(404);
+        expect(res.headers.get('content-type') || '').toContain('application/json');
+        const data = await res.json();
+        expect(data).toEqual({ error: 'Not found' });
+      });
+
+      it('f) Render: the author sees "Attendees (N)" and "You\'re hosting"; there are no remove buttons anywhere', async () => {
+        const authorProfile = {
+          id: 'author-render-160',
+          name: 'Host Render 160',
+          role: 'Developer',
+          headline: 'Event Organizer',
+          bio: 'Organizing events',
+          offers: 'Community',
+          needs: 'Speakers',
+          tags: [],
+          skills: [],
+          created_at: new Date().toISOString()
+        };
+
+        const mockEvent = {
+          id: 'ev-render-160',
+          kind: 'event',
+          title: 'Kampala Builders Summit 160',
+          description: 'Annual summit for builders.',
+          author_id: authorProfile.id,
+          author_name: authorProfile.name,
+          starts_at: new Date(Date.now() + 86400000).toISOString(),
+          ends_at: new Date(Date.now() + 90000000).toISOString(),
+          timezone: 'Africa/Kampala',
+          format: 'in_person',
+          venue: 'Kampala Serena Conference Centre',
+          map_link: 'https://maps.google.com/?q=Kampala',
+          tags: ['summit', 'kampala'],
+          capacity: 50,
+          created_at: new Date().toISOString(),
+          published: true,
+          attendee_ids: ['m-1'],
+          attendee_count: 2,
+          attendees: [
+            { id: 'm-1', name: 'Member One', type: 'member', registered_at: new Date().toISOString() }
+          ],
+          guests: [
+            { id: 'g-1', event_id: 'ev-render-160', name: 'Guest One', email: 'guest1@example.com', created_at: new Date().toISOString() }
+          ],
+          phase: 'upcoming'
+        };
+
+        window.location.hash = '#/events';
+        try { localStorage.clear(); } catch {}
+
+        if (!store.events) store.events = [];
+        store.events.push(mockEvent as any);
+        if (!store.event_guests) store.event_guests = [];
+        store.event_guests.push(mockEvent.guests[0] as any);
+
+        vi.spyOn(apiModule, 'fetchEvents').mockResolvedValue([mockEvent as any]);
+        vi.spyOn(apiModule, 'fetchEventById').mockResolvedValue(mockEvent as any);
+        vi.spyOn(apiModule, 'fetchEventQuestions').mockResolvedValue([]);
+        vi.spyOn(apiModule, 'fetchEventGuests').mockResolvedValue(mockEvent.guests as any);
+
+        const { act, waitFor, cleanup } = await import('@testing-library/react');
+        cleanup();
+
+        let renderedContainer: HTMLElement | null = null;
+        await act(async () => {
+          const res = render(
+            React.createElement(EventsView, {
+              currentProfile: authorProfile as any,
+              allProfiles: [authorProfile as any],
+              initialItemId: mockEvent.id,
+              onViewProfile: vi.fn(),
+              onToast: vi.fn()
+            })
+          );
+          renderedContainer = res.container;
+          await new Promise(r => setTimeout(r, 50));
+        });
+
+        await waitFor(() => {
+          expect(screen.getAllByText(/Attendees \(2\)/i).length).toBeGreaterThan(0);
+          expect(screen.getAllByText(/You're hosting/i).length).toBeGreaterThan(0);
+          expect(screen.getAllByText(/Open in Maps/i).length).toBeGreaterThan(0);
+        });
+
+        // Assert no remove buttons exist anywhere in the rendered view
+        const allButtons = Array.from((renderedContainer || document).querySelectorAll('button'));
+        for (const btn of allButtons) {
+          expect((btn.textContent || '').toLowerCase()).not.toContain('remove');
+        }
+      });
+    });
   });
 });
 
 afterAll(() => {
   if (server) server.close();
 });
+
 
 
