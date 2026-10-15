@@ -61,6 +61,7 @@ import {
 import { validatePasswordStrength } from '../src/services/firebase';
 import { normalizeIntent, parseIntents, toggleChoice, makeFirst } from '../src/lib/profileChoices';
 import { ShareCardModal, avatarSrc } from '../src/components/ShareCardModal';
+import { formatTzLabel } from '../src/lib/timezoneLabel';
 
 let server: any;
 let baseUrl: string;
@@ -327,8 +328,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.10.1
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.10.1'");
+    // 1. Cache name includes version kwegatta-1.10.2
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.10.2'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -6271,16 +6272,49 @@ describe('Release 1.5.0 Features', () => {
         const swCacheName = match![1];
 
         expect(swCacheName).toBe(`kwegatta-${pkg.version}`);
-        expect(pkg.version).toBe('1.10.1');
-        expect(swCacheName).toBe('kwegatta-1.10.1');
+        expect(pkg.version).toBe('1.10.2');
+        expect(swCacheName).toBe('kwegatta-1.10.2');
       });
 
       it('d) OG_RENDER_VERSION busts image cache', () => {
-        expect(OG_RENDER_VERSION).toBe('2');
+        expect(OG_RENDER_VERSION).toBe('3');
         const hash = computeEventOgVersionHash({ title: 'Test', starts_at: '2026-10-15T00:00:00Z' });
         expect(hash).toBeDefined();
         expect(typeof hash).toBe('string');
         expect(hash.length).toBe(10);
+      });
+    });
+
+    describe('Release 1.10.2: Friendly Timezone Labels ("EAT")', () => {
+      it('a) formatTzLabel correctly maps EAT zones, valid zones, empty, and invalid tz', () => {
+        expect(formatTzLabel('Africa/Nairobi')).toBe('EAT');
+        expect(formatTzLabel('Africa/Kampala')).toBe('EAT');
+        expect(formatTzLabel('Africa/Dar_es_Salaam')).toBe('EAT');
+
+        const berlinLabel = formatTzLabel('Europe/Berlin');
+        expect(berlinLabel).not.toBe('Europe/Berlin');
+        expect(berlinLabel.length).toBeGreaterThan(0);
+
+        expect(formatTzLabel('')).toBe('EAT');
+        expect(formatTzLabel('   ')).toBe('EAT');
+        expect(formatTzLabel('Not/AZone')).toBe('UTC');
+      });
+
+      it('b) /e/:id og:description for event with timezone Africa/Nairobi contains "EAT" and not "Africa/Nairobi"', async () => {
+        const testEvent = {
+          id: 'ev-tz-nairobi-1102',
+          title: 'Nairobi Timezone Test Event',
+          timezone: 'Africa/Nairobi',
+          published: true,
+          starts_at: '2026-12-10T14:00:00Z',
+          venue: 'Nairobi Garage'
+        };
+
+        const rawHtml = '<!DOCTYPE html><html><head><title>Default</title></head><body>App</body></html>';
+        const injectedHtml = injectEventOgIntoHtml(rawHtml, testEvent);
+
+        expect(injectedHtml).toContain('EAT');
+        expect(injectedHtml).not.toContain('Africa/Nairobi');
       });
     });
   });

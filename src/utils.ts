@@ -1,4 +1,6 @@
 import { Profile } from './types';
+import { formatTzLabel } from './lib/timezoneLabel';
+export { formatTzLabel };
 
 export function getInitials(name: string): string {
   const parts = String(name || '?')
@@ -277,20 +279,24 @@ export function formatEventDateTime(
     });
     const eventTimeStr = eventFormatter.format(startDate);
 
-    if (userTimezone === eventTz) {
+    const eventTzLabel = formatTzLabel(eventTz, startDate);
+    const userTzLabel = formatTzLabel(userTimezone, startDate);
+
+    if (userTimezone === eventTz || userTzLabel === eventTzLabel) {
       return {
-        display: `${userTimeStr} · ${eventTz}`,
+        display: `${userTimeStr} ${eventTzLabel}`,
         isLegacy: false
       };
     }
 
     return {
-      display: `${userTimeStr} · your time · ${eventTz} ${eventTimeStr}`,
+      display: `${userTimeStr} ${userTzLabel} · your time · ${eventTimeStr} ${eventTzLabel}`,
       isLegacy: false
     };
   } catch {
+    const tzLabel = formatTzLabel(userTimezone, startDate);
     return {
-      display: `${userTimeStr}`,
+      display: `${userTimeStr} ${tzLabel}`,
       isLegacy: false
     };
   }

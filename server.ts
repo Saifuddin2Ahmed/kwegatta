@@ -14,6 +14,7 @@ import wawoff2 from 'wawoff2';
 import { ISO_COUNTRIES, deriveLocation } from './src/lib/countries';
 import { ROLE_CHOICES, STAGE_CHOICES, INTENT_CHOICES, normalizeIntent } from './src/lib/profileChoices';
 import { normalizeTicketCode, isValidTicketCode, formatTicketCode } from './src/lib/ticketCode';
+import { formatTzLabel } from './src/lib/timezoneLabel';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -4719,7 +4720,7 @@ export function isEventPubliclyVisible(item: any): boolean {
   return true;
 }
 
-export const OG_RENDER_VERSION = '2';
+export const OG_RENDER_VERSION = '3';
 
 export function computeEventOgVersionHash(item: any): string {
   const raw = `v${OG_RENDER_VERSION}|${item?.cover_image || ''}|${item?.title || ''}|${item?.starts_at || item?.datetime || ''}`;
@@ -4729,8 +4730,10 @@ export function computeEventOgVersionHash(item: any): string {
 export function formatEventOgDatePart(item: any): { dateTimeText: string; tz: string } {
   const tz = stripControlChars(item?.timezone || 'Africa/Kampala') || 'Africa/Kampala';
   const startRaw = item?.starts_at;
+  const d = startRaw ? new Date(startRaw) : new Date();
+  const validDate = !isNaN(d.getTime()) ? d : new Date();
+  const tzLabel = formatTzLabel(tz, validDate);
   if (startRaw) {
-    const d = new Date(startRaw);
     if (!isNaN(d.getTime())) {
       try {
         const weekdayDayMonth = new Intl.DateTimeFormat('en-GB', {
@@ -4745,12 +4748,12 @@ export function formatEventOgDatePart(item: any): { dateTimeText: string; tz: st
           hour12: true,
           timeZone: tz
         }).format(d);
-        return { dateTimeText: `${weekdayDayMonth} · ${timeStr}`, tz };
+        return { dateTimeText: `${weekdayDayMonth} · ${timeStr}`, tz: tzLabel };
       } catch (_) {}
     }
   }
   const fallback = stripControlChars(item?.datetime || 'Upcoming Event');
-  return { dateTimeText: fallback, tz };
+  return { dateTimeText: fallback, tz: tzLabel };
 }
 
 export function buildEventMetaDescription(item: any): string {
@@ -4761,8 +4764,8 @@ export function buildEventMetaDescription(item: any): string {
       : stripControlChars(item?.venue || item?.location || 'Online') || 'Online';
   const descCollapsed = stripControlChars(item?.description || '').slice(0, 150);
   const combined = descCollapsed
-    ? `${dateTimeText} (${tz}) · ${venuePart} — ${descCollapsed}`
-    : `${dateTimeText} (${tz}) · ${venuePart}`;
+    ? `${dateTimeText} ${tz} · ${venuePart} — ${descCollapsed}`
+    : `${dateTimeText} ${tz} · ${venuePart}`;
   return combined.length > 200 ? combined.slice(0, 199).trimEnd() + '…' : combined;
 }
 

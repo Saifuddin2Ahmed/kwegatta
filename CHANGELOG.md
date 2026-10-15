@@ -4,6 +4,18 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.2] - 2026-10-15
+
+### Added & Fixed (Release 1.10.2)
+- **Friendly Timezone Labels ("EAT" instead of raw IANA zone)**:
+  - Created shared `src/lib/timezoneLabel.ts` with `formatTzLabel(tz: string, at: Date): string`.
+  - Maps East Africa Time zones (`Africa/Kampala`, `Africa/Nairobi`, `Africa/Dar_es_Salaam`, `Africa/Addis_Ababa`, `Africa/Mogadishu`, `Africa/Djibouti`, `Africa/Asmara`, `Indian/Comoro`, `Indian/Antananarivo`, `Indian/Mayotte`) to `"EAT"`.
+  - For other valid zones, extracts short timeZoneName (`"GMT+2"`, `"EST"`, `"CET"`, etc.) via `Intl.DateTimeFormat`.
+  - Handles empty timezone strings (defaulting to `"EAT"`) and invalid identifiers (`"UTC"`).
+  - Updated `/e/:id` Open Graph and Twitter meta descriptions (`buildEventMetaDescription`), OG image date line (`formatEventOgDatePart`), event cards and detail view (`formatEventDateTime`), emails, notifications, and waitlist promotion messages.
+  - Kept `.ics` files using the real IANA TZID and left the create/edit timezone dropdown unchanged.
+  - Bumped `OG_RENDER_VERSION` to `'3'` and service worker cache to `kwegatta-1.10.2`.
+
 ## [1.10.1] - 2026-10-15
 
 ### Fixed (Release 1.10.1)
