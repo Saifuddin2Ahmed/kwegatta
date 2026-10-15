@@ -667,6 +667,7 @@ interface StoreData {
   event_questions: any[];
   event_guests: any[];
   event_checkins: any[];
+  event_match_feedback: any[];
   pinned_announcement: any;
   admin_emails: string[];
   team: TeamMember[];
@@ -1064,6 +1065,7 @@ function createInitialStore(demo: boolean = isDemoMode): StoreData {
     event_questions: [],
     event_guests: [],
     event_checkins: [],
+    event_match_feedback: [],
     pinned_announcement: null,
     admin_emails: [],
     team: [...INITIAL_TEAM_MEMBERS],
@@ -1308,7 +1310,8 @@ export const PERSISTED_COLLECTIONS = [
   'events',
   'event_guests',
   'event_questions',
-  'event_checkins'
+  'event_checkins',
+  'event_match_feedback'
 ] as const;
 
 // Explicit write-only allowlist (empty: all persisted collections are loaded in setupFirestoreListeners)
@@ -1583,6 +1586,24 @@ export async function setupFirestoreListeners(customDbForTest?: any): Promise<vo
       if (initial) { initial = false; resolve(); }
     }, (err) => {
       console.error('[Firestore] event_checkins listener error:', err?.message || err);
+      if (initial) { initial = false; resolve(); }
+    });
+    firestoreUnsubscribers.push(unsub);
+  }));
+
+  // 14. Event Match Feedback listener
+  initialLoadPromises.push(new Promise((resolve) => {
+    let initial = true;
+    const unsub = firestoreDb!.collection('event_match_feedback').onSnapshot((snap) => {
+      const list: any[] = [];
+      snap.forEach(doc => {
+        const d = doc.data();
+        list.push({ ...d, id: d.id || doc.id });
+      });
+      store.event_match_feedback = list;
+      if (initial) { initial = false; resolve(); }
+    }, (err) => {
+      console.error('[Firestore] event_match_feedback listener error:', err?.message || err);
       if (initial) { initial = false; resolve(); }
     });
     firestoreUnsubscribers.push(unsub);
@@ -4073,6 +4094,14 @@ export async function cascadeDeleteMemberData(memberId: string, memberUid?: stri
     (c: any) => !authoredEventIds.has(c.event_id) && !(c.kind === 'member' && matchesMember(c.ref_id)) && !matchesMember(c.checked_in_by)
   );
 
+  // Event match feedback: belonging to authored events OR from/to this member
+  const deletedMatchFeedback = (store.event_match_feedback || [])
+    .filter((f: any) => authoredEventIds.has(f.event_id) || matchesMember(f.member_id) || matchesMember(f.target_profile_id))
+    .map((f: any) => f.id);
+  store.event_match_feedback = (store.event_match_feedback || []).filter(
+    (f: any) => !authoredEventIds.has(f.event_id) && !matchesMember(f.member_id) && !matchesMember(f.target_profile_id)
+  );
+
   // 6. Delete replies the member posted on questions of other events
   for (const q of (store.event_questions || [])) {
     if (q.reply && matchesMember(q.reply.author_id)) {
@@ -4097,6 +4126,13 @@ export async function cascadeDeleteMemberData(memberId: string, memberUid?: stri
           delete ev.member_ticket_hashes[k];
           changed = true;
         }
+      }
+    }
+    if (Array.isArray(ev.match_optout_ids)) {
+      const origOptLen = ev.match_optout_ids.length;
+      ev.match_optout_ids = ev.match_optout_ids.filter((optId: string) => !matchesMember(optId));
+      if (ev.match_optout_ids.length !== origOptLen) {
+        changed = true;
       }
     }
     if (ev.rsvp_times && typeof ev.rsvp_times === 'object') {
@@ -4159,6 +4195,7 @@ export async function cascadeDeleteMemberData(memberId: string, memberUid?: stri
     if (deletedGuests.length > 0) await batchRemoveDocs('event_guests', deletedGuests);
     if (deletedQuestions.length > 0) await batchRemoveDocs('event_questions', deletedQuestions);
     if (deletedCheckins.length > 0) await batchRemoveDocs('event_checkins', deletedCheckins);
+    if (deletedMatchFeedback.length > 0) await batchRemoveDocs('event_match_feedback', deletedMatchFeedback);
   } else {
     saveStore(store);
   }
@@ -5740,6 +5777,9 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
         removeDoc('event_checkins', cid).catch(() => {});
       }
     }
+    if (Array.isArray(item.match_optout_ids)) {
+      item.match_optout_ids = item.match_optout_ids.filter((optId: string) => optId !== memberId && optId !== callerId);
+    }
     isGoing = false;
   } else {
     if (item.capacity && item.capacity > 0) {
@@ -5760,6 +5800,18 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
     }
     const code = deriveTicketCode(id, `member:${memberId}`, rsvpNow);
     item.member_ticket_hashes[memberId] = hashTicketCode(code);
+
+    if (!Array.isArray(item.match_optout_ids)) {
+      item.match_optout_ids = [];
+    }
+    const rawBody = req.body || {};
+    const optIn = rawBody.opt_in !== undefined ? Boolean(rawBody.opt_in) : (rawBody.show_in_people_to_meet !== undefined ? Boolean(rawBody.show_in_people_to_meet) : (rawBody.match_optout !== undefined ? !rawBody.match_optout : true));
+    if (!optIn) {
+      if (!item.match_optout_ids.includes(memberId)) item.match_optout_ids.push(memberId);
+    } else {
+      item.match_optout_ids = item.match_optout_ids.filter((optId: string) => optId !== memberId && optId !== callerId);
+    }
+
     isGoing = true;
   }
 
@@ -7562,6 +7614,326 @@ app.post('/api/events/:id/self-checkin', async (req: Request, res: Response) => 
     status: 'checked_in',
     checked_in_at: checkinRecord.checked_in_at
   });
+});
+
+/* =========================================================================
+   EVENT MATCHING: "PEOPLE TO MEET HERE" ENDPOINTS
+   ========================================================================= */
+
+const eventPeopleToMeetCache = new Map<string, { timestamp: number; data: any }>();
+
+function computeHeuristicMatchScore(me: any, candidate: any): { score: number; reason: string } {
+  let score = 65;
+  const meOffers = String(me.offers || me.teaches || '').toLowerCase();
+  const meNeeds = String(me.needs || me.learns || '').toLowerCase();
+  const candOffers = String(candidate.offers || candidate.teaches || '').toLowerCase();
+  const candNeeds = String(candidate.needs || candidate.learns || '').toLowerCase();
+
+  let reason = '';
+  if (candOffers && meNeeds && (candOffers.includes(meNeeds) || meNeeds.split(' ').some(w => w.length > 3 && candOffers.includes(w)))) {
+    score += 15;
+    reason = `${candidate.name || 'They'} offers skills (${candidate.offers || candidate.role || 'expertise'}) that align with what you need.`;
+  } else if (meOffers && candNeeds && (meOffers.includes(candNeeds) || candNeeds.split(' ').some(w => w.length > 3 && meOffers.includes(w)))) {
+    score += 15;
+    reason = `You offer skills that ${candidate.name || 'they'} are looking for in the tech community.`;
+  } else if (candidate.role && me.role && candidate.role.toLowerCase() !== me.role.toLowerCase()) {
+    score += 10;
+    reason = `As a ${candidate.role}, ${candidate.name} brings a complementary perspective to your ${me.role} background.`;
+  } else {
+    reason = `Both of you are active builders attending this event to connect and collaborate.`;
+  }
+
+  const meSkills = Array.isArray(me.skills) ? me.skills : [];
+  const candSkills = Array.isArray(candidate.skills) ? candidate.skills : [];
+  const sharedSkills = meSkills.filter((s: string) => candSkills.some((cs: string) => String(cs).toLowerCase() === String(s).toLowerCase()));
+  if (sharedSkills.length > 0) {
+    score += Math.min(20, sharedSkills.length * 5);
+    reason += ` Shared interests: ${sharedSkills.slice(0, 3).join(', ')}.`;
+  }
+
+  score = Math.min(95, Math.max(65, score));
+  return { score, reason };
+}
+
+// GET /api/events/:id/people-to-meet
+app.get('/api/events/:id/people-to-meet', async (req: Request, res: Response) => {
+  const callerId = resolveAuthUserId(req);
+  if (!callerId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) {
+    return res.status(404).json({ error: 'Event not found' });
+  }
+  const callerProfile = store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId);
+  const memberId = callerProfile?.id || callerId;
+
+  const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
+  const isAttendee = attendeeIds.includes(memberId) || attendeeIds.includes(callerId);
+  if (!isAttendee) {
+    return res.status(403).json({ error: 'Forbidden: You must be an attendee of this event to see people to meet.' });
+  }
+
+  // Time window check: 7 days before starts_at until 24 hours after ends_at
+  const now = Date.now();
+  const startMs = new Date(item.starts_at || item.datetime || item.created_at).getTime();
+  const endMs = item.ends_at ? new Date(item.ends_at).getTime() : startMs + (3 * 60 * 60 * 1000);
+
+  const windowStart = startMs - (7 * 24 * 60 * 60 * 1000);
+  const windowEnd = endMs + (24 * 60 * 60 * 1000);
+
+  if (now < windowStart || now > windowEnd) {
+    return res.status(409).json({ error: 'People to meet is available from 7 days before the event until 24 hours after it ends.' });
+  }
+
+  const optoutSet = new Set<string>(Array.isArray(item.match_optout_ids) ? item.match_optout_ids : []);
+  const optedInAttendees = attendeeIds.filter((attId: string) => !optoutSet.has(attId));
+  const optedInCount = optedInAttendees.length;
+
+  const isAdmin = checkAdmin(req);
+  const isHost = Boolean(item.author_id === memberId || item.author_id === callerId);
+
+  if (isHost || isAdmin) {
+    return res.json({
+      people: [],
+      is_host_or_admin: true,
+      opted_in_count: optedInCount,
+      message: `${optedInCount} attendee${optedInCount === 1 ? '' : 's'} opted into matching`
+    });
+  }
+
+  const feedbackHiddenSet = new Set<string>(
+    (store.event_match_feedback || [])
+      .filter((f: any) => f.event_id === id && (f.member_id === memberId || f.member_id === callerId) && f.value === -1)
+      .map((f: any) => f.target_profile_id)
+  );
+
+  const callerBlockedSet = new Set<string>(callerProfile?.blocked_ids || []);
+
+  const candidates = (store.profiles || []).filter((p: any) => {
+    if (!p.account_uid) return false;
+    if (p.id === memberId || p.id === callerId || p.account_uid === callerId) return false;
+    const isAtt = attendeeIds.includes(p.id) || attendeeIds.includes(p.account_uid);
+    if (!isAtt) return false;
+    if (optoutSet.has(p.id) || optoutSet.has(p.account_uid)) return false;
+    if (p.hidden || p.suspended || p.hidden_by_moderation) return false;
+    if (feedbackHiddenSet.has(p.id) || feedbackHiddenSet.has(p.account_uid)) return false;
+    if (callerBlockedSet.has(p.id) || callerBlockedSet.has(p.account_uid)) return false;
+    if (Array.isArray(p.blocked_ids) && (p.blocked_ids.includes(memberId) || p.blocked_ids.includes(callerId))) return false;
+    return true;
+  });
+
+  if (candidates.length < 1 || optedInCount < 2) {
+    return res.json({
+      people: [],
+      opted_in_count: optedInCount,
+      message: 'Matches appear when more people RSVP.'
+    });
+  }
+
+  // Heuristic ranking
+  const scoredCandidates = candidates.map((cand: any) => {
+    const { score, reason } = computeHeuristicMatchScore(callerProfile || { name: 'Member' }, cand);
+    return { candidate: cand, score, reason };
+  }).sort((a, b) => b.score - a.score);
+
+  const top10 = scoredCandidates.slice(0, 10);
+
+  // Cache check
+  const cacheKey = `${id}:${memberId}:${top10.map(t => t.candidate.id).join('-')}:${feedbackHiddenSet.size}`;
+  const cached = eventPeopleToMeetCache.get(cacheKey);
+  if (cached && (now - cached.timestamp < 6 * 60 * 60 * 1000)) {
+    return res.json(cached.data);
+  }
+
+  let resultPeople: any[] = [];
+  const rateLimitRes = checkMemberGemmaRateLimit(callerId);
+
+  if (rateLimitRes.allowed && process.env.GEMINI_API_KEY) {
+    try {
+      const gemmaData = {
+        event_title: item.title,
+        me: {
+          name: callerProfile?.name || 'Attendee',
+          role: callerProfile?.role || 'builder',
+          offers: callerProfile?.offers || callerProfile?.teaches || '',
+          needs: callerProfile?.needs || callerProfile?.learns || ''
+        },
+        attendees: top10.map(t => ({
+          id: t.candidate.id,
+          name: t.candidate.name,
+          role: t.candidate.role,
+          offers: t.candidate.offers || t.candidate.teaches || '',
+          needs: t.candidate.needs || t.candidate.learns || ''
+        }))
+      };
+
+      const prompt = buildGemmaPrompt('event_matches', gemmaData);
+      const contents = [{ role: 'user', parts: [{ text: prompt }] }];
+      const generationConfig = { temperature: 0.1, maxOutputTokens: 800 };
+
+      const gemmaPromise = invokeGemmaDirect(contents, generationConfig);
+      const timeoutMs = (process.env.NODE_ENV === 'test' || process.env.VITEST) ? 1500 : 10000;
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Gemma timeout')), timeoutMs));
+
+      const gemmaRes: any = await Promise.race([gemmaPromise, timeoutPromise]);
+      let rawText = gemmaRes?.text || (typeof gemmaRes?.data === 'string' ? gemmaRes.data : JSON.stringify(gemmaRes?.data || {}));
+      if (rawText.includes('```')) {
+        rawText = rawText.replace(/```(?:json)?\s*([\s\S]*?)\s*```/gi, '$1').trim();
+      }
+
+      let parsed: any = null;
+      try { parsed = JSON.parse(rawText); } catch (_) {}
+
+      const matchesArray = Array.isArray(parsed?.matches) ? parsed.matches : (Array.isArray(parsed) ? parsed : []);
+
+      if (matchesArray.length > 0) {
+        for (const m of matchesArray.slice(0, 5)) {
+          const candObj = top10.find(t => t.candidate.id === m.profile_id || t.candidate.id === m.id);
+          if (candObj) {
+            resultPeople.push({
+              id: candObj.candidate.id,
+              name: candObj.candidate.name || 'Member',
+              avatar: candObj.candidate.avatar || '',
+              role: candObj.candidate.role || 'Member',
+              headline: candObj.candidate.headline || '',
+              reason: m.reason || candObj.reason,
+              score: typeof m.score === 'number' ? m.score : candObj.score
+            });
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('[People-to-Meet] Gemma task event_matches failed/timed out, using heuristic:', err?.message || err);
+    }
+  }
+
+  // Fallback to heuristic if Gemma produced no results
+  if (resultPeople.length === 0) {
+    resultPeople = top10.slice(0, 5).map(t => ({
+      id: t.candidate.id,
+      name: t.candidate.name || 'Member',
+      avatar: t.candidate.avatar || '',
+      role: t.candidate.role || 'Member',
+      headline: t.candidate.headline || '',
+      reason: t.reason,
+      score: t.score
+    }));
+  }
+
+  const responsePayload = {
+    people: resultPeople,
+    opted_in_count: optedInCount
+  };
+
+  eventPeopleToMeetCache.set(cacheKey, { timestamp: now, data: responsePayload });
+  return res.json(responsePayload);
+});
+
+// POST /api/events/:id/people-to-meet/feedback
+app.post('/api/events/:id/people-to-meet/feedback', async (req: Request, res: Response) => {
+  const callerId = resolveAuthUserId(req);
+  if (!callerId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) {
+    return res.status(404).json({ error: 'Event not found' });
+  }
+  const callerProfile = store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId);
+  const memberId = callerProfile?.id || callerId;
+
+  const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
+  const isAttendee = attendeeIds.includes(memberId) || attendeeIds.includes(callerId);
+  if (!isAttendee) {
+    return res.status(403).json({ error: 'Forbidden: You must be an attendee to leave feedback.' });
+  }
+
+  const { profile_id, value } = req.body || {};
+  if (!profile_id || (value !== 1 && value !== -1)) {
+    return res.status(400).json({ error: 'Provide valid profile_id and value (1 or -1).' });
+  }
+
+  if (!Array.isArray(store.event_match_feedback)) {
+    store.event_match_feedback = [];
+  }
+
+  const existingIdx = store.event_match_feedback.findIndex(
+    (f: any) => f.event_id === id && (f.member_id === memberId || f.member_id === callerId) && f.target_profile_id === profile_id
+  );
+
+  const fbRecord = {
+    id: existingIdx >= 0 ? store.event_match_feedback[existingIdx].id : `fb-${id}-${memberId}-${profile_id}`,
+    event_id: id,
+    member_id: memberId,
+    target_profile_id: profile_id,
+    value,
+    created_at: new Date().toISOString()
+  };
+
+  if (existingIdx >= 0) {
+    store.event_match_feedback[existingIdx] = fbRecord;
+  } else {
+    store.event_match_feedback.push(fbRecord);
+  }
+
+  await persistDoc('event_match_feedback', fbRecord.id, fbRecord);
+  if (storageMode === 'disk') saveStore(store);
+
+  // Invalidate cache for caller
+  for (const k of eventPeopleToMeetCache.keys()) {
+    if (k.startsWith(`${id}:${memberId}`)) eventPeopleToMeetCache.delete(k);
+  }
+
+  return res.json({ success: true });
+});
+
+// POST /api/events/:id/people-to-meet/opt-in
+app.post('/api/events/:id/people-to-meet/opt-in', async (req: Request, res: Response) => {
+  const callerId = resolveAuthUserId(req);
+  if (!callerId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) {
+    return res.status(404).json({ error: 'Event not found' });
+  }
+  const callerProfile = store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId);
+  const memberId = callerProfile?.id || callerId;
+
+  const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
+  const isAttendee = attendeeIds.includes(memberId) || attendeeIds.includes(callerId);
+  if (!isAttendee) {
+    return res.status(403).json({ error: 'Forbidden: You must be registered for this event to change matching preferences.' });
+  }
+
+  if (!Array.isArray(item.match_optout_ids)) {
+    item.match_optout_ids = [];
+  }
+
+  const raw = req.body || {};
+  const optIn = raw.opt_in !== undefined ? Boolean(raw.opt_in) : (raw.show_in_people_to_meet !== undefined ? Boolean(raw.show_in_people_to_meet) : (raw.match_optout !== undefined ? !raw.match_optout : true));
+
+  if (optIn) {
+    item.match_optout_ids = item.match_optout_ids.filter((optId: string) => optId !== memberId && optId !== callerId);
+  } else {
+    if (!item.match_optout_ids.includes(memberId)) {
+      item.match_optout_ids.push(memberId);
+    }
+  }
+
+  await persistDoc('events', item.id, item);
+  if (storageMode === 'disk') saveStore(store);
+
+  // Invalidate cache
+  for (const k of eventPeopleToMeetCache.keys()) {
+    if (k.startsWith(`${id}:`)) eventPeopleToMeetCache.delete(k);
+  }
+
+  return res.json({ success: true, opt_in: !item.match_optout_ids.includes(memberId) });
 });
 
 /* =========================================================================

@@ -277,8 +277,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.8.1
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.8.2'");
+    // 1. Cache name includes version kwegatta-1.9.0
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.9.0'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -4959,6 +4959,297 @@ describe('Release 1.5.0 Features', () => {
         expect(res.status).toBe(200);
         expect(res.headers.get('cache-control')).toContain('public, max-age=3600');
         expect(res.headers.get('etag')).toBeTruthy();
+      });
+    });
+
+    describe('Release 1.9.0: "People to meet here" AI Matching inside Events', () => {
+      it('a) Anonymous -> 401; non-attendee -> 403; outside the time window -> 409', async () => {
+        const now = Date.now();
+        const evActiveId = 'ev-ptm-active-' + now;
+        const evFutureId = 'ev-ptm-future-' + now;
+
+        const activeEvent = {
+          id: evActiveId,
+          title: 'Active Tech Meetup',
+          starts_at: new Date(now + 3600000).toISOString(),
+          ends_at: new Date(now + 7200000).toISOString(),
+          attendee_ids: ['user-ptm-1', 'user-ptm-2'],
+          published: true,
+          status: 'approved'
+        };
+
+        const futureEvent = {
+          id: evFutureId,
+          title: 'Far Future Hackathon',
+          starts_at: new Date(now + 30 * 86400000).toISOString(),
+          ends_at: new Date(now + 30 * 86400000 + 7200000).toISOString(),
+          attendee_ids: ['user-ptm-1', 'user-ptm-2'],
+          published: true,
+          status: 'approved'
+        };
+
+        store.events.push(activeEvent, futureEvent);
+
+        // 1. Anonymous -> 401
+        const resAnon = await fetch(`${baseUrl}/api/events/${evActiveId}/people-to-meet`);
+        expect(resAnon.status).toBe(401);
+
+        // 2. Non-attendee -> 403
+        const resNonAtt = await fetch(`${baseUrl}/api/events/${evActiveId}/people-to-meet`, {
+          headers: { Authorization: 'Bearer user-ptm-nonatt' }
+        });
+        expect(resNonAtt.status).toBe(403);
+
+        // 3. Outside time window -> 409
+        store.profiles.push({ id: 'user-ptm-1', account_uid: 'user-ptm-1', name: 'User 1', role: 'Developer' });
+        const resFuture = await fetch(`${baseUrl}/api/events/${evFutureId}/people-to-meet`, {
+          headers: { Authorization: 'Bearer user-ptm-1' }
+        });
+        expect(resFuture.status).toBe(409);
+      });
+
+      it('b) Opted-out and blocked members never appear; response has no whatsapp, email, account_uid or phone keys', async () => {
+        const now = Date.now();
+        const evId = 'ev-ptm-candidates-' + now;
+
+        const p1 = { id: 'u-ptm-caller', account_uid: 'u-ptm-caller', name: 'Caller', role: 'Developer', offers: 'React', needs: 'Design', blocked_ids: ['u-ptm-blocked'] };
+        const p2Optout = { id: 'u-ptm-optout', account_uid: 'u-ptm-optout', name: 'Opted Out User', role: 'Designer', offers: 'Figma', needs: 'Code' };
+        const p3Blocked = { id: 'u-ptm-blocked', account_uid: 'u-ptm-blocked', name: 'Blocked User', role: 'Designer', offers: 'Figma', needs: 'Code' };
+        const p4Eligible = { id: 'u-ptm-eligible', account_uid: 'u-ptm-eligible', name: 'Eligible User', role: 'Designer', offers: 'UI/UX', needs: 'React', whatsapp: '256700000000', email: 'secret@example.com', phone: '0700000000' };
+
+        store.profiles.push(p1, p2Optout, p3Blocked, p4Eligible);
+
+        const evObj = {
+          id: evId,
+          title: 'Networking Night',
+          starts_at: new Date(now + 1800000).toISOString(),
+          ends_at: new Date(now + 5400000).toISOString(),
+          attendee_ids: ['u-ptm-caller', 'u-ptm-optout', 'u-ptm-blocked', 'u-ptm-eligible'],
+          match_optout_ids: ['u-ptm-optout'],
+          published: true,
+          status: 'approved'
+        };
+        store.events.push(evObj);
+
+        const res = await fetch(`${baseUrl}/api/events/${evId}/people-to-meet`, {
+          headers: { Authorization: 'Bearer u-ptm-caller' }
+        });
+
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(data.people).toBeTruthy();
+        expect(Array.isArray(data.people)).toBe(true);
+
+        const ids = data.people.map((p: any) => p.id);
+        expect(ids).not.toContain('u-ptm-optout');
+        expect(ids).not.toContain('u-ptm-blocked');
+        expect(ids).toContain('u-ptm-eligible');
+
+        for (const person of data.people) {
+          expect(person).not.toHaveProperty('whatsapp');
+          expect(person).not.toHaveProperty('email');
+          expect(person).not.toHaveProperty('account_uid');
+          expect(person).not.toHaveProperty('phone');
+        }
+      });
+
+      it('c) Gemma failure (mocked) -> heuristic results returned', async () => {
+        const now = Date.now();
+        const evId = 'ev-ptm-gemma-fail-' + now;
+
+        const p1 = { id: 'u-ptm-gf1', account_uid: 'u-ptm-gf1', name: 'Caller GF', role: 'Developer', needs: 'Design' };
+        const p2 = { id: 'u-ptm-gf2', account_uid: 'u-ptm-gf2', name: 'Cand GF', role: 'Designer', offers: 'Design' };
+        store.profiles.push(p1, p2);
+
+        store.events.push({
+          id: evId,
+          title: 'Gemma Fail Event',
+          starts_at: new Date(now + 1800000).toISOString(),
+          ends_at: new Date(now + 5400000).toISOString(),
+          attendee_ids: ['u-ptm-gf1', 'u-ptm-gf2'],
+          published: true,
+          status: 'approved'
+        });
+
+        const res = await fetch(`${baseUrl}/api/events/${evId}/people-to-meet`, {
+          headers: { Authorization: 'Bearer u-ptm-gf1' }
+        });
+
+        expect(res.status).toBe(200);
+        const data = await res.json();
+        expect(data.people.length).toBeGreaterThan(0);
+        expect(data.people[0].id).toBe('u-ptm-gf2');
+      });
+
+      it('d) Thumbs down hides that person on the next call', async () => {
+        const now = Date.now();
+        const evId = 'ev-ptm-fb-' + now;
+
+        const p1 = { id: 'u-ptm-fb1', account_uid: 'u-ptm-fb1', name: 'Caller FB', role: 'Developer' };
+        const p2 = { id: 'u-ptm-fb2', account_uid: 'u-ptm-fb2', name: 'Target FB', role: 'Designer' };
+        store.profiles.push(p1, p2);
+
+        store.events.push({
+          id: evId,
+          title: 'Feedback Test Event',
+          starts_at: new Date(now + 1800000).toISOString(),
+          ends_at: new Date(now + 5400000).toISOString(),
+          attendee_ids: ['u-ptm-fb1', 'u-ptm-fb2'],
+          published: true,
+          status: 'approved'
+        });
+
+        // Submit thumbs down feedback
+        const fbRes = await fetch(`${baseUrl}/api/events/${evId}/people-to-meet/feedback`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer u-ptm-fb1'
+          },
+          body: JSON.stringify({ profile_id: 'u-ptm-fb2', value: -1 })
+        });
+        expect(fbRes.status).toBe(200);
+
+        // Next call: u-ptm-fb2 is hidden
+        const getRes = await fetch(`${baseUrl}/api/events/${evId}/people-to-meet`, {
+          headers: { Authorization: 'Bearer u-ptm-fb1' }
+        });
+        expect(getRes.status).toBe(200);
+        const data = await getRes.json();
+        const ids = data.people.map((p: any) => p.id);
+        expect(ids).not.toContain('u-ptm-fb2');
+      });
+
+      it('e) /api/data/event_match_feedback -> 404; public event responses contain no match_optout_ids', async () => {
+        const resFbData = await fetch(`${baseUrl}/api/data/event_match_feedback`);
+        expect(resFbData.status).toBe(404);
+
+        const testEv = {
+          id: 'ev-san-test-' + Date.now(),
+          title: 'Sanitizing Test Event',
+          match_optout_ids: ['u1', 'u2'],
+          published: true,
+          status: 'approved'
+        };
+        store.events.push(testEv);
+
+        const resEv = await fetch(`${baseUrl}/api/events/${testEv.id}`);
+        expect(resEv.status).toBe(200);
+        const dataEv = await resEv.json();
+        expect(dataEv.match_optout_ids).toBeUndefined();
+      });
+
+      it('f) Deleting a member removes their event_match_feedback rows and their id from match_optout_ids', async () => {
+        const delMemberId = 'u-to-be-deleted-' + Date.now();
+        const evId = 'ev-del-test-' + Date.now();
+
+        store.events.push({
+          id: evId,
+          title: 'Delete Cascade Event',
+          match_optout_ids: [delMemberId, 'u-other-stay']
+        });
+
+        store.event_match_feedback.push({
+          id: 'fb-del-1',
+          event_id: evId,
+          member_id: delMemberId,
+          target_profile_id: 'u-other-stay',
+          value: -1
+        });
+
+        await cascadeDeleteMemberData(delMemberId, null);
+
+        const targetEv = store.events.find(e => e.id === evId);
+        expect(targetEv?.match_optout_ids).not.toContain(delMemberId);
+        expect(targetEv?.match_optout_ids).toContain('u-other-stay');
+
+        const fbExists = store.event_match_feedback.some(f => f.member_id === delMemberId);
+        expect(fbExists).toBe(false);
+      });
+
+      it('g) event_match_feedback is listed in PERSISTED_COLLECTIONS and has an onSnapshot listener', async () => {
+        expect(PERSISTED_COLLECTIONS).toContain('event_match_feedback');
+
+        const fs = await import('fs');
+        const path = await import('path');
+        const serverCode = fs.readFileSync(path.join(process.cwd(), 'server.ts'), 'utf-8');
+        expect(serverCode).toContain("collection('event_match_feedback').onSnapshot");
+      });
+
+      it('h) Render: an attendee sees the section; a non-attendee does not', async () => {
+        const now = Date.now();
+        const profileAtt = { id: 'u-att-1', account_uid: 'u-att-1', name: 'Attendee One', role: 'Developer' };
+        const profileNonAtt = { id: 'u-nonatt-1', account_uid: 'u-nonatt-1', name: 'Non Attendee', role: 'Designer' };
+
+        const mockEvent = {
+          id: 'ev-render-ptm-' + now,
+          kind: 'event',
+          title: 'Render Test Meetup',
+          description: 'Desc',
+          starts_at: new Date(now + 1800000).toISOString(),
+          ends_at: new Date(now + 5400000).toISOString(),
+          attendee_ids: ['u-att-1'],
+          is_attending: true,
+          phase: 'upcoming'
+        };
+
+        window.location.hash = `#/events/${mockEvent.id}`;
+
+        const mockFetch = vi.spyOn(apiModule, 'fetchEventById').mockResolvedValue(mockEvent as any);
+        const mockPtm = vi.spyOn(apiModule, 'fetchPeopleToMeet').mockResolvedValue({ people: [], message: 'Matches appear when more people RSVP.' });
+
+        const { rerender } = render(
+          React.createElement(EventsView, {
+            currentProfile: profileAtt as any,
+            allProfiles: [profileAtt as any],
+            onViewProfile: vi.fn(),
+            onToast: vi.fn()
+          })
+        );
+
+        await act(async () => {});
+
+        // Attendee view -> section rendered
+        expect(screen.queryByTestId('people-to-meet-section')).toBeTruthy();
+
+        // Non-attendee view -> section not rendered
+        const mockEventNonAtt = { ...mockEvent, is_attending: false, attendee_ids: ['u-att-1'] };
+        mockFetch.mockResolvedValue(mockEventNonAtt as any);
+
+        rerender(
+          React.createElement(EventsView, {
+            currentProfile: profileNonAtt as any,
+            allProfiles: [profileNonAtt as any],
+            onViewProfile: vi.fn(),
+            onToast: vi.fn()
+          })
+        );
+
+        await act(async () => {});
+
+        expect(screen.queryByTestId('people-to-meet-section')).toBeNull();
+
+        mockFetch.mockRestore();
+        mockPtm.mockRestore();
+      });
+
+      it('i) Render: the events search input has left padding and the icon has pointer-events-none', async () => {
+        render(
+          React.createElement(EventsView, {
+            currentProfile: null,
+            allProfiles: [],
+            onViewProfile: vi.fn(),
+            onToast: vi.fn()
+          })
+        );
+
+        const searchInputs = screen.getAllByLabelText(/Search events/i);
+        expect(searchInputs.length).toBeGreaterThan(0);
+        expect(searchInputs[0].className).toContain('pl-10');
+
+        const parentDiv = searchInputs[0].parentElement;
+        const iconSvg = parentDiv?.querySelector('svg');
+        expect(iconSvg?.classList.contains('pointer-events-none')).toBe(true);
       });
     });
   });

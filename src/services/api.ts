@@ -1109,15 +1109,56 @@ export async function fetchEventById(id: string, guestToken?: string): Promise<a
   }
 }
 
-export async function rsvpEvent(id: string): Promise<{ success: boolean; is_attending: boolean; attendee_count: number }> {
+export async function rsvpEvent(id: string, opts?: { show_in_people_to_meet?: boolean; match_optout?: boolean }): Promise<{ success: boolean; is_attending: boolean; attendee_count: number }> {
   await getFreshAuthToken();
   const res = await fetch(`/api/events/${encodeURIComponent(id)}/rsvp`, {
     method: 'POST',
-    headers: getAuthHeaders({ 'Content-Type': 'application/json' })
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: opts ? JSON.stringify(opts) : undefined
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || 'Failed to update RSVP');
+  }
+  return await res.json();
+}
+
+export async function fetchPeopleToMeet(eventId: string): Promise<{ people: any[]; is_host_or_admin?: boolean; opted_in_count?: number; message?: string }> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/people-to-meet`, {
+    headers: getAuthHeaders()
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to fetch people to meet');
+  }
+  return await res.json();
+}
+
+export async function submitPeopleToMeetFeedback(eventId: string, profileId: string, value: 1 | -1): Promise<{ success: boolean }> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/people-to-meet/feedback`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ profile_id: profileId, value })
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to submit feedback');
+  }
+  return await res.json();
+}
+
+export async function toggleEventMatchOptIn(eventId: string, optIn: boolean): Promise<{ success: boolean; opt_in: boolean }> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/people-to-meet/opt-in`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ opt_in: optIn })
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to update preference');
   }
   return await res.json();
 }

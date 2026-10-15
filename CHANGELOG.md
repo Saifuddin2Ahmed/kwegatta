@@ -4,6 +4,14 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-10-15
+
+### Added & Fixed (Release 1.9.0)
+- **"People to meet here" AI Event Networking**: Signed-in event attendees receive AI-ranked matches of fellow attendees using Gemma task `event_matches` (with heuristic fallback, 6h caching, and rate limiting). Includes thumbs up/down feedback (`POST /api/events/:id/people-to-meet/feedback`), feedback persistence (`event_match_feedback` collection with Firestore `onSnapshot` listener), and opt-in/opt-out toggles per event (`match_optout_ids`).
+- **Host & Admin Summary**: Event hosts and platform admins view total opt-in counts ("N attendees opted into matching") without individual match pairs.
+- **Member Data Cascade Cleanup**: `cascadeDeleteMemberData` cleans up member feedback rows and removes member IDs from event `match_optout_ids`.
+- **Search Box UX Fix**: Added `pl-10` padding and `pointer-events-none` positioning to the search input icon across event search inputs.
+
 ## [1.8.2] - 2026-10-15
 
 ### Fixed (Release 1.8.2)

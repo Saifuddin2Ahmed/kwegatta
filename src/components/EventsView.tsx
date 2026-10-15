@@ -32,7 +32,9 @@ import {
   XCircle,
   Search,
   Tag,
-  QrCode
+  QrCode,
+  ThumbsUp,
+  ThumbsDown
 } from 'lucide-react';
 import { EventOpportunityItem, OpportunityType, Profile, EventQuestion, EventGuest } from '../types';
 
@@ -45,7 +47,8 @@ import {
   generateGoogleCalendarUrl,
   downloadIcsFile,
   zonedTimeToUtcIso,
-  utcToZonedParts
+  utcToZonedParts,
+  formatWhatsAppUrl
 } from '../utils';
 import {
   fetchEvents,
@@ -68,8 +71,22 @@ import {
   checkinEventAttendee,
   fetchEventCheckinToken,
   selfCheckinEvent,
+  fetchPeopleToMeet,
+  submitPeopleToMeetFeedback,
+  toggleEventMatchOptIn,
+  requestMemberConnect,
   PUBLIC_APP_URL
 } from '../services/api';
+
+function isWithinMeetingWindow(item: any): boolean {
+  if (!item) return false;
+  const startMs = new Date(item.starts_at || item.datetime || item.created_at).getTime();
+  const endMs = item.ends_at ? new Date(item.ends_at).getTime() : startMs + (3 * 60 * 60 * 1000);
+  const now = Date.now();
+  const windowStart = startMs - (7 * 24 * 60 * 60 * 1000);
+  const windowEnd = endMs + (24 * 60 * 60 * 1000);
+  return now >= windowStart && now <= windowEnd;
+}
 
 interface CoverImageUploaderProps {
   value: string;
@@ -169,7 +186,14 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [items, setItems] = useState<EventOpportunityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming');
-  const [selectedItemId, setSelectedItemId] = useState<string | null>(initialItemId || null);
+  const getItemIdFromHash = () => {
+    if (typeof window === 'undefined') return null;
+    const hash = window.location.hash || '';
+    const match = hash.match(/#\/events\/([^\/?#]+)/);
+    return match ? match[1] : null;
+  };
+
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(() => initialItemId || getItemIdFromHash());
   const [detailedItem, setDetailedItem] = useState<any | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [rsvpLoading, setRsvpLoading] = useState(false);
@@ -271,6 +295,61 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [updateMessage, setUpdateMessage] = useState('');
   const [sendingUpdate, setSendingUpdate] = useState(false);
 
+  // People to meet state
+  const [peopleToMeetList, setPeopleToMeetList] = useState<any[]>([]);
+  const [peopleToMeetLoading, setPeopleToMeetLoading] = useState(false);
+  const [peopleToMeetMessage, setPeopleToMeetMessage] = useState<string | null>(null);
+  const [peopleToMeetOptedInCount, setPeopleToMeetOptedInCount] = useState<number>(0);
+
+  const loadPeopleToMeet = async (eventId: string) => {
+    if (!currentProfile) return;
+    setPeopleToMeetLoading(true);
+    try {
+      const res = await fetchPeopleToMeet(eventId);
+      setPeopleToMeetList(res.people || []);
+      setPeopleToMeetOptedInCount(res.opted_in_count || 0);
+      setPeopleToMeetMessage(res.message || null);
+    } catch (err: any) {
+      setPeopleToMeetList([]);
+      setPeopleToMeetMessage(err?.message || 'Could not load matches.');
+    } finally {
+      setPeopleToMeetLoading(false);
+    }
+  };
+
+  const handleMatchFeedback = async (eventId: string, profileId: string, value: 1 | -1) => {
+    if (value === -1) {
+      setPeopleToMeetList(prev => prev.filter(p => p.id !== profileId));
+      onToast('Member hidden from your matches.');
+    } else {
+      onToast('Thanks for your feedback!');
+    }
+    try {
+      await submitPeopleToMeetFeedback(eventId, profileId, value);
+    } catch (err: any) {
+      console.warn('[People to meet feedback error]:', err);
+    }
+  };
+
+  const handleConnectPerson = async (person: any) => {
+    if (!currentProfile) {
+      onToast('Please sign in to connect.');
+      return;
+    }
+    try {
+      const conn = await requestMemberConnect(currentProfile.id, person.id, person.reason || 'Event networking match');
+      const waUrl = formatWhatsAppUrl(conn.whatsapp, `Hi ${person.name.split(' ')[0]}, I saw you on Kwegatta for ${detailedItem?.title || 'the event'} and would love to connect!`);
+      const link = waUrl || conn.linkedin;
+      if (link) {
+        window.open(link, '_blank', 'noopener,noreferrer');
+      } else {
+        onToast(`Connected with ${person.name}!`);
+      }
+    } catch (err: any) {
+      onToast(err?.message || `Sent connection request to ${person.name}`);
+    }
+  };
+
   // Safety Report Modal State
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [reportingItem, setReportingItem] = useState<EventOpportunityItem | null>(null);
@@ -349,10 +428,13 @@ export const EventsView: React.FC<EventsViewProps> = ({
     loadEventsList();
   }, []);
 
-  // Sync selected item from prop if changed
+  // Sync selected item from prop or hash if changed
   useEffect(() => {
     if (initialItemId) {
       setSelectedItemId(initialItemId);
+    } else {
+      const fromHash = getItemIdFromHash();
+      if (fromHash) setSelectedItemId(fromHash);
     }
   }, [initialItemId]);
 
@@ -395,6 +477,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
             res.author_id === currentProfile?.account_uid
           ) {
             loadEventGuests(selectedItemId);
+          }
+          if (res.kind === 'event' && currentProfile) {
+            loadPeopleToMeet(selectedItemId);
           }
         } else {
           onToast('Event or Opportunity not found');
@@ -1916,6 +2001,137 @@ export const EventsView: React.FC<EventsViewProps> = ({
           </div>
         </div>
 
+        {/* "People to meet here" Section */}
+        {isEvent && currentProfile && isAttending && isWithinMeetingWindow(detailedItem) && (
+          <div className="kw-card p-6 space-y-4 border-[var(--gold)]/30" data-testid="people-to-meet-section">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--card-border)]">
+              <div className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-[var(--gold-text)]" />
+                <h2 className="text-base font-bold text-[var(--fg)] tracking-tight">People to meet here</h2>
+              </div>
+
+              {/* Opt-in / Opt-out toggle */}
+              <label className="inline-flex items-center gap-2 text-xs font-medium text-[var(--fg-muted)] cursor-pointer hover:text-[var(--fg)]">
+                <input
+                  type="checkbox"
+                  checked={!detailedItem.match_optout_ids?.includes(currentProfile.id)}
+                  onChange={async (e) => {
+                    const optIn = e.target.checked;
+                    try {
+                      await toggleEventMatchOptIn(detailedItem.id, optIn);
+                      setDetailedItem((prev: any) => {
+                        if (!prev) return prev;
+                        const optoutIds = Array.isArray(prev.match_optout_ids) ? [...prev.match_optout_ids] : [];
+                        if (optIn) {
+                          const idx = optoutIds.indexOf(currentProfile.id);
+                          if (idx >= 0) optoutIds.splice(idx, 1);
+                        } else {
+                          if (!optoutIds.includes(currentProfile.id)) optoutIds.push(currentProfile.id);
+                        }
+                        return { ...prev, match_optout_ids: optoutIds };
+                      });
+                      onToast(optIn ? "Shown in 'People to meet'" : "Hidden from 'People to meet'");
+                      loadPeopleToMeet(detailedItem.id);
+                    } catch (err: any) {
+                      onToast(err?.message || 'Failed to update preference');
+                    }
+                  }}
+                  className="rounded border-[var(--card-border)] text-[var(--gold)] focus:ring-[var(--gold)] cursor-pointer"
+                />
+                <span>Show me in 'People to meet' for this event</span>
+              </label>
+            </div>
+
+            {peopleToMeetLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-pulse">
+                {[1, 2].map(i => (
+                  <div key={i} className="p-4 rounded-xl bg-[var(--bg)] border border-[var(--card-border)] h-32 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-[var(--card-border)]" />
+                      <div className="space-y-1.5 flex-1">
+                        <div className="h-3.5 w-1/2 bg-[var(--card-border)] rounded" />
+                        <div className="h-3 w-1/3 bg-[var(--card-border)] rounded" />
+                      </div>
+                    </div>
+                    <div className="h-3 w-3/4 bg-[var(--card-border)] rounded" />
+                  </div>
+                ))}
+              </div>
+            ) : isAuthor || currentProfile?.is_admin ? (
+              <div className="p-4 rounded-xl bg-[var(--bg)] border border-[var(--card-border)] text-xs text-[var(--fg-muted)] font-medium">
+                <span>{peopleToMeetMessage || `${peopleToMeetOptedInCount} attendees opted into matching`}</span>
+              </div>
+            ) : peopleToMeetList.length === 0 ? (
+              <div className="p-6 text-center rounded-xl bg-[var(--bg)] border border-[var(--card-border)] space-y-2">
+                <p className="text-xs text-[var(--fg-muted)]">
+                  {peopleToMeetMessage || 'Matches appear when more people RSVP.'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {peopleToMeetList.map(person => (
+                  <div key={person.id} className="p-4 rounded-xl bg-[var(--bg)] border border-[var(--card-border)] flex flex-col justify-between space-y-3">
+                    <div className="space-y-2.5">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-3">
+                          <Avatar profile={person} size="md" />
+                          <div>
+                            <h3 className="text-xs font-bold text-[var(--fg)] hover:text-[var(--gold-text)] transition-colors cursor-pointer" onClick={() => onViewProfile(person.id)}>
+                              {person.name}
+                            </h3>
+                            <p className="text-[11px] text-[var(--fg-subtle)] capitalize">{person.role || 'Member'}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            aria-label="Thumbs up"
+                            onClick={() => handleMatchFeedback(detailedItem.id, person.id, 1)}
+                            className="p-1.5 rounded-lg text-[var(--fg-muted)] hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors cursor-pointer"
+                          >
+                            <ThumbsUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Thumbs down"
+                            onClick={() => handleMatchFeedback(detailedItem.id, person.id, -1)}
+                            className="p-1.5 rounded-lg text-[var(--fg-muted)] hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
+                          >
+                            <ThumbsDown className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-[var(--fg-muted)] leading-relaxed bg-[var(--card)] p-2.5 rounded-lg border border-[var(--card-border)]">
+                        {person.reason}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-[var(--card-border)]/60 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => onViewProfile(person.id)}
+                        className="text-[var(--gold-text)] font-semibold hover:underline cursor-pointer"
+                      >
+                        View profile
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleConnectPerson(person)}
+                        className="kw-btn kw-btn-gold px-3 py-1 text-xs font-bold rounded-lg inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        Connect
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Questions Section */}
         <div className="kw-card p-6 space-y-4">
           <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
@@ -2910,7 +3126,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
           onChange={e => setSearchQuery(e.target.value)}
           placeholder="Search events by title, venue, or tag..."
           aria-label="Search events"
-          className="kw-input text-xs pl-9 py-2 w-full"
+          className="kw-input text-xs pl-10 py-2 w-full"
         />
       </div>
 
