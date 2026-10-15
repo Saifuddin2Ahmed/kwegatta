@@ -1230,7 +1230,7 @@ export async function deleteEventQuestion(eventId: string, qid: string): Promise
   return true;
 }
 
-export async function registerEventGuest(eventId: string, payload: { name: string; phone?: string; email?: string; agree: boolean; website?: string }): Promise<{ token: string; guest_id: string }> {
+export async function registerEventGuest(eventId: string, payload: { name: string; phone?: string; email?: string; agree: boolean; website?: string }): Promise<{ token: string; guest_id: string; code?: string }> {
   const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/guest-register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1240,6 +1240,70 @@ export async function registerEventGuest(eventId: string, payload: { name: strin
   if (!res.ok) throw new Error(data.error || 'Failed to register');
   return data;
 }
+
+export async function fetchMyEventTicket(eventId: string, guestToken?: string): Promise<{ code: string; qr_payload?: string }> {
+  await getFreshAuthToken();
+  const extraHeaders: Record<string, string> = {};
+  if (guestToken) extraHeaders['X-Guest-Token'] = guestToken;
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/my-ticket`, {
+    headers: getAuthHeaders(extraHeaders)
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to load ticket');
+  return data;
+}
+
+export async function hostCheckinAttendee(
+  eventId: string,
+  payload: { code?: string; kind?: 'member' | 'guest'; ref_id?: string }
+): Promise<{ name: string; status: 'checked_in' | 'already'; checked_in_at: string; method?: string }> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/checkin`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    const err: any = new Error(data.error || 'Check-in failed');
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+export async function fetchSelfCheckinQrToken(eventId: string): Promise<{ token: string; url: string; checked_in_count: number; expires_in_ms: number }> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/checkin-token`, {
+    headers: getAuthHeaders()
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to generate venue QR token');
+  return data;
+}
+
+export async function submitSelfCheckin(
+  eventId: string,
+  payload: { token: string; guest_email?: string }
+): Promise<{ name: string; status: 'checked_in' | 'already'; checked_in_at: string; message?: string }> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/self-checkin`, {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    const err: any = new Error(data.error || 'Self check-in failed');
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+export const checkinEventAttendee = hostCheckinAttendee;
+export const fetchEventCheckinToken = fetchSelfCheckinQrToken;
+export const selfCheckinEvent = submitSelfCheckin;
 
 export async function cancelEventGuest(eventId: string, token: string): Promise<boolean> {
   const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/guest-cancel`, {

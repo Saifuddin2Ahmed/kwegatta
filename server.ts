@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import { initializeApp, getApps, type App } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { getAuth as getAdminAuth, type Auth as AdminAuth } from 'firebase-admin/auth';
+import nodemailer from 'nodemailer';
 import { ISO_COUNTRIES, deriveLocation } from './src/lib/countries';
 import { ROLE_CHOICES, STAGE_CHOICES, INTENT_CHOICES, normalizeIntent } from './src/lib/profileChoices';
 
@@ -101,7 +102,7 @@ app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('X-XSS-Protection', '1; mode=block');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()');
   res.setHeader(
     'Content-Security-Policy',
     "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://apis.google.com https://accounts.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; connect-src 'self' https://apis.google.com https://accounts.google.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://*.firebaseio.com https://*.googleapis.com; frame-src 'self' https://accounts.google.com https://*.firebaseapp.com; object-src 'none'; base-uri 'self';"
@@ -665,6 +666,7 @@ interface StoreData {
   events: any[];
   event_questions: any[];
   event_guests: any[];
+  event_checkins: any[];
   pinned_announcement: any;
   admin_emails: string[];
   team: TeamMember[];
@@ -1061,6 +1063,7 @@ function createInitialStore(demo: boolean = isDemoMode): StoreData {
     ] : [],
     event_questions: [],
     event_guests: [],
+    event_checkins: [],
     pinned_announcement: null,
     admin_emails: [],
     team: [...INITIAL_TEAM_MEMBERS],
@@ -1101,6 +1104,9 @@ function loadStore(): StoreData {
         }
         if (!parsed.event_guests || !Array.isArray(parsed.event_guests)) {
           parsed.event_guests = [];
+        }
+        if (!parsed.event_checkins || !Array.isArray(parsed.event_checkins)) {
+          parsed.event_checkins = [];
         }
         if (!parsed.admin_emails || !Array.isArray(parsed.admin_emails)) {
           parsed.admin_emails = [];
@@ -1284,9 +1290,45 @@ async function batchRemoveDocs(collectionName: string, ids: string[]): Promise<v
   }
 }
 
-async function setupFirestoreListeners(): Promise<void> {
-  assertStorageModeForTest(storageMode);
+/**
+ * Audited list of every Firestore collection written via persistDoc, removeDoc,
+ * batchPersistDocs, or batchRemoveDocs. Every collection in PERSISTED_COLLECTIONS
+ * has a real-time onSnapshot listener in setupFirestoreListeners().
+ */
+export const PERSISTED_COLLECTIONS = [
+  'profiles',
+  'posts',
+  'follows',
+  'matches',
+  'notifications',
+  'sessions',
+  'audit_log',
+  'reports',
+  'team',
+  'events',
+  'event_guests',
+  'event_questions',
+  'event_checkins'
+] as const;
+
+// Explicit write-only allowlist (empty: all persisted collections are loaded in setupFirestoreListeners)
+export const WRITE_ONLY_COLLECTIONS: readonly string[] = [] as const;
+
+let usingMockFirestoreInTest = false;
+export function setMockFirestoreDbForTest(mockDb: any): void {
   if (isTestEnv()) {
+    firestoreDb = mockDb;
+    usingMockFirestoreInTest = Boolean(mockDb);
+  }
+}
+
+export async function setupFirestoreListeners(customDbForTest?: any): Promise<void> {
+  assertStorageModeForTest(storageMode);
+  if (isTestEnv() && customDbForTest) {
+    firestoreDb = customDbForTest;
+    usingMockFirestoreInTest = true;
+  }
+  if (isTestEnv() && !usingMockFirestoreInTest) {
     throw new Error('FATAL GUARD VIOLATION: Snapshot listeners must not be started in test environment.');
   }
   if (!firestoreDb) return;
@@ -1459,14 +1501,88 @@ async function setupFirestoreListeners(): Promise<void> {
         store.team = list.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
       } else {
         store.team = [...INITIAL_TEAM_MEMBERS];
-        INITIAL_TEAM_MEMBERS.forEach(m => {
-          firestoreDb!.collection('team').doc(m.id).set(m).catch(() => {});
-        });
+        if (!isTestEnv()) {
+          INITIAL_TEAM_MEMBERS.forEach(m => {
+            firestoreDb!.collection('team').doc?.(m.id)?.set?.(m)?.catch?.(() => {});
+          });
+        }
       }
       if (initial) { initial = false; resolve(); }
     }, (err) => {
       console.error('[Firestore] team listener error:', err?.message || err);
       if (!store.team || store.team.length === 0) store.team = [...INITIAL_TEAM_MEMBERS];
+      if (initial) { initial = false; resolve(); }
+    });
+    firestoreUnsubscribers.push(unsub);
+  }));
+
+  // 10. Events listener
+  initialLoadPromises.push(new Promise((resolve) => {
+    let initial = true;
+    const unsub = firestoreDb!.collection('events').onSnapshot((snap) => {
+      const list: any[] = [];
+      snap.forEach(doc => {
+        const d = doc.data();
+        list.push({ ...d, id: d.id || doc.id });
+      });
+      store.events = list;
+      if (initial) { initial = false; resolve(); }
+    }, (err) => {
+      console.error('[Firestore] events listener error:', err?.message || err);
+      if (initial) { initial = false; resolve(); }
+    });
+    firestoreUnsubscribers.push(unsub);
+  }));
+
+  // 11. Event Guests listener
+  initialLoadPromises.push(new Promise((resolve) => {
+    let initial = true;
+    const unsub = firestoreDb!.collection('event_guests').onSnapshot((snap) => {
+      const list: any[] = [];
+      snap.forEach(doc => {
+        const d = doc.data();
+        list.push({ ...d, id: d.id || doc.id });
+      });
+      store.event_guests = list;
+      if (initial) { initial = false; resolve(); }
+    }, (err) => {
+      console.error('[Firestore] event_guests listener error:', err?.message || err);
+      if (initial) { initial = false; resolve(); }
+    });
+    firestoreUnsubscribers.push(unsub);
+  }));
+
+  // 12. Event Questions listener
+  initialLoadPromises.push(new Promise((resolve) => {
+    let initial = true;
+    const unsub = firestoreDb!.collection('event_questions').onSnapshot((snap) => {
+      const list: any[] = [];
+      snap.forEach(doc => {
+        const d = doc.data();
+        list.push({ ...d, id: d.id || doc.id });
+      });
+      store.event_questions = list;
+      if (initial) { initial = false; resolve(); }
+    }, (err) => {
+      console.error('[Firestore] event_questions listener error:', err?.message || err);
+      if (initial) { initial = false; resolve(); }
+    });
+    firestoreUnsubscribers.push(unsub);
+  }));
+
+  // 13. Event Check-ins listener
+  initialLoadPromises.push(new Promise((resolve) => {
+    let initial = true;
+    const unsub = firestoreDb!.collection('event_checkins').onSnapshot((snap) => {
+      const list: any[] = [];
+      snap.forEach(doc => {
+        const d = doc.data();
+        list.push({ ...d, id: d.id || doc.id });
+      });
+      store.event_checkins = list;
+      if (initial) { initial = false; resolve(); }
+    }, (err) => {
+      console.error('[Firestore] event_checkins listener error:', err?.message || err);
       if (initial) { initial = false; resolve(); }
     });
     firestoreUnsubscribers.push(unsub);
@@ -1484,19 +1600,32 @@ async function setupFirestoreListeners(): Promise<void> {
     store.matches = store.matches.filter((m: any) => m.a_id !== legacyId && m.b_id !== legacyId);
     store.posts = store.posts.filter((p: any) => p.author_id !== legacyId);
     store.follows = store.follows.filter((f: any) => f.follower_id !== legacyId && f.following_id !== legacyId);
-    if (firestoreDb) {
+    if (firestoreDb && !isTestEnv()) {
       firestoreDb.collection('profiles').doc(legacyId).delete().catch(() => {});
     }
   }
 
   console.log(`[Storage] Cloud Firestore real-time snapshot sync operational.`);
-  console.log(`[Storage] Warm cache: ${store.profiles.length} profiles, ${store.posts.length} posts, ${store.matches.length} matches.`);
+  console.log(`[Storage] Warm cache: ${store.profiles.length} profiles, ${store.posts.length} posts, ${store.matches.length} matches, ${(store.events || []).length} events.`);
 }
 
-async function initStorage(): Promise<void> {
+export async function initStorage(mockDbForTest?: any): Promise<void> {
   if (isTestEnv()) {
     storageMode = 'memory';
     assertStorageModeForTest(storageMode);
+    if (mockDbForTest) {
+      try {
+        await setupFirestoreListeners(mockDbForTest);
+        await runSaifuddinProfileMigration();
+        await runSaifuddinProfileMigrationV2();
+        await runSaifuddinProfileMigrationV3();
+        await cleanupTestEvents();
+        await publishExistingPendingEvents();
+      } finally {
+        setMockFirestoreDbForTest(null);
+      }
+      return;
+    }
     console.log('[Storage] Test environment detected: isolated in-memory store active (storageMode: memory).');
     return;
   }
@@ -1547,9 +1676,10 @@ async function initStorage(): Promise<void> {
   }
 
   try {
+    const probeTimeoutMs = isProduction ? 8000 : 1200;
     const probePromise = firestoreDb.collection('profiles').limit(1).get();
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Cloud Firestore connection probe timed out after 8000ms')), 8000)
+      setTimeout(() => reject(new Error(`Cloud Firestore connection probe timed out after ${probeTimeoutMs}ms`)), probeTimeoutMs)
     );
     await Promise.race([probePromise, timeoutPromise]);
 
@@ -1995,7 +2125,17 @@ export async function runSaifuddinProfileMigrationV3(): Promise<boolean> {
    ========================================================================= */
 export const CLEANUP_TEST_EVENTS_FLAG = 'cleanup_test_events_unapproved_author_v1';
 
+let cleanupTestEventsHook: (() => void) | null = null;
+export function setCleanupTestEventsHookForTest(hook: (() => void) | null): void {
+  if (isTestEnv()) {
+    cleanupTestEventsHook = hook;
+  }
+}
+
 export async function cleanupTestEvents(): Promise<number> {
+  if (isTestEnv() && cleanupTestEventsHook) {
+    cleanupTestEventsHook();
+  }
   // Flag check: stops it running twice or doing duplicate deletions
   if (store.migrations && store.migrations[CLEANUP_TEST_EVENTS_FLAG]?.completed) {
     return 0;
@@ -3925,6 +4065,14 @@ export async function cascadeDeleteMemberData(memberId: string, memberUid?: stri
   const deletedQuestions = (store.event_questions || []).filter((q: any) => authoredEventIds.has(q.event_id) || matchesMember(q.author_id)).map(q => q.id);
   store.event_questions = (store.event_questions || []).filter((q: any) => !authoredEventIds.has(q.event_id) && !matchesMember(q.author_id));
 
+  // Event check-ins: belonging to authored events OR for this member
+  const deletedCheckins = (store.event_checkins || [])
+    .filter((c: any) => authoredEventIds.has(c.event_id) || (c.kind === 'member' && matchesMember(c.ref_id)) || matchesMember(c.checked_in_by))
+    .map((c: any) => c.id);
+  store.event_checkins = (store.event_checkins || []).filter(
+    (c: any) => !authoredEventIds.has(c.event_id) && !(c.kind === 'member' && matchesMember(c.ref_id)) && !matchesMember(c.checked_in_by)
+  );
+
   // 6. Delete replies the member posted on questions of other events
   for (const q of (store.event_questions || [])) {
     if (q.reply && matchesMember(q.reply.author_id)) {
@@ -3933,7 +4081,7 @@ export async function cascadeDeleteMemberData(memberId: string, memberUid?: stri
     }
   }
 
-  // 7. Remove the member's id and uid from attendee_ids in all other events
+  // 7. Remove the member's id and uid from attendee_ids and ticket hashes in all other events
   for (const ev of (store.events || [])) {
     let changed = false;
     if (Array.isArray(ev.attendee_ids)) {
@@ -3941,6 +4089,22 @@ export async function cascadeDeleteMemberData(memberId: string, memberUid?: stri
       ev.attendee_ids = ev.attendee_ids.filter((attId: string) => !matchesMember(attId));
       if (ev.attendee_ids.length !== origLen) {
         changed = true;
+      }
+    }
+    if (ev.member_ticket_hashes && typeof ev.member_ticket_hashes === 'object') {
+      for (const k of Object.keys(ev.member_ticket_hashes)) {
+        if (matchesMember(k)) {
+          delete ev.member_ticket_hashes[k];
+          changed = true;
+        }
+      }
+    }
+    if (ev.rsvp_times && typeof ev.rsvp_times === 'object') {
+      for (const k of Object.keys(ev.rsvp_times)) {
+        if (matchesMember(k)) {
+          delete ev.rsvp_times[k];
+          changed = true;
+        }
       }
     }
     if (Array.isArray(ev.reports)) {
@@ -3994,6 +4158,7 @@ export async function cascadeDeleteMemberData(memberId: string, memberUid?: stri
     if (authoredEvents.length > 0) await batchRemoveDocs('events', Array.from(authoredEventIds));
     if (deletedGuests.length > 0) await batchRemoveDocs('event_guests', deletedGuests);
     if (deletedQuestions.length > 0) await batchRemoveDocs('event_questions', deletedQuestions);
+    if (deletedCheckins.length > 0) await batchRemoveDocs('event_checkins', deletedCheckins);
   } else {
     saveStore(store);
   }
@@ -5036,6 +5201,11 @@ export function sanitizeEventForPublic(
     guest_count: guestCount,
     attendee_count: totalAttendeeCount,
     i_am_going: isAttending,
+    self_checkin_enabled: Boolean(item.self_checkin_enabled),
+    allow_walkins: item.allow_walkins !== false,
+    checked_in_count: canSeeInternalFields
+      ? (store.event_checkins || []).filter((c: any) => c.event_id === item.id).length
+      : undefined,
 
     // Conditional fields
     join_link: (!callerId || isPast) ? undefined : item.join_link,
@@ -5055,6 +5225,219 @@ export function sanitizeEventForPublic(
     rejection_reason: canSeeInternalFields ? item.rejection_reason : undefined,
     events_blocked: canSeeInternalFields ? item.events_blocked : undefined
   };
+}
+
+/* =========================================================================
+   RELEASE 1.8.0: PERSONAL TICKETS, CHECK-IN, ROTATING QR & CONFIRMATION EMAIL
+   ========================================================================= */
+
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+const SERVER_TICKET_SECRET = process.env.TICKET_HMAC_SECRET || process.env.ADMIN_CODE || 'kw-ticket-secret-2026-v180';
+
+export function deriveTicketCode(eventId: string, holderKey: string, salt: string): string {
+  const digest = crypto
+    .createHmac('sha256', SERVER_TICKET_SECRET)
+    .update(`${eventId}:${holderKey}:${salt}`)
+    .digest();
+  let out = '';
+  for (let i = 0; i < 10; i++) {
+    out += BASE32_ALPHABET[digest[i] % 32];
+  }
+  return out;
+}
+
+export function hashTicketCode(code: string): string {
+  return crypto.createHash('sha256').update(String(code).trim().toUpperCase()).digest('hex');
+}
+
+export function isWithinCheckinWindow(item: any, nowMs: number = Date.now()): boolean {
+  const startRaw = item.starts_at || item.datetime || item.created_at;
+  const startMs = startRaw ? new Date(startRaw).getTime() : nowMs;
+  const endMs = item.ends_at ? new Date(item.ends_at).getTime() : (startMs + 2 * 60 * 60 * 1000);
+  const threeHoursBefore = startMs - 3 * 60 * 60 * 1000;
+  const sixHoursAfter = endMs + 6 * 60 * 60 * 1000;
+  return nowMs >= threeHoursBefore && nowMs <= sixHoursAfter;
+}
+
+function computeWindowHmac(eventId: string, windowNum: number): string {
+  return crypto
+    .createHmac('sha256', SERVER_TICKET_SECRET)
+    .update(`self-checkin:${eventId}:${windowNum}`)
+    .digest('hex')
+    .slice(0, 32);
+}
+
+export function generateSelfCheckinToken(eventId: string, timestampMs: number = Date.now()): string {
+  const windowNum = Math.floor(timestampMs / 30000);
+  const sig = computeWindowHmac(eventId, windowNum);
+  return `${windowNum}.${sig}`;
+}
+
+export function verifySelfCheckinToken(
+  eventId: string,
+  token: string,
+  nowMs: number = Date.now()
+): { valid: boolean; expired?: boolean } {
+  if (!token || typeof token !== 'string') return { valid: false };
+  const trimmed = token.trim();
+  const nowWindow = Math.floor(nowMs / 30000);
+
+  if (trimmed.includes('.')) {
+    const [wStr, sig] = trimmed.split('.');
+    const wNum = Number(wStr);
+    if (!Number.isInteger(wNum) || !sig) return { valid: false };
+    const expected = computeWindowHmac(eventId, wNum);
+    if (sig !== expected) return { valid: false };
+    if (wNum === nowWindow || wNum === nowWindow - 1) {
+      return { valid: true };
+    }
+    if (wNum < nowWindow - 1) {
+      return { valid: false, expired: true };
+    }
+    return { valid: false };
+  }
+
+  // Also support raw HMAC tokens without window prefix
+  if (trimmed === computeWindowHmac(eventId, nowWindow) || trimmed === computeWindowHmac(eventId, nowWindow - 1)) {
+    return { valid: true };
+  }
+  for (let k = 2; k <= 240; k++) {
+    if (trimmed === computeWindowHmac(eventId, nowWindow - k)) {
+      return { valid: false, expired: true };
+    }
+  }
+  return { valid: false };
+}
+
+export function generateEventIcsContent(item: any): string {
+  const toIcsUtc = (iso?: string) => {
+    const d = iso ? new Date(iso) : new Date();
+    if (isNaN(d.getTime())) return new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  };
+  const startUtc = toIcsUtc(item.starts_at || item.datetime || item.created_at);
+  const endUtc = item.ends_at
+    ? toIcsUtc(item.ends_at)
+    : toIcsUtc(new Date(new Date(item.starts_at || item.datetime || Date.now()).getTime() + 7200000).toISOString());
+  const loc = item.format === 'online' ? (item.join_link || 'Online') : (item.venue || item.location || 'Kampala');
+  const clean = (s: string) => String(s || '').replace(/\r?\n/g, '\\n');
+
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Kwegatta//Events//EN',
+    'BEGIN:VEVENT',
+    `UID:${item.id}@kwegatta.ai.studio`,
+    `DTSTAMP:${toIcsUtc(new Date().toISOString())}`,
+    `DTSTART:${startUtc}`,
+    `DTEND:${endUtc}`,
+    `SUMMARY:${clean(item.title)}`,
+    `DESCRIPTION:${clean(item.description)}`,
+    `LOCATION:${clean(loc)}`,
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+}
+
+let testMailSender: ((mailOptions: any) => Promise<any>) | null = null;
+export function setMailSenderForTest(fn: ((mailOptions: any) => Promise<any>) | null): void {
+  if (isTestEnv()) {
+    testMailSender = fn;
+  }
+}
+
+let dailyEmailDateKey = '';
+let dailyEmailCount = 0;
+
+export async function sendEventConfirmationEmail(
+  item: any,
+  recipientEmail: string | undefined,
+  recipientName: string,
+  ticketUrl: string
+): Promise<boolean> {
+  if (!recipientEmail || !recipientEmail.includes('@')) return false;
+  const smtpUser = process.env.SMTP_USER ? process.env.SMTP_USER.trim() : '';
+  const smtpPass = process.env.SMTP_PASS ? process.env.SMTP_PASS.trim() : '';
+  if (!smtpUser || !smtpPass) {
+    // Silently disabled when SMTP credentials are not configured
+    return false;
+  }
+
+  const todayKey = new Date().toISOString().slice(0, 10);
+  if (dailyEmailDateKey !== todayKey) {
+    dailyEmailDateKey = todayKey;
+    dailyEmailCount = 0;
+  }
+  if (dailyEmailCount >= 400) {
+    return false;
+  }
+
+  const tz = item.timezone || 'UTC';
+  let formattedDate = item.starts_at || item.datetime || '';
+  try {
+    if (formattedDate) {
+      formattedDate = new Intl.DateTimeFormat('en-GB', {
+        dateStyle: 'full',
+        timeStyle: 'short',
+        timeZone: tz
+      }).format(new Date(formattedDate)) + ` (${tz})`;
+    }
+  } catch (_) {}
+
+  const placeLine = item.format === 'online'
+    ? `Online link: ${item.join_link || 'Provided on event page'}`
+    : `Venue: ${item.venue || item.location || 'See event page'}`;
+
+  const icsContent = generateEventIcsContent(item);
+  const mailOptions: any = {
+    from: smtpUser,
+    to: recipientEmail,
+    ...(item.contact_email ? { replyTo: item.contact_email } : {}),
+    subject: `Confirmation: ${item.title}`,
+    text: [
+      `Hi ${recipientName || 'there'},`,
+      '',
+      `You are registered for "${item.title}" on Kwegatta.`,
+      `Date & Time: ${formattedDate}`,
+      placeLine,
+      '',
+      `View your ticket: ${ticketUrl}`,
+      '',
+      'An .ics calendar invite is attached to this email.'
+    ].join('\n'),
+    attachments: [
+      {
+        filename: 'event.ics',
+        content: icsContent,
+        contentType: 'text/calendar; charset=utf-8'
+      }
+    ]
+  };
+
+  try {
+    if (isTestEnv() && testMailSender) {
+      await testMailSender(mailOptions);
+      dailyEmailCount++;
+      return true;
+    }
+    const smtpHost = process.env.SMTP_HOST?.trim() || 'smtp.gmail.com';
+    const smtpPort = Number(process.env.SMTP_PORT) || 465;
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: {
+        user: smtpUser,
+        pass: smtpPass
+      }
+    });
+    await transporter.sendMail(mailOptions);
+    dailyEmailCount++;
+    return true;
+  } catch (err: any) {
+    console.warn('[Email] Could not send event confirmation email:', err?.message || err);
+    return false;
+  }
 }
 
 app.get('/api/events', (req: Request, res: Response) => {
@@ -5156,18 +5539,30 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
   let attendeeProfiles: any[] = [];
   let peopleToMeet: Array<{ profile: any; reason: string; score: number }> = [];
 
+  const eventCheckins = (store.event_checkins || []).filter((c: any) => c.event_id === id);
+
   if (callerId || isAdmin) {
     attendeeProfiles = store.profiles
       .filter((p: any) => attendeeIds.includes(p.id) && !p.hidden && !p.suspended)
-      .map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        avatar: `/api/avatar/${p.id}`,
-        role: p.role,
-        headline: p.headline,
-        type: 'member',
-        registered_at: (item.rsvp_times && item.rsvp_times[p.id]) || item.created_at || p.created_at
-      }));
+      .map((p: any) => {
+        const chk = (isAuthor || isAdmin)
+          ? eventCheckins.find((c: any) => c.kind === 'member' && (c.ref_id === p.id || c.ref_id === p.account_uid))
+          : undefined;
+        return {
+          id: p.id,
+          name: p.name,
+          avatar: `/api/avatar/${p.id}`,
+          role: p.role,
+          headline: p.headline,
+          type: 'member',
+          registered_at: (item.rsvp_times && item.rsvp_times[p.id]) || item.created_at || p.created_at,
+          ...((isAuthor || isAdmin) ? {
+            checked_in: Boolean(chk),
+            checked_in_at: chk?.checked_in_at || null,
+            checkin_method: chk?.method || null
+          } : {})
+        };
+      });
 
     if (callerProfile) {
       const otherAttendees = store.profiles.filter(
@@ -5239,6 +5634,9 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
   const rawGuests = (store.event_guests || []).filter((g: any) => g.event_id === id);
   const guestsForCaller = ((callerId || isAdmin) && canSeeAttendees)
     ? rawGuests.map((g: any) => {
+        const chk = (isAuthor || isAdmin)
+          ? eventCheckins.find((c: any) => c.kind === 'guest' && c.ref_id === g.id)
+          : undefined;
         const guestObj: any = {
           id: g.id,
           event_id: g.event_id,
@@ -5250,6 +5648,9 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
         if (isAuthor || isAdmin) {
           if (g.email !== undefined) guestObj.email = g.email;
           if (g.phone !== undefined) guestObj.phone = g.phone;
+          guestObj.checked_in = Boolean(chk);
+          guestObj.checked_in_at = chk?.checked_in_at || null;
+          guestObj.checkin_method = chk?.method || null;
         }
         return guestObj;
       })
@@ -5301,6 +5702,23 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
     item.attendee_ids.splice(index, 1);
     if (item.rsvp_times && typeof item.rsvp_times === 'object') {
       delete item.rsvp_times[memberId];
+      if (callerId) delete item.rsvp_times[callerId];
+    }
+    if (item.member_ticket_hashes && typeof item.member_ticket_hashes === 'object') {
+      delete item.member_ticket_hashes[memberId];
+      if (callerId) delete item.member_ticket_hashes[callerId];
+    }
+    // Also remove any check-in record for cancelled RSVP
+    if (Array.isArray(store.event_checkins)) {
+      const removedChkIds = store.event_checkins
+        .filter((c: any) => c.event_id === id && c.kind === 'member' && (c.ref_id === memberId || c.ref_id === callerId))
+        .map((c: any) => c.id);
+      store.event_checkins = store.event_checkins.filter(
+        (c: any) => !(c.event_id === id && c.kind === 'member' && (c.ref_id === memberId || c.ref_id === callerId))
+      );
+      for (const cid of removedChkIds) {
+        removeDoc('event_checkins', cid).catch(() => {});
+      }
     }
     isGoing = false;
   } else {
@@ -5315,12 +5733,31 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
     if (!item.rsvp_times || typeof item.rsvp_times !== 'object') {
       item.rsvp_times = {};
     }
-    item.rsvp_times[memberId] = new Date().toISOString();
+    const rsvpNow = new Date().toISOString();
+    item.rsvp_times[memberId] = rsvpNow;
+    if (!item.member_ticket_hashes || typeof item.member_ticket_hashes !== 'object') {
+      item.member_ticket_hashes = {};
+    }
+    const code = deriveTicketCode(id, `member:${memberId}`, rsvpNow);
+    item.member_ticket_hashes[memberId] = hashTicketCode(code);
     isGoing = true;
   }
 
   await persistDoc('events', item.id, item);
   if (storageMode === 'disk') saveStore(store);
+
+  if (isGoing) {
+    let memberEmail = callerProfile?.email || (req as any).authUser?.email || '';
+    if (!memberEmail && adminAuth && callerId) {
+      try {
+        const u = await adminAuth.getUser(callerId);
+        if (u?.email) memberEmail = u.email;
+      } catch (_) {}
+    }
+    const appBase = (process.env.APP_URL || 'https://kwegatta.ai.studio').replace(/\/$/, '');
+    const ticketUrl = `${appBase}/#/events/${item.id}/ticket`;
+    await sendEventConfirmationEmail(item, memberEmail, callerProfile?.name || 'Member', ticketUrl);
+  }
 
   const guestCount = (store.event_guests || []).filter((g: any) => g.event_id === id).length;
   return res.json({
@@ -5480,6 +5917,8 @@ app.post('/api/events', async (req: Request, res: Response) => {
     status,
     published,
     is_cancelled: false,
+    self_checkin_enabled: Boolean(raw.self_checkin_enabled),
+    allow_walkins: raw.allow_walkins !== undefined ? Boolean(raw.allow_walkins) : true,
     attendee_ids: [],
     reports: [],
     report_count: 0,
@@ -5650,9 +6089,15 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
   if (raw.deadline !== undefined) item.deadline = sanitizeText(raw.deadline, 60);
   if (raw.link !== undefined) item.link = sanitizeHttpsUrl(raw.link);
 
-  // Author can cancel event
+  // Author can cancel event or toggle self check-in
   if (raw.is_cancelled !== undefined) {
     item.is_cancelled = Boolean(raw.is_cancelled);
+  }
+  if (raw.self_checkin_enabled !== undefined) {
+    item.self_checkin_enabled = Boolean(raw.self_checkin_enabled);
+  }
+  if (raw.allow_walkins !== undefined) {
+    item.allow_walkins = Boolean(raw.allow_walkins);
   }
 
   if (isAdmin && raw.published !== undefined) {
@@ -6165,18 +6610,23 @@ app.post('/api/events/:id/guest-register', async (req: Request, res: Response) =
     return res.status(429).json({ error: 'Guest registration limit reached for this event today.' });
   }
 
-  // Token generation
+  // Token & personal ticket code generation (store sha256 only)
   const rawToken = crypto.randomBytes(32).toString('hex');
   const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+  const guestId = 'guest-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex');
+  const createdAt = new Date().toISOString();
+  const ticketCode = deriveTicketCode(id, `guest:${guestId}`, createdAt);
+  const codeHash = hashTicketCode(ticketCode);
 
   const guestRecord = {
-    id: 'guest-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
+    id: guestId,
     event_id: id,
     name,
     phone,
     email,
-    created_at: new Date().toISOString(),
-    token_hash: tokenHash
+    created_at: createdAt,
+    token_hash: tokenHash,
+    code_hash: codeHash
   };
 
   if (!Array.isArray(store.event_guests)) store.event_guests = [];
@@ -6188,11 +6638,18 @@ app.post('/api/events/:id/guest-register', async (req: Request, res: Response) =
   ipRecord.eventRegistrations.set(id, eventTs);
   ipRecord.totalTimestamps.push(now);
 
+  if (email) {
+    const appBase = (process.env.APP_URL || 'https://kwegatta.ai.studio').replace(/\/$/, '');
+    const ticketUrl = `${appBase}/#/events/${id}/ticket?g=${encodeURIComponent(rawToken)}`;
+    await sendEventConfirmationEmail(item, email, name, ticketUrl);
+  }
+
   return res.json({
     success: true,
     token: rawToken,
     guest_id: guestRecord.id,
-    event_id: id
+    event_id: id,
+    code: ticketCode
   });
 });
 
@@ -6650,23 +7107,429 @@ app.get('/api/events/:id/export', (req: Request, res: Response) => {
   const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
   const attendeeProfiles = store.profiles.filter((p: any) => attendeeIds.includes(p.id) && !p.hidden && !p.suspended);
   const guests = (store.event_guests || []).filter((g: any) => g.event_id === id);
+  const eventCheckins = (store.event_checkins || []).filter((c: any) => c.event_id === id);
 
-  let csv = 'name,type,email,registered_at\n';
+  let csv = 'name,type,email,registered_at,checked_in_at,method\n';
   for (const p of attendeeProfiles) {
     const cleanName = (p.name || '').replace(/"/g, '""');
     const regAt = ((item.rsvp_times && item.rsvp_times[p.id]) || item.created_at || '').replace(/"/g, '""');
-    csv += `"${cleanName}","Member","","${regAt}"\n`;
+    const chk = eventCheckins.find((c: any) => c.kind === 'member' && (c.ref_id === p.id || c.ref_id === p.account_uid));
+    const checkedInAt = (chk?.checked_in_at || '').replace(/"/g, '""');
+    const method = (chk?.method || '').replace(/"/g, '""');
+    csv += `"${cleanName}","Member","","${regAt}","${checkedInAt}","${method}"\n`;
   }
   for (const g of guests) {
     const cleanName = (g.name || '').replace(/"/g, '""');
     const cleanEmail = (g.email || '').replace(/"/g, '""');
     const regAt = (g.created_at || '').replace(/"/g, '""');
-    csv += `"${cleanName}","Guest","${cleanEmail}","${regAt}"\n`;
+    const chk = eventCheckins.find((c: any) => c.kind === 'guest' && c.ref_id === g.id);
+    const checkedInAt = (chk?.checked_in_at || '').replace(/"/g, '""');
+    const method = (chk?.method || '').replace(/"/g, '""');
+    csv += `"${cleanName}","Guest","${cleanEmail}","${regAt}","${checkedInAt}","${method}"\n`;
   }
 
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename="${item.id}-attendees.csv"`);
   return res.send(csv);
+});
+
+// Rate limit maps for Kwegatta 1.8.0 check-in endpoints
+const hostCheckinRateMap = new Map<string, number[]>();
+const selfCheckinIpRateMap = new Map<string, number[]>();
+const selfCheckinGuestFailMap = new Map<string, { fails: number; blockedUntil: number }>();
+
+// GET /api/events/:id/my-ticket — signed-in attendee or registered guest with X-Guest-Token
+app.get('/api/events/:id/my-ticket', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) {
+    return res.status(404).json({ error: 'Event not found' });
+  }
+
+  const callerId = resolveAuthUserId(req);
+  const guestToken =
+    (typeof req.headers['x-guest-token'] === 'string' ? (req.headers['x-guest-token'] as string) : undefined) ||
+    (typeof req.query.g === 'string' ? req.query.g : undefined);
+
+  if (callerId) {
+    const callerProfile = store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId);
+    const memberId = callerProfile?.id || callerId;
+    const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
+    const isAttendee = attendeeIds.includes(memberId) || attendeeIds.includes(callerId);
+
+    if (isAttendee) {
+      const matchedId = attendeeIds.includes(memberId) ? memberId : callerId;
+      if (!item.rsvp_times || typeof item.rsvp_times !== 'object') {
+        item.rsvp_times = {};
+      }
+      if (!item.rsvp_times[matchedId]) {
+        item.rsvp_times[matchedId] = item.created_at || new Date().toISOString();
+      }
+      const code = deriveTicketCode(id, `member:${matchedId}`, item.rsvp_times[matchedId]);
+      const codeHash = hashTicketCode(code);
+      if (!item.member_ticket_hashes || typeof item.member_ticket_hashes !== 'object') {
+        item.member_ticket_hashes = {};
+      }
+      if (item.member_ticket_hashes[matchedId] !== codeHash) {
+        item.member_ticket_hashes[matchedId] = codeHash;
+        await persistDoc('events', item.id, item);
+      }
+      return res.json({
+        code,
+        qr_payload: `KWG1:${id}:${code}`
+      });
+    }
+  }
+
+  if (guestToken) {
+    const tokenHash = crypto.createHash('sha256').update(guestToken).digest('hex');
+    const guestRec = (store.event_guests || []).find((g: any) => g.event_id === id && g.token_hash === tokenHash);
+    if (guestRec) {
+      const code = deriveTicketCode(id, `guest:${guestRec.id}`, guestRec.created_at || '');
+      const codeHash = hashTicketCode(code);
+      if (guestRec.code_hash !== codeHash) {
+        guestRec.code_hash = codeHash;
+        await persistDoc('event_guests', guestRec.id, guestRec);
+      }
+      return res.json({
+        code,
+        qr_payload: `KWG1:${id}:${code}`
+      });
+    }
+  }
+
+  return res.status(403).json({ error: 'Forbidden: Only registered attendees for this event can view a ticket.' });
+});
+
+// POST /api/events/:id/checkin — Mode 1: Host scans tickets or checks in manually (author or admin only)
+app.post('/api/events/:id/checkin', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) {
+    return res.status(404).json({ error: 'Event not found' });
+  }
+
+  const isAdmin = checkAdmin(req);
+  const callerId = resolveAuthUserId(req);
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
+  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
+
+  if (!isAdmin && !isAuthor) {
+    return res.status(403).json({ error: 'Forbidden: Only the event host or an admin can check in attendees.' });
+  }
+
+  // Rate limit: 120 per minute per host
+  const hostKey = callerProfileId || 'admin';
+  const now = Date.now();
+  const recentHostActions = (hostCheckinRateMap.get(hostKey) || []).filter(t => now - t < 60000);
+  if (recentHostActions.length >= 120) {
+    return res.status(429).json({ error: 'Rate limit exceeded: max 120 check-in actions per minute.' });
+  }
+  recentHostActions.push(now);
+  hostCheckinRateMap.set(hostKey, recentHostActions);
+
+  // Common rule: Check-in is allowed from 3 hours before start until 6 hours after end (409 otherwise)
+  if (!isWithinCheckinWindow(item, now)) {
+    return res.status(409).json({ error: 'Check-in is only allowed from 3 hours before start until 6 hours after end.' });
+  }
+
+  const body = req.body || {};
+  const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
+  let kind: 'member' | 'guest' | null = null;
+  let refId = '';
+  let attendeeName = '';
+  let codeHash = '';
+  let method: 'host_scan' | 'manual' = 'host_scan';
+
+  if (typeof body.code === 'string' && body.code.trim()) {
+    let rawCode = body.code.trim();
+    if (rawCode.toUpperCase().startsWith('KWG1:')) {
+      const parts = rawCode.split(':');
+      if (parts.length < 3 || parts[1] !== id) {
+        return res.status(404).json({ error: 'Not a ticket for this event' });
+      }
+      rawCode = parts[2].trim();
+    }
+    const candidateHash = hashTicketCode(rawCode);
+
+    // Search active member attendees of this event
+    for (const attId of attendeeIds) {
+      let storedHash = item.member_ticket_hashes?.[attId];
+      if (!storedHash) {
+        const regTime = item.rsvp_times?.[attId] || item.created_at || '';
+        if (regTime) {
+          storedHash = hashTicketCode(deriveTicketCode(id, `member:${attId}`, regTime));
+        }
+      }
+      if (storedHash && storedHash === candidateHash) {
+        kind = 'member';
+        refId = attId;
+        codeHash = storedHash;
+        const prof = store.profiles.find((p: any) => p.id === attId || p.account_uid === attId);
+        attendeeName = prof?.name || 'Member';
+        method = 'host_scan';
+        break;
+      }
+    }
+
+    // If not a member, search guest registrations for this event
+    if (!kind) {
+      const eventGuests = (store.event_guests || []).filter((g: any) => g.event_id === id);
+      for (const g of eventGuests) {
+        const gHash = g.code_hash || hashTicketCode(deriveTicketCode(id, `guest:${g.id}`, g.created_at || ''));
+        if (gHash === candidateHash) {
+          kind = 'guest';
+          refId = g.id;
+          codeHash = gHash;
+          attendeeName = g.name || 'Guest';
+          method = 'host_scan';
+          break;
+        }
+      }
+    }
+
+    if (!kind) {
+      return res.status(404).json({ error: 'Not a ticket for this event' });
+    }
+  } else if ((body.kind === 'member' || body.kind === 'guest') && typeof body.ref_id === 'string' && body.ref_id.trim()) {
+    method = 'manual';
+    const targetRef = body.ref_id.trim();
+    if (body.kind === 'member') {
+      const prof = store.profiles.find((p: any) => p.id === targetRef || p.account_uid === targetRef);
+      const isAtt = attendeeIds.includes(targetRef) || (prof && attendeeIds.includes(prof.id));
+      if (!isAtt) {
+        return res.status(404).json({ error: 'Not a ticket for this event' });
+      }
+      kind = 'member';
+      refId = prof?.id || targetRef;
+      attendeeName = prof?.name || 'Member';
+      codeHash = item.member_ticket_hashes?.[refId] || '';
+    } else {
+      const g = (store.event_guests || []).find((guest: any) => guest.event_id === id && guest.id === targetRef);
+      if (!g) {
+        return res.status(404).json({ error: 'Not a ticket for this event' });
+      }
+      kind = 'guest';
+      refId = g.id;
+      attendeeName = g.name || 'Guest';
+      codeHash = g.code_hash || '';
+    }
+  } else {
+    return res.status(400).json({ error: 'Provide either { code } or { kind, ref_id }.' });
+  }
+
+  if (!Array.isArray(store.event_checkins)) store.event_checkins = [];
+  const existing = store.event_checkins.find(
+    (c: any) => c.event_id === id && c.kind === kind && c.ref_id === refId
+  );
+
+  if (existing) {
+    return res.json({
+      name: attendeeName,
+      status: 'already',
+      checked_in_at: existing.checked_in_at,
+      method: existing.method
+    });
+  }
+
+  const checkinRecord = {
+    id: `chk-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+    event_id: id,
+    kind,
+    ref_id: refId,
+    code_hash: codeHash,
+    checked_in_at: new Date(now).toISOString(),
+    checked_in_by: hostKey,
+    method
+  };
+
+  store.event_checkins.push(checkinRecord);
+  await persistDoc('event_checkins', checkinRecord.id, checkinRecord);
+
+  return res.json({
+    name: attendeeName,
+    status: 'checked_in',
+    checked_in_at: checkinRecord.checked_in_at,
+    method: checkinRecord.method
+  });
+});
+
+// GET /api/events/:id/checkin-token — Host/Admin rotating venue QR token (30s window)
+app.get('/api/events/:id/checkin-token', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) {
+    return res.status(404).json({ error: 'Event not found' });
+  }
+
+  const isAdmin = checkAdmin(req);
+  const callerId = resolveAuthUserId(req);
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
+  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
+
+  if (!isAdmin && !isAuthor) {
+    return res.status(403).json({ error: 'Forbidden: Only the event host or an admin can display the venue QR.' });
+  }
+
+  const token = generateSelfCheckinToken(id);
+  const checkedInCount = (store.event_checkins || []).filter((c: any) => c.event_id === id).length;
+
+  return res.json({
+    token,
+    url: `https://kwegatta.ai.studio/#/checkin/${id}/${token}`,
+    checked_in_count: checkedInCount,
+    expires_in_ms: 30000
+  });
+});
+
+// POST /api/events/:id/self-checkin — Mode 2: Venue QR self check-in
+app.post('/api/events/:id/self-checkin', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) {
+    return res.status(404).json({ error: 'Event not found' });
+  }
+
+  if (!item.self_checkin_enabled) {
+    return res.status(403).json({ error: 'Self check-in is not enabled for this event.' });
+  }
+
+  const ip = getClientIp(req);
+  const now = Date.now();
+  const ipEventKey = `${ip}:${id}`;
+
+  // Check 15-minute block from 5 failed guest-email attempts per IP per event
+  const failState = selfCheckinGuestFailMap.get(ipEventKey);
+  if (failState && failState.blockedUntil > now) {
+    return res.status(429).json({ error: 'Too many failed guest email attempts. Please try again in 15 minutes.' });
+  }
+
+  // Rate limit: 10 attempts per minute per IP
+  const recentAttempts = (selfCheckinIpRateMap.get(ipEventKey) || []).filter(t => now - t < 60000);
+  if (recentAttempts.length >= 10) {
+    return res.status(429).json({ error: 'Too many self check-in attempts. Please wait a minute and try again.' });
+  }
+  recentAttempts.push(now);
+  selfCheckinIpRateMap.set(ipEventKey, recentAttempts);
+
+  const rawToken = typeof req.body?.token === 'string' ? req.body.token : '';
+  const tokenCheck = verifySelfCheckinToken(id, rawToken, now);
+  if (tokenCheck.expired) {
+    return res.status(410).json({ error: 'QR expired, scan again' });
+  }
+  if (!tokenCheck.valid) {
+    return res.status(400).json({ error: 'Invalid check-in QR token' });
+  }
+
+  // Event check-in time window check (3h before start until 6h after end)
+  if (!isWithinCheckinWindow(item, now)) {
+    return res.status(409).json({ error: 'Check-in is only allowed from 3 hours before start until 6 hours after end.' });
+  }
+
+  if (!Array.isArray(store.event_checkins)) store.event_checkins = [];
+
+  // Guest self check-in by email
+  if (typeof req.body?.guest_email === 'string' && req.body.guest_email.trim()) {
+    const guestEmail = req.body.guest_email.trim().toLowerCase();
+    const matchedGuest = (store.event_guests || []).find(
+      (g: any) => g.event_id === id && typeof g.email === 'string' && g.email.trim().toLowerCase() === guestEmail
+    );
+
+    if (!matchedGuest) {
+      const currentFails =
+        (failState && failState.blockedUntil > 0 && failState.blockedUntil <= now ? 0 : (failState?.fails || 0)) + 1;
+      const blockedUntil = currentFails >= 5 ? now + 15 * 60 * 1000 : 0;
+      selfCheckinGuestFailMap.set(ipEventKey, { fails: currentFails, blockedUntil });
+      if (currentFails >= 5) {
+        return res.status(429).json({ error: 'Too many failed guest email attempts. Blocked for 15 minutes.' });
+      }
+      return res.status(404).json({ error: 'No guest registration found matching that email for this event.' });
+    }
+
+    const existing = store.event_checkins.find(
+      (c: any) => c.event_id === id && c.kind === 'guest' && c.ref_id === matchedGuest.id
+    );
+    if (existing) {
+      return res.json({
+        name: matchedGuest.name || 'Guest',
+        status: 'already',
+        message: "You're already checked in",
+        checked_in_at: existing.checked_in_at
+      });
+    }
+
+    const codeHash = matchedGuest.code_hash || hashTicketCode(deriveTicketCode(id, `guest:${matchedGuest.id}`, matchedGuest.created_at || ''));
+    const checkinRecord = {
+      id: `chk-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+      event_id: id,
+      kind: 'guest' as const,
+      ref_id: matchedGuest.id,
+      code_hash: codeHash,
+      checked_in_at: new Date(now).toISOString(),
+      checked_in_by: matchedGuest.id,
+      method: 'self' as const
+    };
+    store.event_checkins.push(checkinRecord);
+    await persistDoc('event_checkins', checkinRecord.id, checkinRecord);
+
+    return res.json({
+      name: matchedGuest.name || 'Guest',
+      status: 'checked_in',
+      checked_in_at: checkinRecord.checked_in_at
+    });
+  }
+
+  // Signed-in member self check-in
+  const callerId = resolveAuthUserId(req);
+  if (!callerId) {
+    return res.status(401).json({ error: 'Sign in or enter the email you used to register as a guest.' });
+  }
+
+  const callerProfile = store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId);
+  const memberId = callerProfile?.id || callerId;
+  const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
+  const isRegistered = attendeeIds.includes(memberId) || attendeeIds.includes(callerId);
+
+  if (!isRegistered) {
+    return res.status(409).json({ error: "You're not registered for this event" });
+  }
+
+  const refId = attendeeIds.includes(memberId) ? memberId : callerId;
+  const existing = store.event_checkins.find(
+    (c: any) => c.event_id === id && c.kind === 'member' && (c.ref_id === refId || c.ref_id === callerId)
+  );
+  if (existing) {
+    return res.json({
+      name: callerProfile?.name || 'Member',
+      status: 'already',
+      message: "You're already checked in",
+      checked_in_at: existing.checked_in_at
+    });
+  }
+
+  const regTime = item.rsvp_times?.[refId] || item.created_at || new Date(now).toISOString();
+  const codeHash = item.member_ticket_hashes?.[refId] || hashTicketCode(deriveTicketCode(id, `member:${refId}`, regTime));
+
+  const checkinRecord = {
+    id: `chk-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
+    event_id: id,
+    kind: 'member' as const,
+    ref_id: refId,
+    code_hash: codeHash,
+    checked_in_at: new Date(now).toISOString(),
+    checked_in_by: refId,
+    method: 'self' as const
+  };
+  store.event_checkins.push(checkinRecord);
+  await persistDoc('event_checkins', checkinRecord.id, checkinRecord);
+
+  return res.json({
+    name: callerProfile?.name || 'Member',
+    status: 'checked_in',
+    checked_in_at: checkinRecord.checked_in_at
+  });
 });
 
 /* =========================================================================
@@ -7986,12 +8849,11 @@ app.use(errorHandler);
 
 // Production static assets or Vite middleware in dev
 async function setupVite() {
-  await initStorage();
-
   const isProd = process.env.NODE_ENV === 'production';
   const distPath = path.join(__dirname, 'dist');
 
   if (isProd && fs.existsSync(distPath)) {
+    await initStorage();
     console.log('Serving production static bundle from dist');
 
     // Long-lived immutable caching for hashed /assets/
@@ -8030,7 +8892,7 @@ async function setupVite() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   } else {
-    // In dev / middleware mode:
+    // In dev / middleware mode: run initStorage and Vite server initialization concurrently
     app.get('/sw.js', (_req, res, next) => {
       res.setHeader('Cache-Control', 'no-cache');
       const swPublic = path.join(__dirname, 'public', 'sw.js');
@@ -8048,11 +8910,15 @@ async function setupVite() {
     });
 
     console.log('Starting Vite in middleware mode for rapid development');
-    const { createServer } = await import('vite');
-    const vite = await createServer({
-      server: { middlewareMode: true, host: '0.0.0.0' },
-      appType: 'spa'
-    });
+    const [, vite] = await Promise.all([
+      initStorage(),
+      import('vite').then(({ createServer }) =>
+        createServer({
+          server: { middlewareMode: true, host: '0.0.0.0' },
+          appType: 'spa'
+        })
+      )
+    ]);
     app.use(vite.middlewares);
   }
 

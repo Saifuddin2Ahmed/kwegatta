@@ -130,15 +130,24 @@ export const PrivacyView: React.FC<PrivacyViewProps> = ({ onBack }) => {
         </div>
       </section>
 
-      {/* Section 4: Guest Registrations for Events */}
+      {/* Section 4: Guest Registrations, Tickets, Check-in & Confirmation Emails */}
       <section className="kw-card p-6 sm:p-8 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl space-y-4">
-        <h2 className="text-lg font-bold text-[var(--fg)]">4. Guest Registrations for Events (Accountless RSVP)</h2>
+        <h2 className="text-lg font-bold text-[var(--fg)]">4. Guest Registrations, Event Tickets, Check-in &amp; Confirmation Emails</h2>
         <div className="space-y-2.5 text-xs sm:text-sm text-[var(--fg-muted)] leading-relaxed">
           <p>
             * <strong>Data Collected:</strong> Full name (2-80 characters), contact phone/WhatsApp or email, and required consent checkbox.
           </p>
           <p>
             * <strong>Visibility Boundary:</strong> Shared <strong>ONLY</strong> with the event host and platform admins. Guests are never listed by name in public attendee lists and details are never exposed to other members.
+          </p>
+          <p>
+            * <strong>Personal Event Tickets:</strong> Each registered member or guest receives a 10-character base32 ticket code (<code className="text-[var(--gold-text)]">KWG1:&lt;eventId&gt;:&lt;code&gt;</code>). The QR code contains no personal data, and the server stores only the SHA-256 hash of the ticket code. Cancelling an RSVP or guest registration immediately invalidates the ticket.
+          </p>
+          <p>
+            * <strong>Event Check-in Records:</strong> When an attendee checks in at an event, the private <code className="text-[var(--gold-text)]">event_checkins</code> collection records the check-in timestamp (<code className="text-[var(--gold-text)]">checked_in_at</code>) and check-in method (<code className="text-[var(--gold-text)]">host_scan</code>, <code className="text-[var(--gold-text)]">self</code> via rotating venue QR, or <code className="text-[var(--gold-text)]">manual</code>). Check-in records are visible only to the event host and platform admins and are permanently deleted if a member deletes their profile.
+          </p>
+          <p>
+            * <strong>Confirmation Emails:</strong> When configured via Google Gmail SMTP, a single transactional confirmation email with an <code className="text-[var(--gold-text)]">.ics</code> calendar invite and ticket link is sent upon RSVP or guest registration (using the member's Firebase Auth email or the guest's registration email). No marketing emails are ever sent.
           </p>
           <p>
             * <strong>30-Day Retention:</strong> Guest registration records are automatically purged 30 days after the event ends.

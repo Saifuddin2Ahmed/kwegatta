@@ -4,6 +4,21 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-10-14
+
+### Added & Improved (Release 1.8.0)
+- **Check-in (host scan + venue QR self check-in) + confirmation email**:
+  - **Check-in records & personal tickets (`event_checkins`)**: Private collection with Firestore snapshot listener and cascade deletion on profile removal. 10-character base32 personal ticket codes stored only as SHA-256 hashes (`KWG1:<eventId>:<code>` QR payload with zero personal data), invalidated on RSVP/guest cancellation.
+  - **Host ticket scanner & manual check-in**: `POST /api/events/:id/checkin` and host "Check in guests" scanner (`getUserMedia` + `BarcodeDetector` with `jsQR` fallback) plus manual check-in list and search.
+  - **Venue QR self check-in**: Per-event `Allow self check-in` toggle (`self_checkin_enabled`), full-screen rotating 30s HMAC QR display (`#/checkin/<eventId>/<token>`), and `POST /api/events/:id/self-checkin` for RSVP'd members and registered guests with rate limiting and 15-minute failed guest-email lockout.
+  - **Attendees panel & CSV export**: Added `Checked in` / `Not yet` tabs, live check-in counter, `checked_in_at` and `method` columns in CSV export, and `Permissions-Policy: camera=(self)`.
+  - **Confirmation email with `.ics` attachment**: Optional Gmail SMTP (`nodemailer`) confirmation email on RSVP and guest registration with `.ics` calendar invite and ticket link (silently disabled when SMTP env vars are absent; capped at 400/day).
+
+## [1.6.1] - 2026-10-14
+
+### Fixed (Release 1.6.1)
+- Fix: events, guest registrations and questions are now loaded from the database after a restart (`onSnapshot` listeners added for `events`, `event_guests`, and `event_questions` in `setupFirestoreListeners()`, completing initial load before migrations/cleanups, with audited `PERSISTED_COLLECTIONS`).
+
 ## [1.6.0] - 2026-10-14
 
 ### Added & Improved (Release 1.6.0)

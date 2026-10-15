@@ -236,6 +236,9 @@ export interface EventOpportunityItem {
   attendees?: any[];
   guests?: EventGuest[];
   rsvp_times?: Record<string, string>;
+  self_checkin_enabled?: boolean;
+  allow_walkins?: boolean;
+  checked_in_count?: number;
 }
 
 export interface EventQuestionReply {
@@ -270,6 +273,10 @@ export interface EventGuest {
   phone?: string;
   email?: string;
   created_at: string;
+  registered_at?: string;
+  checked_in?: boolean;
+  checked_in_at?: string | null;
+  checkin_method?: 'host_scan' | 'self' | 'manual' | null;
 }
 
 export interface PinnedAnnouncement {

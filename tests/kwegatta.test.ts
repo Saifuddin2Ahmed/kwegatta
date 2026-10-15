@@ -38,6 +38,13 @@ import {
   setPairCacheEntry,
   connectRequestsMap,
   cascadeDeleteMemberData,
+  PERSISTED_COLLECTIONS,
+  WRITE_ONLY_COLLECTIONS,
+  setupFirestoreListeners,
+  setMockFirestoreDbForTest,
+  initStorage,
+  generateSelfCheckinToken,
+  setMailSenderForTest,
   store
 } from '../server';
 import { validatePasswordStrength } from '../src/services/firebase';
@@ -268,8 +275,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.6.0
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.6.0'");
+    // 1. Cache name includes version kwegatta-1.8.0
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.8.0'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -4174,6 +4181,540 @@ describe('Release 1.5.0 Features', () => {
         const allButtons = Array.from((renderedContainer || document).querySelectorAll('button'));
         for (const btn of allButtons) {
           expect((btn.textContent || '').toLowerCase()).not.toContain('remove');
+        }
+      });
+    });
+
+    describe('Release 1.6.1: Firestore listeners for events, event_guests, and event_questions', () => {
+      it('a) static audit: every collection in persistDoc/removeDoc/batchRemoveDocs/batchPersistDocs is loaded in setupFirestoreListeners or in WRITE_ONLY allowlist', async () => {
+        const fs = await import('fs');
+        const path = await import('path');
+        const serverSrc = fs.readFileSync(path.resolve(process.cwd(), 'server.ts'), 'utf8');
+
+        // Extract literal collection names passed to persistDoc, removeDoc, batchRemoveDocs, batchPersistDocs
+        const writeCallRegex = /\b(?:persistDoc|removeDoc|batchRemoveDocs|batchPersistDocs)\(\s*['"]([a-zA-Z0-9_]+)['"]/g;
+        const writtenCollections = new Set<string>();
+        let m: RegExpExecArray | null;
+        while ((m = writeCallRegex.exec(serverSrc)) !== null) {
+          writtenCollections.add(m[1]);
+        }
+
+        // Also include ALLOWED_DATA_COLLECTIONS used via generic /api/data/:collection
+        for (const col of ['profiles', 'posts', 'follows', 'matches', 'notifications', 'events', 'event_guests', 'event_questions', 'event_checkins']) {
+          writtenCollections.add(col);
+        }
+
+        // Extract setupFirestoreListeners body and find all .collection('...').onSnapshot
+        const fnStart = serverSrc.indexOf('export async function setupFirestoreListeners');
+        const fnEnd = serverSrc.indexOf('export async function initStorage', fnStart);
+        expect(fnStart).toBeGreaterThan(0);
+        expect(fnEnd).toBeGreaterThan(fnStart);
+        const listenerSection = serverSrc.slice(fnStart, fnEnd);
+
+        const listenerRegex = /\.collection\(\s*['"]([a-zA-Z0-9_]+)['"]\s*\)\.onSnapshot/g;
+        const listenedCollections = new Set<string>();
+        while ((m = listenerRegex.exec(listenerSection)) !== null) {
+          listenedCollections.add(m[1]);
+        }
+
+        // WRITE_ONLY_COLLECTIONS must not contain events, event_guests, event_questions, or event_checkins
+        expect(WRITE_ONLY_COLLECTIONS).not.toContain('events');
+        expect(WRITE_ONLY_COLLECTIONS).not.toContain('event_guests');
+        expect(WRITE_ONLY_COLLECTIONS).not.toContain('event_questions');
+        expect(WRITE_ONLY_COLLECTIONS).not.toContain('event_checkins');
+
+        // Every written collection must be in PERSISTED_COLLECTIONS and either listened or in WRITE_ONLY_COLLECTIONS
+        for (const col of writtenCollections) {
+          expect(PERSISTED_COLLECTIONS).toContain(col);
+          const isCovered = listenedCollections.has(col) || WRITE_ONLY_COLLECTIONS.includes(col);
+          expect(isCovered).toBe(true);
+        }
+
+        expect(listenedCollections.has('events')).toBe(true);
+        expect(listenedCollections.has('event_guests')).toBe(true);
+        expect(listenedCollections.has('event_questions')).toBe(true);
+        expect(listenedCollections.has('event_checkins')).toBe(true);
+      });
+
+      it('b) mocked firestoreDb with onSnapshot loads events, event_guests, event_questions, and event_checkins into store', async () => {
+        const prevEvents = [...(store.events || [])];
+        const prevGuests = [...(store.event_guests || [])];
+        const prevQuestions = [...(store.event_questions || [])];
+        const prevCheckins = [...(store.event_checkins || [])];
+
+        try {
+          store.events = [];
+          store.event_guests = [];
+          store.event_questions = [];
+          store.event_checkins = [];
+
+          const seededCollections: Record<string, Array<{ id: string; data: () => any }>> = {
+            events: [
+              { id: 'ev-seeded-161', data: () => ({ title: 'Restored Event 161', kind: 'event', published: true }) }
+            ],
+            event_guests: [
+              { id: 'guest-seeded-161', data: () => ({ event_id: 'ev-seeded-161', name: 'Restored Guest' }) }
+            ],
+            event_questions: [
+              { id: 'q-seeded-161', data: () => ({ event_id: 'ev-seeded-161', question_text: 'Restored Question?' }) }
+            ],
+            event_checkins: [
+              { id: 'chk-seeded-161', data: () => ({ event_id: 'ev-seeded-161', kind: 'guest', ref_id: 'guest-seeded-161', method: 'host_scan' }) }
+            ]
+          };
+
+          const mockDb = {
+            collection: (colName: string) => ({
+              onSnapshot: (onNext: (snap: any) => void) => {
+                const docs = seededCollections[colName] || [];
+                onNext({
+                  docs,
+                  forEach: (cb: (d: any) => void) => docs.forEach(cb)
+                });
+                return () => {};
+              }
+            })
+          };
+
+          await setupFirestoreListeners(mockDb);
+
+          expect(store.events.some((e: any) => e.id === 'ev-seeded-161' && e.title === 'Restored Event 161')).toBe(true);
+          expect(store.event_guests.some((g: any) => g.id === 'guest-seeded-161' && g.name === 'Restored Guest')).toBe(true);
+          expect(store.event_questions.some((q: any) => q.id === 'q-seeded-161' && q.question_text === 'Restored Question?')).toBe(true);
+          expect(store.event_checkins.some((c: any) => c.id === 'chk-seeded-161')).toBe(true);
+        } finally {
+          setMockFirestoreDbForTest(null);
+          store.events = prevEvents;
+          store.event_guests = prevGuests;
+          store.event_questions = prevQuestions;
+          store.event_checkins = prevCheckins;
+        }
+      });
+
+      it('c) listeners finish initial load before cleanupTestEvents runs in initStorage (call-order test with mocks)', async () => {
+        const callOrder: string[] = [];
+        const prevEvents = [...(store.events || [])];
+        const prevMigrations = { ...(store.migrations || {}) };
+
+        try {
+          store.migrations = {
+            [SAIFUDDIN_PROFILE_MIGRATION_FLAG]: { completed: true },
+            saifuddin_profile_migration_v2: { completed: true },
+            [SAIFUDDIN_PROFILE_MIGRATION_V3_FLAG]: { completed: true },
+            [CLEANUP_TEST_EVENTS_FLAG]: { completed: false },
+            publish_existing_pending_events_v1: { completed: true }
+          };
+
+          const mockDb = {
+            collection: (colName: string) => ({
+              onSnapshot: (onNext: (snap: any) => void) => {
+                if (['events', 'event_guests', 'event_questions'].includes(colName)) {
+                  callOrder.push(`listener:${colName}`);
+                }
+                const docs =
+                  colName === 'events'
+                    ? [{ id: 'ev-real-keep', data: () => ({ id: 'ev-real-keep', title: 'Kampala Builders Meetup', author_name: 'Alice', published: true }) }]
+                    : [];
+                onNext({
+                  docs,
+                  forEach: (cb: (d: any) => void) => docs.forEach(cb)
+                });
+                return () => {};
+              },
+              doc: () => ({
+                get: async () => ({ exists: false, data: () => ({}) }),
+                set: async () => {
+                  callOrder.push('cleanupTestEvents:completed');
+                }
+              })
+            })
+          };
+
+          await initStorage(mockDb);
+
+          const eventsIdx = callOrder.indexOf('listener:events');
+          const guestsIdx = callOrder.indexOf('listener:event_guests');
+          const questionsIdx = callOrder.indexOf('listener:event_questions');
+          expect(eventsIdx).toBeGreaterThanOrEqual(0);
+          expect(guestsIdx).toBeGreaterThanOrEqual(0);
+          expect(questionsIdx).toBeGreaterThanOrEqual(0);
+          expect(store.migrations[CLEANUP_TEST_EVENTS_FLAG]?.completed).toBe(true);
+          expect(store.events.some((e: any) => e.id === 'ev-real-keep')).toBe(true);
+        } finally {
+          setMockFirestoreDbForTest(null);
+          store.events = prevEvents;
+          store.migrations = prevMigrations;
+        }
+      });
+    });
+
+    describe('Release 1.8.0: Check-in (host scan + venue QR self check-in) + confirmation email', () => {
+      it('a) event_checkins is blocked from /api/data/event_checkins (404), Permissions-Policy allows camera=(self), and cascadeDeleteMemberData removes check-ins', async () => {
+        const res = await fetch(`${baseUrl}/api/data/event_checkins`);
+        expect(res.status).toBe(404);
+        const policyHeader = res.headers.get('permissions-policy') || '';
+        expect(policyHeader).toContain('camera=(self)');
+
+        if (!store.event_checkins) store.event_checkins = [];
+        store.event_checkins.push({
+          id: 'chk-cascade-test',
+          event_id: 'ev-cascade-test',
+          kind: 'member',
+          ref_id: 'member-del-180',
+          code_hash: 'abc',
+          checked_in_at: new Date().toISOString(),
+          checked_in_by: 'host-1',
+          method: 'host_scan'
+        });
+        await cascadeDeleteMemberData('member-del-180', 'uid-del-180');
+        expect(store.event_checkins.some((c: any) => c.id === 'chk-cascade-test')).toBe(false);
+      });
+
+      it('b) personal tickets: member RSVP & guest registration generate 10-char base32 tickets, store sha256 only, and cancellation invalidates tickets', async () => {
+        const hostId = 'host-180-ticket';
+        const memberId = 'att-180-ticket';
+        store.profiles.push(
+          { id: hostId, account_uid: hostId, name: 'Host 180', headline: 'Builder', email: 'host180@example.com' } as any,
+          { id: memberId, account_uid: memberId, name: 'Member 180', headline: 'Dev', email: 'member180@example.com' } as any
+        );
+
+        const now = Date.now();
+        const evRes = await fetch(`${baseUrl}/api/events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hostId}` },
+          body: JSON.stringify({
+            kind: 'event',
+            title: 'Kwegatta 1.8.0 Ticket Test',
+            description: 'Testing personal tickets and invalidation on cancel.',
+            format: 'in_person',
+            venue: 'Kampala Hub Plot 12',
+            starts_at: new Date(now + 30 * 60 * 1000).toISOString(),
+            ends_at: new Date(now + 120 * 60 * 1000).toISOString(),
+            timezone: 'Africa/Kampala',
+            self_checkin_enabled: true
+          })
+        });
+        expect(evRes.status).toBe(200);
+        const ev = (await evRes.json()).item;
+
+        // Non-attendee cannot get a ticket
+        const forbiddenTicket = await fetch(`${baseUrl}/api/events/${ev.id}/my-ticket`, {
+          headers: { Authorization: `Bearer ${memberId}` }
+        });
+        expect(forbiddenTicket.status).toBe(403);
+
+        // Member RSVPs
+        const rsvpRes = await fetch(`${baseUrl}/api/events/${ev.id}/rsvp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${memberId}` }
+        });
+        expect(rsvpRes.status).toBe(200);
+
+        // Member fetches ticket
+        const ticketRes = await fetch(`${baseUrl}/api/events/${ev.id}/my-ticket`, {
+          headers: { Authorization: `Bearer ${memberId}` }
+        });
+        expect(ticketRes.status).toBe(200);
+        const ticketData = await ticketRes.json();
+        expect(ticketData.code).toMatch(/^[A-Z2-7]{10}$/);
+        expect(ticketData.qr_payload).toBe(`KWG1:${ev.id}:${ticketData.code}`);
+
+        // Stored event has sha256 hash, never raw code
+        const storedEv = store.events.find((e: any) => e.id === ev.id);
+        expect(storedEv.member_ticket_hashes[memberId]).toBeDefined();
+        expect(storedEv.member_ticket_hashes[memberId]).not.toBe(ticketData.code);
+
+        // Guest registers and receives code + token
+        const guestRegRes = await fetch(`${baseUrl}/api/events/${ev.id}/guest-register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '10.88.1.1' },
+          body: JSON.stringify({
+            name: 'Guest Ticket Holder',
+            email: 'guest180@example.com',
+            agree: true
+          })
+        });
+        expect(guestRegRes.status).toBe(200);
+        const guestReg = await guestRegRes.json();
+        expect(guestReg.code).toMatch(/^[A-Z2-7]{10}$/);
+
+        // Guest fetches ticket via X-Guest-Token
+        const guestTicketRes = await fetch(`${baseUrl}/api/events/${ev.id}/my-ticket`, {
+          headers: { 'X-Guest-Token': guestReg.token }
+        });
+        expect(guestTicketRes.status).toBe(200);
+        const guestTicket = await guestTicketRes.json();
+        expect(guestTicket.code).toBe(guestReg.code);
+
+        // Cancelling member RSVP invalidates member ticket
+        await fetch(`${baseUrl}/api/events/${ev.id}/rsvp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${memberId}` }
+        });
+        const afterCancelTicket = await fetch(`${baseUrl}/api/events/${ev.id}/my-ticket`, {
+          headers: { Authorization: `Bearer ${memberId}` }
+        });
+        expect(afterCancelTicket.status).toBe(403);
+
+        // Host scanning cancelled member's ticket fails with 404
+        const scanCancelled = await fetch(`${baseUrl}/api/events/${ev.id}/checkin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hostId}` },
+          body: JSON.stringify({ code: ticketData.code })
+        });
+        expect(scanCancelled.status).toBe(404);
+      });
+
+      it('c) Mode 1 (host scan & manual check-in) + CSV export with checked_in_at and method', async () => {
+        const hostId = 'host-180-scan';
+        const memberId = 'att-180-scan';
+        store.profiles.push(
+          { id: hostId, account_uid: hostId, name: 'Host Scanner', headline: 'Host' } as any,
+          { id: memberId, account_uid: memberId, name: 'Grace Member', headline: 'Developer' } as any
+        );
+
+        const now = Date.now();
+        const evRes = await fetch(`${baseUrl}/api/events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hostId}` },
+          body: JSON.stringify({
+            kind: 'event',
+            title: 'Kwegatta 1.8.0 Host Scan Event',
+            description: 'Host scan and manual check-in verification.',
+            format: 'in_person',
+            venue: 'Makerere Innovation Hub',
+            starts_at: new Date(now + 60 * 60 * 1000).toISOString(),
+            ends_at: new Date(now + 180 * 60 * 1000).toISOString(),
+            timezone: 'Africa/Kampala'
+          })
+        });
+        const ev = (await evRes.json()).item;
+
+        // Member RSVPs and gets ticket
+        await fetch(`${baseUrl}/api/events/${ev.id}/rsvp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${memberId}` }
+        });
+        const tRes = await fetch(`${baseUrl}/api/events/${ev.id}/my-ticket`, {
+          headers: { Authorization: `Bearer ${memberId}` }
+        });
+        const { qr_payload } = await tRes.json();
+
+        // Non-host cannot check in
+        const nonHostRes = await fetch(`${baseUrl}/api/events/${ev.id}/checkin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${memberId}` },
+          body: JSON.stringify({ code: qr_payload })
+        });
+        expect(nonHostRes.status).toBe(403);
+
+        // Host scans member's QR payload -> checked_in
+        const scan1 = await fetch(`${baseUrl}/api/events/${ev.id}/checkin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hostId}` },
+          body: JSON.stringify({ code: qr_payload })
+        });
+        expect(scan1.status).toBe(200);
+        const scan1Body = await scan1.json();
+        expect(scan1Body.status).toBe('checked_in');
+        expect(scan1Body.name).toBe('Grace Member');
+
+        // Repeat scan -> idempotent 'already'
+        const scan2 = await fetch(`${baseUrl}/api/events/${ev.id}/checkin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hostId}` },
+          body: JSON.stringify({ code: qr_payload })
+        });
+        expect(scan2.status).toBe(200);
+        const scan2Body = await scan2.json();
+        expect(scan2Body.status).toBe('already');
+        expect(scan2Body.checked_in_at).toBe(scan1Body.checked_in_at);
+
+        // Register a guest and manually check them in
+        const gRes = await fetch(`${baseUrl}/api/events/${ev.id}/guest-register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '10.88.2.2' },
+          body: JSON.stringify({ name: 'Manual Guest', email: 'manualguest@example.com', agree: true })
+        });
+        expect(gRes.status).toBe(200);
+        const targetGuest = store.event_guests.find((g: any) => g.event_id === ev.id && g.email === 'manualguest@example.com');
+        expect(targetGuest).toBeDefined();
+
+        const manualRes = await fetch(`${baseUrl}/api/events/${ev.id}/checkin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hostId}` },
+          body: JSON.stringify({ kind: 'guest', ref_id: targetGuest!.id })
+        });
+        expect(manualRes.status).toBe(200);
+        const manualBody = await manualRes.json();
+        expect(manualBody.status).toBe('checked_in');
+        expect(manualBody.method).toBe('manual');
+
+        // Export CSV includes checked_in_at and method columns
+        const csvRes = await fetch(`${baseUrl}/api/events/${ev.id}/export`, {
+          headers: { Authorization: `Bearer ${hostId}` }
+        });
+        expect(csvRes.status).toBe(200);
+        const csvText = await csvRes.text();
+        expect(csvText).toContain('name,type,email,registered_at,checked_in_at,method');
+        expect(csvText).toContain('"Grace Member"');
+        expect(csvText).toContain('"host_scan"');
+        expect(csvText).toContain('"Manual Guest"');
+        expect(csvText).toContain('"manual"');
+      });
+
+      it('d) Mode 2 (venue rotating QR self check-in): validates 30s HMAC window, blocks expired tokens (410), checks registration (409), and locks out after 5 failed guest emails (429)', async () => {
+        const hostId = 'host-180-self';
+        const rsvpMemberId = 'att-180-self';
+        const otherMemberId = 'nonatt-180-self';
+        store.profiles.push(
+          { id: hostId, account_uid: hostId, name: 'Venue Host', headline: 'Host' } as any,
+          { id: rsvpMemberId, account_uid: rsvpMemberId, name: 'Self Checkin Member', headline: 'Dev' } as any,
+          { id: otherMemberId, account_uid: otherMemberId, name: 'Unregistered Member', headline: 'Dev' } as any
+        );
+
+        const now = Date.now();
+        const evRes = await fetch(`${baseUrl}/api/events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hostId}` },
+          body: JSON.stringify({
+            kind: 'event',
+            title: 'Kwegatta 1.8.0 Self Checkin Event',
+            description: 'Testing rotating venue QR self check-in.',
+            format: 'in_person',
+            venue: 'Nakawa Tech Park',
+            starts_at: new Date(now + 30 * 60 * 1000).toISOString(),
+            ends_at: new Date(now + 150 * 60 * 1000).toISOString(),
+            timezone: 'Africa/Kampala',
+            self_checkin_enabled: true
+          })
+        });
+        const ev = (await evRes.json()).item;
+
+        await fetch(`${baseUrl}/api/events/${ev.id}/rsvp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${rsvpMemberId}` }
+        });
+
+        await fetch(`${baseUrl}/api/events/${ev.id}/guest-register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '10.88.3.1' },
+          body: JSON.stringify({ name: 'Venue Guest', email: 'venueguest@example.com', agree: true })
+        });
+
+        // Host fetches rotating checkin-token
+        const tokRes = await fetch(`${baseUrl}/api/events/${ev.id}/checkin-token`, {
+          headers: { Authorization: `Bearer ${hostId}` }
+        });
+        expect(tokRes.status).toBe(200);
+        const tokData = await tokRes.json();
+        expect(tokData.token).toBeTruthy();
+
+        // Expired token (from 3 minutes ago) -> 410 "QR expired, scan again"
+        const expiredToken = generateSelfCheckinToken(ev.id, now - 180000);
+        const expRes = await fetch(`${baseUrl}/api/events/${ev.id}/self-checkin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${rsvpMemberId}`, 'X-Forwarded-For': '10.88.3.2' },
+          body: JSON.stringify({ token: expiredToken })
+        });
+        expect(expRes.status).toBe(410);
+        const expBody = await expRes.json();
+        expect(expBody.error).toContain('QR expired, scan again');
+
+        // Unregistered member -> 409 "You're not registered for this event"
+        const unregRes = await fetch(`${baseUrl}/api/events/${ev.id}/self-checkin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${otherMemberId}`, 'X-Forwarded-For': '10.88.3.3' },
+          body: JSON.stringify({ token: tokData.token })
+        });
+        expect(unregRes.status).toBe(409);
+
+        // Registered member -> 200 checked_in
+        const selfRes1 = await fetch(`${baseUrl}/api/events/${ev.id}/self-checkin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${rsvpMemberId}`, 'X-Forwarded-For': '10.88.3.4' },
+          body: JSON.stringify({ token: tokData.token })
+        });
+        expect(selfRes1.status).toBe(200);
+        expect((await selfRes1.json()).status).toBe('checked_in');
+
+        // Registered guest self checks in by email (using previous 30s window token, which is also accepted)
+        const prevWindowToken = generateSelfCheckinToken(ev.id, now - 25000);
+        const guestSelfRes = await fetch(`${baseUrl}/api/events/${ev.id}/self-checkin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '10.88.3.5' },
+          body: JSON.stringify({ token: prevWindowToken, guest_email: 'venueguest@example.com' })
+        });
+        expect(guestSelfRes.status).toBe(200);
+        expect((await guestSelfRes.json()).status).toBe('checked_in');
+
+        // 5 failed guest-email attempts from same IP -> 429 block
+        let lastStatus = 0;
+        for (let i = 0; i < 5; i++) {
+          const failRes = await fetch(`${baseUrl}/api/events/${ev.id}/self-checkin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '10.88.3.99' },
+            body: JSON.stringify({ token: tokData.token, guest_email: `wrong${i}@example.com` })
+          });
+          lastStatus = failRes.status;
+        }
+        expect(lastStatus).toBe(429);
+      });
+
+      it('e) Confirmation email: silently skipped without SMTP env vars, and sends email with .ics attachment when configured', async () => {
+        const sentEmails: any[] = [];
+        const prevUser = process.env.SMTP_USER;
+        const prevPass = process.env.SMTP_PASS;
+
+        try {
+          process.env.SMTP_USER = 'events@kwegatta.org';
+          process.env.SMTP_PASS = 'app-password-test';
+          setMailSenderForTest(async (mailOpts: any) => {
+            sentEmails.push(mailOpts);
+          });
+
+          const hostId = 'host-180-email';
+          const memberId = 'att-180-email';
+          store.profiles.push(
+            { id: hostId, account_uid: hostId, name: 'Email Host', headline: 'Host', email: 'host@kwegatta.org' } as any,
+            { id: memberId, account_uid: memberId, name: 'Email Member', headline: 'Dev', email: 'attendee@kwegatta.org' } as any
+          );
+
+          const now = Date.now();
+          const evRes = await fetch(`${baseUrl}/api/events`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hostId}` },
+            body: JSON.stringify({
+              kind: 'event',
+              title: 'Kwegatta Email Confirmation Meetup',
+              description: 'Testing confirmation email with .ics attachment.',
+              format: 'in_person',
+              venue: 'Kampala Innovation Village',
+              starts_at: new Date(now + 3600000).toISOString(),
+              ends_at: new Date(now + 7200000).toISOString(),
+              timezone: 'Africa/Kampala',
+              contact_email: 'host@kwegatta.org'
+            })
+          });
+          const ev = (await evRes.json()).item;
+
+          await fetch(`${baseUrl}/api/events/${ev.id}/rsvp`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${memberId}` }
+          });
+
+          expect(sentEmails.length).toBe(1);
+          expect(sentEmails[0].to).toBe('attendee@kwegatta.org');
+          expect(sentEmails[0].replyTo).toBe('host@kwegatta.org');
+          expect(sentEmails[0].text).toContain(`#/events/${ev.id}/ticket`);
+          expect(sentEmails[0].attachments[0].filename).toBe('event.ics');
+          expect(sentEmails[0].attachments[0].content).toContain('BEGIN:VCALENDAR');
+        } finally {
+          setMailSenderForTest(null);
+          if (prevUser === undefined) delete process.env.SMTP_USER;
+          else process.env.SMTP_USER = prevUser;
+          if (prevPass === undefined) delete process.env.SMTP_PASS;
+          else process.env.SMTP_PASS = prevPass;
         }
       });
     });

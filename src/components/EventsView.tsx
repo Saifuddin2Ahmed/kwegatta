@@ -31,8 +31,11 @@ import {
   UserCheck,
   XCircle,
   Search,
-  Tag
+  Tag,
+  QrCode
 } from 'lucide-react';
+import QRCode from 'qrcode';
+import jsQR from 'jsqr';
 import { EventOpportunityItem, OpportunityType, Profile, EventQuestion, EventGuest } from '../types';
 import { Avatar } from './Avatar';
 import { GuestRegisterModal } from './GuestRegisterModal';
@@ -61,6 +64,10 @@ import {
   cancelEventGuest,
   fetchEventGuests,
   exportEventAttendeesCsv,
+  fetchMyEventTicket,
+  checkinEventAttendee,
+  fetchEventCheckinToken,
+  selfCheckinEvent,
   PUBLIC_APP_URL
 } from '../services/api';
 
@@ -195,6 +202,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [formMapLink, setFormMapLink] = useState('');
   const [formCapacity, setFormCapacity] = useState('');
   const [formTagsInput, setFormTagsInput] = useState('');
+  const [formSelfCheckin, setFormSelfCheckin] = useState(false);
   const [formContactPhone, setFormContactPhone] = useState('');
   const [formContactEmail, setFormContactEmail] = useState('');
   const [formOppType, setFormOppType] = useState<OpportunityType>('Hackathon');
@@ -207,9 +215,41 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
   // Host Attendees Panel State
   const [showAttendeesPanel, setShowAttendeesPanel] = useState(true);
-  const [attendeeTab, setAttendeeTab] = useState<'all' | 'members' | 'guests'>('all');
+  const [attendeeTab, setAttendeeTab] = useState<'all' | 'checked_in' | 'not_yet' | 'members' | 'guests'>('all');
   const [attendeeSearch, setAttendeeSearch] = useState('');
   const [exportingCsv, setExportingCsv] = useState(false);
+
+  // Kwegatta 1.8.0: Personal Ticket, Host Check-in Scanner, Rotating Venue QR, and Self Check-in State
+  const [isTicketModalOpen, setIsTicketModalOpen] = useState(false);
+  const [ticketCode, setTicketCode] = useState<string | null>(null);
+  const [ticketQrDataUrl, setTicketQrDataUrl] = useState<string>('');
+  const [loadingTicket, setLoadingTicket] = useState(false);
+
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [manualTicketCode, setManualTicketCode] = useState('');
+  const [scannerSearch, setScannerSearch] = useState('');
+  const [scanResult, setScanResult] = useState<{
+    type: 'success' | 'already' | 'error';
+    name?: string;
+    checkedInAt?: string;
+    message?: string;
+  } | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const [isVenueQrOpen, setIsVenueQrOpen] = useState(false);
+  const [venueQrUrl, setVenueQrUrl] = useState('');
+  const [venueQrDataUrl, setVenueQrDataUrl] = useState('');
+  const [venueCheckedInCount, setVenueCheckedInCount] = useState(0);
+  const [venueCountdown, setVenueCountdown] = useState(30);
+
+  const [selfCheckinToken, setSelfCheckinToken] = useState<string | null>(null);
+  const [selfCheckinGuestEmail, setSelfCheckinGuestEmail] = useState('');
+  const [selfCheckinLoading, setSelfCheckinLoading] = useState(false);
+  const [selfCheckinResult, setSelfCheckinResult] = useState<{
+    type: 'success' | 'already' | 'error';
+    message: string;
+  } | null>(null);
 
   // Questions State
   const [questions, setQuestions] = useState<EventQuestion[]>([]);
@@ -453,6 +493,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
     setFormMapLink('');
     setFormCapacity('');
     setFormTagsInput('');
+    setFormSelfCheckin(false);
     setFormContactPhone('');
     setFormContactEmail('');
     setFormOppType('Hackathon');
@@ -490,6 +531,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
     setFormMapLink(item.map_link || '');
     setFormCapacity(item.capacity ? String(item.capacity) : '');
     setFormTagsInput(Array.isArray(item.tags) ? item.tags.join(', ') : '');
+    setFormSelfCheckin(Boolean(item.self_checkin_enabled));
     setFormContactPhone(item.contact_phone || '');
     setFormContactEmail(item.contact_email || '');
     const tz = item.timezone || 'Africa/Kampala';
@@ -610,6 +652,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
       payload.join_link = formJoinLink.trim() || undefined;
       payload.cover_image = formCoverImage.trim() || undefined;
       payload.registration_link = formRegLink.trim() || undefined;
+      payload.self_checkin_enabled = formSelfCheckin;
     } else {
       payload.opportunity_type = formOppType;
       payload.deadline = formDeadline.trim();
@@ -709,6 +752,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
       patch.join_link = formJoinLink.trim() || undefined;
       patch.cover_image = formCoverImage.trim() || undefined;
       patch.registration_link = formRegLink.trim() || undefined;
+      patch.self_checkin_enabled = formSelfCheckin;
     } else {
       patch.opportunity_type = formOppType;
       patch.deadline = formDeadline.trim();
@@ -933,6 +977,293 @@ export const EventsView: React.FC<EventsViewProps> = ({
     }
   };
 
+  // Kwegatta 1.8.0: Detect #/checkin/:eventId/:token or #/events/:id/ticket from URL hash
+  useEffect(() => {
+    const syncHashCheckinAndTicket = () => {
+      try {
+        const rawHash = window.location.hash.replace(/^#\/?/, '');
+        const [pathPart, queryPart] = rawHash.split('?');
+        const segs = pathPart.split('/');
+        if (segs[0] === 'checkin' && segs[1] && segs[2]) {
+          setSelectedItemId(segs[1]);
+          setSelfCheckinToken(decodeURIComponent(segs[2]));
+          setSelfCheckinResult(null);
+        } else if (segs[0] === 'events' && segs[1] && segs[2] === 'ticket') {
+          setSelectedItemId(segs[1]);
+          handleOpenMyTicket(segs[1]);
+        } else if (queryPart) {
+          const params = new URLSearchParams(queryPart);
+          const chkTok = params.get('checkin');
+          if (chkTok) {
+            setSelfCheckinToken(chkTok);
+            setSelfCheckinResult(null);
+          } else {
+            setSelfCheckinToken(null);
+          }
+        } else {
+          setSelfCheckinToken(null);
+        }
+      } catch {}
+    };
+    syncHashCheckinAndTicket();
+    window.addEventListener('hashchange', syncHashCheckinAndTicket);
+    return () => window.removeEventListener('hashchange', syncHashCheckinAndTicket);
+  }, []);
+
+  const handleOpenMyTicket = async (eventId: string) => {
+    setIsTicketModalOpen(true);
+    setLoadingTicket(true);
+    setTicketCode(null);
+    setTicketQrDataUrl('');
+    try {
+      const gTok = getGuestToken(eventId);
+      const res = await fetchMyEventTicket(eventId, gTok);
+      setTicketCode(res.code);
+      const payload = res.qr_payload || `KWG1:${eventId}:${res.code}`;
+      const url = await QRCode.toDataURL(payload, {
+        width: 240,
+        margin: 1,
+        color: { dark: '#0B0F17', light: '#FFFFFF' }
+      });
+      setTicketQrDataUrl(url);
+    } catch (err: any) {
+      onToast(err?.message || 'Could not load ticket');
+      setIsTicketModalOpen(false);
+    } finally {
+      setLoadingTicket(false);
+    }
+  };
+
+  const refreshDetailAndGuests = (eventId: string) => {
+    const guestToken = getGuestToken(eventId);
+    fetchEventById(eventId, guestToken).then(fresh => {
+      if (fresh) setDetailedItem(fresh);
+    });
+    if (
+      currentProfile?.is_admin ||
+      detailedItem?.author_id === currentProfile?.id ||
+      detailedItem?.author_id === currentProfile?.account_uid
+    ) {
+      loadEventGuests(eventId);
+    }
+  };
+
+  const handleHostCheckinCode = async (rawCode: string) => {
+    if (!selectedItemId || !rawCode.trim()) return;
+    try {
+      const res = await checkinEventAttendee(selectedItemId, { code: rawCode.trim() });
+      if (res.status === 'already') {
+        const timeStr = res.checked_in_at
+          ? new Date(res.checked_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : '';
+        setScanResult({
+          type: 'already',
+          name: res.name,
+          checkedInAt: timeStr,
+          message: `Already checked in at ${timeStr}`
+        });
+      } else {
+        setScanResult({
+          type: 'success',
+          name: res.name,
+          checkedInAt: res.checked_in_at
+            ? new Date(res.checked_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : '',
+          message: `${res.name} checked in`
+        });
+      }
+      setManualTicketCode('');
+      refreshDetailAndGuests(selectedItemId);
+    } catch (err: any) {
+      setScanResult({
+        type: 'error',
+        message: err?.message || 'Not a ticket for this event'
+      });
+    }
+  };
+
+  const handleHostManualCheckin = async (kind: 'member' | 'guest', refId: string) => {
+    if (!selectedItemId) return;
+    try {
+      const res = await checkinEventAttendee(selectedItemId, { kind, ref_id: refId });
+      if (res.status === 'already') {
+        const timeStr = res.checked_in_at
+          ? new Date(res.checked_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : '';
+        setScanResult({
+          type: 'already',
+          name: res.name,
+          checkedInAt: timeStr,
+          message: `Already checked in at ${timeStr}`
+        });
+        onToast(`Already checked in at ${timeStr}`);
+      } else {
+        setScanResult({
+          type: 'success',
+          name: res.name,
+          message: `${res.name} checked in!`
+        });
+        onToast(`Checked in ${res.name}`);
+      }
+      refreshDetailAndGuests(selectedItemId);
+    } catch (err: any) {
+      setScanResult({
+        type: 'error',
+        message: err?.message || 'Check-in failed'
+      });
+      onToast(err?.message || 'Check-in failed');
+    }
+  };
+
+  // Camera barcode/QR scanner loop when isScannerOpen is true
+  useEffect(() => {
+    if (!isScannerOpen || !selectedItemId) return;
+    let stream: MediaStream | null = null;
+    let active = true;
+    let animId: number | null = null;
+    let lastScanned = '';
+
+    const startCamera = async () => {
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) return;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' }
+        });
+        if (!active) {
+          stream.getTracks().forEach(t => t.stop());
+          return;
+        }
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
+        }
+
+        const BarcodeDetectorCtor = (window as any).BarcodeDetector;
+        const detector = BarcodeDetectorCtor ? new BarcodeDetectorCtor({ formats: ['qr_code'] }) : null;
+
+        const tick = async () => {
+          if (!active) return;
+          const video = videoRef.current;
+          if (video && video.readyState >= 2) {
+            try {
+              if (detector) {
+                const codes = await detector.detect(video);
+                if (codes && codes.length > 0 && codes[0].rawValue) {
+                  const val = String(codes[0].rawValue);
+                  if (val !== lastScanned) {
+                    lastScanned = val;
+                    await handleHostCheckinCode(val);
+                  }
+                }
+              } else if (canvasRef.current) {
+                const canvas = canvasRef.current;
+                const w = video.videoWidth || 320;
+                const h = video.videoHeight || 240;
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                  ctx.drawImage(video, 0, 0, w, h);
+                  const imgData = ctx.getImageData(0, 0, w, h);
+                  const qr = jsQR(imgData.data, w, h);
+                  if (qr && qr.data && qr.data !== lastScanned) {
+                    lastScanned = qr.data;
+                    await handleHostCheckinCode(qr.data);
+                  }
+                }
+              }
+            } catch {}
+          }
+          if (active) {
+            animId = window.setTimeout(tick, 400) as unknown as number;
+          }
+        };
+        tick();
+      } catch {
+        // Camera permission denied or unavailable; manual list remains usable
+      }
+    };
+
+    startCamera();
+
+    return () => {
+      active = false;
+      if (animId) clearTimeout(animId);
+      if (stream) {
+        stream.getTracks().forEach(t => t.stop());
+      }
+    };
+  }, [isScannerOpen, selectedItemId]);
+
+  // Rotating 30s Venue QR effect when isVenueQrOpen is true
+  useEffect(() => {
+    if (!isVenueQrOpen || !selectedItemId) return;
+    let active = true;
+
+    const loadRotatingToken = async () => {
+      try {
+        const data = await fetchEventCheckinToken(selectedItemId);
+        if (!active) return;
+        setVenueQrUrl(data.url);
+        setVenueCheckedInCount(data.checked_in_count || 0);
+        setVenueCountdown(30);
+        const qrImg = await QRCode.toDataURL(data.url, {
+          width: 320,
+          margin: 1,
+          color: { dark: '#0B0F17', light: '#FFFFFF' }
+        });
+        if (active) setVenueQrDataUrl(qrImg);
+      } catch (err: any) {
+        if (active) onToast(err?.message || 'Failed to load venue QR');
+      }
+    };
+
+    loadRotatingToken();
+    const rotateTimer = setInterval(loadRotatingToken, 30000);
+    const countdownTimer = setInterval(() => {
+      setVenueCountdown(prev => (prev > 1 ? prev - 1 : 30));
+    }, 1000);
+
+    return () => {
+      active = false;
+      clearInterval(rotateTimer);
+      clearInterval(countdownTimer);
+    };
+  }, [isVenueQrOpen, selectedItemId]);
+
+  const handleSelfCheckinSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!selectedItemId || !selfCheckinToken) return;
+    setSelfCheckinLoading(true);
+    setSelfCheckinResult(null);
+    try {
+      const payload: { token: string; guest_email?: string } = { token: selfCheckinToken };
+      if (!currentProfile || selfCheckinGuestEmail.trim()) {
+        payload.guest_email = selfCheckinGuestEmail.trim();
+      }
+      const res = await selfCheckinEvent(selectedItemId, payload);
+      if (res.status === 'already') {
+        setSelfCheckinResult({
+          type: 'already',
+          message: res.message || "You're already checked in"
+        });
+      } else {
+        setSelfCheckinResult({
+          type: 'success',
+          message: `Checked in! Welcome, ${res.name}.`
+        });
+      }
+      refreshDetailAndGuests(selectedItemId);
+    } catch (err: any) {
+      setSelfCheckinResult({
+        type: 'error',
+        message: err?.message || 'Self check-in failed'
+      });
+    } finally {
+      setSelfCheckinLoading(false);
+    }
+  };
+
   // Filter items by search query (title, description, venue/location, or tags)
   const normalizedSearch = searchQuery.trim().toLowerCase();
   const filteredItems = normalizedSearch
@@ -1012,6 +1343,64 @@ export const EventsView: React.FC<EventsViewProps> = ({
             Share
           </button>
         </div>
+
+        {/* Venue Self Check-in Banner (when visiting #/checkin/:eventId/:token) */}
+        {selfCheckinToken && (
+          <div className="kw-card p-5 space-y-4 border-[var(--gold)]/60 bg-amber-500/5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <QrCode className="w-5 h-5 text-[var(--gold-text)]" />
+                <h2 className="font-bold text-sm text-[var(--fg)]">Venue Self Check-in</h2>
+              </div>
+              <span className="text-xs text-[var(--fg-muted)]">{detailedItem.title}</span>
+            </div>
+
+            {selfCheckinResult && (
+              <div
+                className={`p-3.5 rounded-xl border text-xs font-bold flex items-center gap-2 ${
+                  selfCheckinResult.type === 'success'
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                    : selfCheckinResult.type === 'already'
+                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                    : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                }`}
+              >
+                {selfCheckinResult.type === 'success' && <Check className="w-4 h-4 flex-shrink-0" />}
+                <span>{selfCheckinResult.message}</span>
+              </div>
+            )}
+
+            {currentProfile && isAttending ? (
+              <button
+                type="button"
+                disabled={selfCheckinLoading}
+                onClick={() => handleSelfCheckinSubmit()}
+                className="kw-btn kw-btn-gold py-2.5 px-5 text-xs font-bold rounded-xl inline-flex items-center gap-2 cursor-pointer"
+              >
+                <UserCheck className="w-4 h-4" />
+                <span>{selfCheckinLoading ? 'Checking in...' : 'Check in now'}</span>
+              </button>
+            ) : (
+              <form onSubmit={handleSelfCheckinSubmit} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <input
+                  type="email"
+                  value={selfCheckinGuestEmail}
+                  onChange={e => setSelfCheckinGuestEmail(e.target.value)}
+                  placeholder="Enter the email you registered with..."
+                  required={!currentProfile}
+                  className="kw-input text-xs flex-1"
+                />
+                <button
+                  type="submit"
+                  disabled={selfCheckinLoading}
+                  className="kw-btn kw-btn-gold py-2 px-4 text-xs font-bold rounded-lg cursor-pointer"
+                >
+                  {selfCheckinLoading ? 'Checking in...' : 'Check in'}
+                </button>
+              </form>
+            )}
+          </div>
+        )}
 
         {/* Hidden Moderator Banner */}
         {isAuthor && detailedItem.hidden_by_moderation && (
@@ -1308,9 +1697,19 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     if (isRegisteredGuest) {
                       return (
                         <div className="kw-card p-4 space-y-3 border-emerald-500/40 bg-emerald-500/5">
-                          <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs">
-                            <Check className="w-4 h-4" />
-                            <span>You're registered</span>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs">
+                              <Check className="w-4 h-4" />
+                              <span>You're registered</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenMyTicket(detailedItem.id)}
+                              className="kw-btn kw-btn-gold text-xs py-1 px-2.5 rounded-lg font-bold inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              <QrCode className="w-3.5 h-3.5" />
+                              <span>My ticket</span>
+                            </button>
                           </div>
                           <p className="text-xs text-[var(--fg-muted)]">
                             Keep your private registration link to view event contact info:
@@ -1371,16 +1770,55 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   })()
                 ) : null}
 
-                {/* Prominent Host / Admin Attendees (N) Button */}
-                {canManageAttendees && (
+                {/* Member My Ticket Button */}
+                {isEvent && currentProfile && isAttending && !isCancelled && (
                   <button
                     type="button"
-                    onClick={() => setShowAttendeesPanel(true)}
-                    className="kw-btn kw-btn-gold px-4 py-2.5 text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+                    onClick={() => handleOpenMyTicket(detailedItem.id)}
+                    className="kw-btn px-3.5 py-2.5 text-xs font-bold rounded-lg border border-[var(--gold)]/50 bg-amber-500/10 text-[var(--gold-text)] hover:bg-amber-500/20 inline-flex items-center gap-1.5 cursor-pointer"
                   >
-                    <Users className="w-4 h-4" />
-                    {`Attendees (${attendeeCount})`}
+                    <QrCode className="w-4 h-4" />
+                    <span>My ticket</span>
                   </button>
+                )}
+
+                {/* Prominent Host / Admin Attendees (N) Button & Check-in Controls */}
+                {canManageAttendees && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setShowAttendeesPanel(true)}
+                      className="kw-btn kw-btn-gold px-4 py-2.5 text-xs font-bold rounded-lg inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Users className="w-4 h-4" />
+                      {`Attendees (${attendeeCount})`}
+                    </button>
+                    {isEvent && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setScanResult(null);
+                            setIsScannerOpen(true);
+                          }}
+                          className="kw-btn px-3.5 py-2.5 text-xs font-bold rounded-lg border border-[var(--gold)]/50 bg-amber-500/10 text-[var(--gold-text)] hover:bg-amber-500/20 inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Camera className="w-4 h-4" />
+                          <span>Check in guests</span>
+                        </button>
+                        {detailedItem.self_checkin_enabled && (
+                          <button
+                            type="button"
+                            onClick={() => setIsVenueQrOpen(true)}
+                            className="kw-btn px-3.5 py-2.5 text-xs font-bold rounded-lg border border-[var(--card-border)] hover:border-[var(--gold)] text-[var(--fg)] inline-flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <QrCode className="w-4 h-4 text-[var(--gold-text)]" />
+                            <span>Display venue QR</span>
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </>
                 )}
 
                 {/* Going Count & Capacity */}
@@ -1610,87 +2048,31 @@ export const EventsView: React.FC<EventsViewProps> = ({
           )}
         </div>
 
-        {/* Host & Admin Attendees Panel (Members + Guest registrations, View-Only) */}
+        {/* Host & Admin Attendees Panel (Members + Guest registrations, Check-in Tabs & Live Counter) */}
         {canManageAttendees && showAttendeesPanel && (
           <div className="kw-card p-6 space-y-4 border-[var(--gold)]/30">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--card-border)] pb-3">
-              <div>
-                <h3 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">
-                  <Users className="w-4 h-4 text-[var(--gold-text)]" />
-                  <span>{`Attendees (${attendees.length + combinedGuests.length})`}</span>
-                </h3>
-                <p className="text-[11px] text-[var(--fg-muted)] mt-0.5">
-                  {`Members (${attendees.length}) & Guest registrations (${combinedGuests.length})`}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleExportAttendeesCsv(detailedItem.id)}
-                  disabled={exportingCsv}
-                  className="kw-btn text-xs py-1.5 px-3 rounded-lg border border-[var(--card-border)] hover:border-[var(--gold)] flex items-center gap-1.5 font-semibold cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5 text-[var(--gold-text)]" />
-                  <span>{exportingCsv ? 'Exporting...' : 'Export CSV'}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Tabs & Search Box */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="inline-flex rounded-lg border border-[var(--card-border)] bg-[var(--bg)] p-0.5">
-                {(
-                  [
-                    { key: 'all', label: `All (${attendees.length + combinedGuests.length})` },
-                    { key: 'members', label: `Members (${attendees.length})` },
-                    { key: 'guests', label: `Guests (${combinedGuests.length})` }
-                  ] as const
-                ).map(t => (
-                  <button
-                    key={t.key}
-                    type="button"
-                    onClick={() => setAttendeeTab(t.key)}
-                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${
-                      attendeeTab === t.key
-                        ? 'bg-[var(--gold)] text-[#090D16] font-bold'
-                        : 'text-[var(--fg-muted)] hover:text-[var(--fg)]'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="relative flex-1 sm:max-w-xs">
-                <Search className="w-3.5 h-3.5 text-[var(--fg-subtle)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="search"
-                  value={attendeeSearch}
-                  onChange={e => setAttendeeSearch(e.target.value)}
-                  placeholder="Search attendees by name..."
-                  aria-label="Search attendees by name"
-                  className="kw-input text-xs pl-8 py-1.5 w-full"
-                />
-              </div>
-            </div>
-
             {(() => {
               const memberRows = attendees.map((m: any) => ({
                 id: m.id,
                 name: m.name || 'Member',
                 avatar: m.avatar,
                 type: 'Member' as const,
+                kind: 'member' as const,
                 email: undefined,
-                registered_at: m.registered_at || detailedItem.created_at || ''
+                registered_at: m.registered_at || detailedItem.created_at || '',
+                checked_in_at: m.checked_in_at || null,
+                checkin_method: m.checkin_method || null
               }));
               const guestRows = combinedGuests.map((g: any) => ({
                 id: g.id,
                 name: g.name || 'Guest',
                 avatar: undefined,
                 type: 'Guest' as const,
+                kind: 'guest' as const,
                 email: canManageAttendees ? g.email : undefined,
-                registered_at: g.registered_at || g.created_at || ''
+                registered_at: g.registered_at || g.created_at || '',
+                checked_in_at: g.checked_in_at || null,
+                checkin_method: g.checkin_method || null
               }));
 
               type AttendeeRowItem = {
@@ -1698,67 +2080,165 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 name: string;
                 avatar?: string;
                 type: 'Member' | 'Guest';
+                kind: 'member' | 'guest';
                 email?: string;
                 registered_at: string;
+                checked_in_at: string | null;
+                checkin_method: string | null;
               };
 
+              const allRows: AttendeeRowItem[] = [...memberRows, ...guestRows];
+              const checkedInRows = allRows.filter(r => Boolean(r.checked_in_at));
+              const notYetRows = allRows.filter(r => !r.checked_in_at);
+
               let rows: AttendeeRowItem[] =
-                attendeeTab === 'members'
+                attendeeTab === 'checked_in'
+                  ? checkedInRows
+                  : attendeeTab === 'not_yet'
+                  ? notYetRows
+                  : attendeeTab === 'members'
                   ? memberRows
                   : attendeeTab === 'guests'
                   ? guestRows
-                  : [...memberRows, ...guestRows];
+                  : allRows;
 
               const q = attendeeSearch.trim().toLowerCase();
               if (q) {
                 rows = rows.filter((r: AttendeeRowItem) => r.name.toLowerCase().includes(q));
               }
 
-              if (rows.length === 0) {
-                return (
-                  <p className="text-xs text-[var(--fg-muted)] italic py-2">
-                    No attendees match your filter.
-                  </p>
-                );
-              }
-
               return (
-                <div className="space-y-2.5">
-                  {rows.map((row: AttendeeRowItem) => (
-                    <div
-                      key={`${row.type}-${row.id}`}
-                      onClick={row.type === 'Member' ? () => onViewProfile(row.id) : undefined}
-                      className={`p-3 rounded-xl bg-[var(--bg)] border border-[var(--card-border)] flex flex-wrap items-center justify-between gap-3 text-xs ${
-                        row.type === 'Member' ? 'hover:border-[var(--gold)] cursor-pointer transition-colors' : ''
-                      }`}
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <Avatar profile={{ id: row.id, name: row.name, avatar: row.avatar }} size="sm" />
-                        <div className="min-w-0 space-y-0.5">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-bold text-[var(--fg)] truncate">{row.name}</span>
-                            <span
-                              className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-                                row.type === 'Member'
-                                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                                  : 'bg-amber-500/15 text-[var(--gold-text)] border border-amber-500/30'
-                              }`}
-                            >
-                              {row.type}
+                <>
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--card-border)] pb-3">
+                    <div>
+                      <h3 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">
+                        <Users className="w-4 h-4 text-[var(--gold-text)]" />
+                        <span>{`Attendees (${allRows.length})`}</span>
+                        <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                          {`${checkedInRows.length} / ${allRows.length} checked in`}
+                        </span>
+                      </h3>
+                      <p className="text-[11px] text-[var(--fg-muted)] mt-0.5">
+                        {`Members (${attendees.length}) & Guest registrations (${combinedGuests.length})`}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleExportAttendeesCsv(detailedItem.id)}
+                        disabled={exportingCsv}
+                        className="kw-btn text-xs py-1.5 px-3 rounded-lg border border-[var(--card-border)] hover:border-[var(--gold)] flex items-center gap-1.5 font-semibold cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5 text-[var(--gold-text)]" />
+                        <span>{exportingCsv ? 'Exporting...' : 'Export CSV'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Tabs & Search Box */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="inline-flex flex-wrap rounded-lg border border-[var(--card-border)] bg-[var(--bg)] p-0.5">
+                      {(
+                        [
+                          { key: 'all', label: `All (${allRows.length})` },
+                          { key: 'checked_in', label: `Checked in (${checkedInRows.length})` },
+                          { key: 'not_yet', label: `Not yet (${notYetRows.length})` },
+                          { key: 'members', label: `Members (${attendees.length})` },
+                          { key: 'guests', label: `Guests (${combinedGuests.length})` }
+                        ] as const
+                      ).map(t => (
+                        <button
+                          key={t.key}
+                          type="button"
+                          onClick={() => setAttendeeTab(t.key)}
+                          className={`px-3 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${
+                            attendeeTab === t.key
+                              ? 'bg-[var(--gold)] text-[#090D16] font-bold'
+                              : 'text-[var(--fg-muted)] hover:text-[var(--fg)]'
+                          }`}
+                        >
+                          {t.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="relative flex-1 sm:max-w-xs">
+                      <Search className="w-3.5 h-3.5 text-[var(--fg-subtle)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="search"
+                        value={attendeeSearch}
+                        onChange={e => setAttendeeSearch(e.target.value)}
+                        placeholder="Search attendees by name..."
+                        aria-label="Search attendees by name"
+                        className="kw-input text-xs pl-8 py-1.5 w-full"
+                      />
+                    </div>
+                  </div>
+
+                  {rows.length === 0 ? (
+                    <p className="text-xs text-[var(--fg-muted)] italic py-2">
+                      No attendees match your filter.
+                    </p>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {rows.map((row: AttendeeRowItem) => (
+                        <div
+                          key={`${row.type}-${row.id}`}
+                          onClick={row.type === 'Member' ? () => onViewProfile(row.id) : undefined}
+                          className={`p-3 rounded-xl bg-[var(--bg)] border border-[var(--card-border)] flex flex-wrap items-center justify-between gap-3 text-xs ${
+                            row.type === 'Member' ? 'hover:border-[var(--gold)] cursor-pointer transition-colors' : ''
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <Avatar profile={{ id: row.id, name: row.name, avatar: row.avatar }} size="sm" />
+                            <div className="min-w-0 space-y-0.5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-bold text-[var(--fg)] truncate">{row.name}</span>
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                                    row.type === 'Member'
+                                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                      : 'bg-amber-500/15 text-[var(--gold-text)] border border-amber-500/30'
+                                  }`}
+                                >
+                                  {row.type}
+                                </span>
+                                {row.checked_in_at && (
+                                  <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                    Checked in · {new Date(row.checked_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    {row.checkin_method ? ` (${row.checkin_method})` : ''}
+                                  </span>
+                                )}
+                              </div>
+                              {row.type === 'Guest' && canManageAttendees && row.email && (
+                                <p className="text-[12px] text-[var(--gold-text)] truncate">{row.email}</p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {!row.checked_in_at && canManageAttendees && (
+                              <button
+                                type="button"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  handleHostManualCheckin(row.kind, row.id);
+                                }}
+                                className="kw-btn text-[11px] py-1 px-2.5 rounded-lg border border-[var(--gold)]/50 text-[var(--gold-text)] hover:bg-amber-500/15 font-bold cursor-pointer"
+                              >
+                                Check in
+                              </button>
+                            )}
+                            <span className="text-[11px] text-[var(--fg-subtle)]">
+                              {row.registered_at ? new Date(row.registered_at).toLocaleDateString() : ''}
                             </span>
                           </div>
-                          {row.type === 'Guest' && canManageAttendees && row.email && (
-                            <p className="text-[12px] text-[var(--gold-text)] truncate">{row.email}</p>
-                          )}
                         </div>
-                      </div>
-
-                      <div className="text-[11px] text-[var(--fg-subtle)]">
-                        {row.registered_at ? new Date(row.registered_at).toLocaleDateString() : ''}
-                      </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  )}
+                </>
               );
             })()}
           </div>
@@ -1981,6 +2461,15 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       </div>
                     </div>
 
+                    <label className="flex items-center gap-2 cursor-pointer text-xs text-[var(--fg)] pt-1">
+                      <input
+                        type="checkbox"
+                        checked={formSelfCheckin}
+                        onChange={e => setFormSelfCheckin(e.target.checked)}
+                      />
+                      <span className="font-semibold">Allow self check-in (venue rotating QR code)</span>
+                    </label>
+
                     {/* Contact for attendees */}
                     <div className="space-y-3 pt-2 border-t border-[var(--card-border)]">
                       <div>
@@ -2113,6 +2602,215 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* PERSONAL TICKET MODAL */}
+        {isTicketModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm grid place-items-center p-4">
+            <div className="kw-card max-w-sm w-full p-6 space-y-4 text-center border-[var(--gold)]/40">
+              <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+                <h3 className="font-bold text-sm text-[var(--fg)] flex items-center gap-1.5">
+                  <QrCode className="w-4 h-4 text-[var(--gold-text)]" />
+                  <span>Personal Event Ticket</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsTicketModalOpen(false)}
+                  className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-1">
+                <p className="font-bold text-sm text-[var(--fg)]">{detailedItem.title}</p>
+                <p className="text-xs text-[var(--fg-muted)]">{timeFormatted.display}</p>
+              </div>
+
+              {loadingTicket ? (
+                <p className="text-xs text-[var(--fg-muted)] py-8">Loading ticket...</p>
+              ) : (
+                <div className="space-y-3">
+                  {ticketQrDataUrl && (
+                    <div className="mx-auto w-52 h-52 p-3 rounded-xl bg-white grid place-items-center">
+                      <img src={ticketQrDataUrl} alt="Event Ticket QR" className="w-full h-full object-contain" />
+                    </div>
+                  )}
+                  {ticketCode && (
+                    <div className="p-2.5 rounded-lg bg-[var(--bg)] border border-[var(--card-border)] font-mono text-sm font-bold tracking-widest text-[var(--gold-text)]">
+                      {ticketCode}
+                    </div>
+                  )}
+                  <p className="text-[11px] text-[var(--fg-subtle)]">
+                    Show this QR code to the event host at check-in. Contains no personal data.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* HOST CHECK-IN GUESTS MODAL (Scanner + Manual List) */}
+        {isScannerOpen && (
+          <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm grid place-items-center p-4">
+            <div className="kw-card max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto border-[var(--gold)]/40">
+              <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+                <h3 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">
+                  <Camera className="w-4 h-4 text-[var(--gold-text)]" />
+                  <span>Check in guests — {detailedItem.title}</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsScannerOpen(false)}
+                  className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Camera Viewport */}
+              <div className="relative rounded-xl overflow-hidden bg-black aspect-video border border-[var(--card-border)] grid place-items-center">
+                <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
+                <canvas ref={canvasRef} className="hidden" />
+              </div>
+
+              {/* Scan / Check-in Feedback Banner */}
+              {scanResult && (
+                <div
+                  className={`p-4 rounded-xl border text-xs font-bold flex items-center gap-2.5 ${
+                    scanResult.type === 'success'
+                      ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                      : scanResult.type === 'already'
+                      ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                      : 'bg-rose-500/20 border-rose-500/50 text-rose-300'
+                  }`}
+                >
+                  {scanResult.type === 'success' && <span className="text-lg">✓</span>}
+                  <span>
+                    {scanResult.type === 'success'
+                      ? `✓ ${scanResult.name}`
+                      : scanResult.type === 'already'
+                      ? `Already checked in at ${scanResult.checkedInAt}`
+                      : scanResult.message || 'Not a ticket for this event'}
+                  </span>
+                </div>
+              )}
+
+              {/* Manual Ticket Code Entry */}
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  handleHostCheckinCode(manualTicketCode);
+                }}
+                className="flex items-center gap-2"
+              >
+                <input
+                  type="text"
+                  value={manualTicketCode}
+                  onChange={e => setManualTicketCode(e.target.value)}
+                  placeholder="Enter ticket code or KWG1 payload..."
+                  className="kw-input text-xs flex-1"
+                />
+                <button
+                  type="submit"
+                  className="kw-btn kw-btn-gold text-xs py-2 px-3.5 font-bold rounded-lg cursor-pointer"
+                >
+                  Verify Ticket
+                </button>
+              </form>
+
+              {/* Manual Attendee List with Search */}
+              <div className="space-y-2 pt-2 border-t border-[var(--card-border)]">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-[var(--fg-subtle)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="search"
+                    value={scannerSearch}
+                    onChange={e => setScannerSearch(e.target.value)}
+                    placeholder="Search registered members or guests..."
+                    className="kw-input text-xs pl-8 py-1.5 w-full"
+                  />
+                </div>
+                <div className="max-h-52 overflow-y-auto space-y-1.5">
+                  {[
+                    ...attendees.map((m: any) => ({
+                      id: m.id,
+                      name: m.name || 'Member',
+                      kind: 'member' as const,
+                      checked_in_at: m.checked_in_at
+                    })),
+                    ...combinedGuests.map((g: any) => ({
+                      id: g.id,
+                      name: g.name || 'Guest',
+                      kind: 'guest' as const,
+                      checked_in_at: g.checked_in_at
+                    }))
+                  ]
+                    .filter(r => !scannerSearch.trim() || r.name.toLowerCase().includes(scannerSearch.trim().toLowerCase()))
+                    .map(r => (
+                      <div
+                        key={`${r.kind}-${r.id}`}
+                        className="p-2.5 rounded-lg bg-[var(--bg)] border border-[var(--card-border)] flex items-center justify-between text-xs"
+                      >
+                        <span className="font-semibold text-[var(--fg)]">{r.name}</span>
+                        {r.checked_in_at ? (
+                          <span className="text-emerald-400 font-bold">
+                            ✓ Checked in ({new Date(r.checked_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleHostManualCheckin(r.kind, r.id)}
+                            className="kw-btn kw-btn-gold text-[11px] py-1 px-2.5 rounded font-bold cursor-pointer"
+                          >
+                            Check in
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ROTATING VENUE QR MODAL (Full-screen) */}
+        {isVenueQrOpen && (
+          <div className="fixed inset-0 z-50 bg-[#090D16] text-white flex flex-col items-center justify-center p-6 space-y-6">
+            <button
+              type="button"
+              onClick={() => setIsVenueQrOpen(false)}
+              className="absolute top-6 right-6 kw-btn py-2 px-3 rounded-lg border border-white/20 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+              <span>Exit full screen</span>
+            </button>
+
+            <div className="text-center space-y-2 max-w-lg">
+              <span className="px-3 py-1 rounded-full text-xs font-bold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                Venue Self Check-in
+              </span>
+              <h2 className="text-2xl sm:text-3xl font-bold">{detailedItem.title}</h2>
+              <p className="text-sm text-zinc-400">Scan with your phone camera to check in automatically</p>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-white shadow-2xl grid place-items-center">
+              {venueQrDataUrl ? (
+                <img src={venueQrDataUrl} alt="Venue Check-in QR" className="w-64 h-64 sm:w-80 sm:h-80 object-contain" />
+              ) : (
+                <div className="w-64 h-64 grid place-items-center text-zinc-900 text-xs">Generating QR...</div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-6 text-sm">
+              <span className="px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-bold">
+                {venueCheckedInCount} checked in
+              </span>
+              <span className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-zinc-300 font-mono">
+                Refreshes in {venueCountdown}s
+              </span>
             </div>
           </div>
         )}
@@ -2661,6 +3359,15 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     </div>
                   </div>
 
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-[var(--fg)] pt-1">
+                    <input
+                      type="checkbox"
+                      checked={formSelfCheckin}
+                      onChange={e => setFormSelfCheckin(e.target.checked)}
+                    />
+                    <span className="font-semibold">Allow self check-in (venue rotating QR code)</span>
+                  </label>
+
                   {/* Contact for attendees */}
                   <div className="space-y-3 pt-2 border-t border-[var(--card-border)]">
                     <div>
@@ -2934,6 +3641,15 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       />
                     </div>
                   </div>
+
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-[var(--fg)] pt-1">
+                    <input
+                      type="checkbox"
+                      checked={formSelfCheckin}
+                      onChange={e => setFormSelfCheckin(e.target.checked)}
+                    />
+                    <span className="font-semibold">Allow self check-in (venue rotating QR code)</span>
+                  </label>
 
                   {/* Contact for attendees */}
                   <div className="space-y-3 pt-2 border-t border-[var(--card-border)]">

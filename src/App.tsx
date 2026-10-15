@@ -283,7 +283,11 @@ export default function App() {
       setActiveTab('userProfile');
     } else if (main === 'events') {
       setActiveTab('events');
-      setSelectedEventId(sub || null);
+      setSelectedEventId(sub ? sub.split('?')[0] : null);
+      setViewedProfileId(null);
+    } else if (main === 'checkin' && sub) {
+      setActiveTab('events');
+      setSelectedEventId(sub.split('?')[0]);
       setViewedProfileId(null);
     } else if (['home', 'events', 'learn', 'people', 'feed', 'inbox', 'me', 'setup', 'admin', 'about', 'onboard', 'privacy', 'license'].includes(main)) {
       setActiveTab(main);
