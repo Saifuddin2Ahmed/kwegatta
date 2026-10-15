@@ -1,6 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { Camera, X, Search } from 'lucide-react';
 import { hostCheckinAttendee } from '../services/api';
+import {
+  normalizeTicketCode,
+  isValidTicketCode,
+  formatLiveTicketInput
+} from '../lib/ticketCode';
+import type { ScanFeedbackOutcome } from './QrScanner';
+
+const LazyQrScanner = React.lazy(() => import('./QrScanner'));
 
 interface HostScannerModalProps {
   isOpen: boolean;
@@ -10,6 +18,33 @@ interface HostScannerModalProps {
   attendees: any[];
   combinedGuests: any[];
   onCheckinSuccess: () => void;
+}
+
+function mapServerCheckinError(err: any): string {
+  const status = err?.status;
+  if (status === 409) {
+    return 'Check-in opens 3 hours before the event starts and closes 6 hours after it ends.';
+  }
+  if (status === 404) {
+    return 'This ticket is not for this event.';
+  }
+  if (status === 403) {
+    return 'Only the host can check people in.';
+  }
+  if (status === 503) {
+    return 'Check-in is not configured on the server.';
+  }
+  if (!status) {
+    return 'No connection — try again.';
+  }
+  return err?.message || 'This ticket is not for this event.';
+}
+
+function formatLocalTime(iso?: string): string {
+  if (!iso) return 'earlier';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 export const HostScannerModal: React.FC<HostScannerModalProps> = ({
@@ -30,32 +65,39 @@ export const HostScannerModal: React.FC<HostScannerModalProps> = ({
     message?: string;
   } | null>(null);
 
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  const handleCodeSubmit = async (code: string) => {
-    if (!code.trim()) return;
-    let cleanCode = code.trim();
-    if (cleanCode.startsWith('KWG1:')) {
-      const parts = cleanCode.split(':');
-      if (parts.length >= 3) {
-        cleanCode = parts[2];
-      }
+  useEffect(() => {
+    if (!isOpen) {
+      setScanResult(null);
+      setManualTicketCode('');
     }
+  }, [isOpen]);
+
+  const handleCodeSubmit = async (rawInput: string): Promise<ScanFeedbackOutcome> => {
+    const trimmed = String(rawInput || '').trim();
+    if (!trimmed) return 'retry';
+
+    // Preserve KWG1:<eventId>:<code> prefix if present so the server can reject wrong-event QR payloads with 404
+    const codePayload = /^kwg1:/i.test(trimmed)
+      ? trimmed
+      : normalizeTicketCode(trimmed);
+
     try {
-      const res = await hostCheckinAttendee(eventId, { code: cleanCode });
+      const res = await hostCheckinAttendee(eventId, { code: codePayload });
+      const isAlready = res.status === 'already';
       setScanResult({
-        type: res.status === 'already' ? 'already' : 'success',
+        type: isAlready ? 'already' : 'success',
         name: res.name,
         checkedInAt: res.checked_in_at
       });
       setManualTicketCode('');
       onCheckinSuccess();
+      return isAlready ? 'already' : 'ok';
     } catch (err: any) {
       setScanResult({
         type: 'error',
-        message: err.message || 'Invalid or unassigned ticket'
+        message: mapServerCheckinError(err)
       });
+      return 'retry';
     }
   };
 
@@ -71,128 +113,73 @@ export const HostScannerModal: React.FC<HostScannerModalProps> = ({
     } catch (err: any) {
       setScanResult({
         type: 'error',
-        message: err.message || 'Check-in failed'
+        message: mapServerCheckinError(err)
       });
     }
   };
 
-  useEffect(() => {
-    if (!isOpen) return;
-    let stream: MediaStream | null = null;
-    let active = true;
-    let animId: number | null = null;
-    let lastScanned = '';
-
-    const startCamera = async () => {
-      if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) return;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' }
-        });
-        if (!active) {
-          stream.getTracks().forEach(t => t.stop());
-          return;
-        }
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => {});
-        }
-
-        const BarcodeDetectorCtor = (window as any).BarcodeDetector;
-        const detector = BarcodeDetectorCtor ? new BarcodeDetectorCtor({ formats: ['qr_code'] }) : null;
-
-        let jsQRFn: any = null;
-        if (!detector) {
-          try {
-            const mod = await import('jsqr');
-            jsQRFn = mod.default || mod;
-          } catch {}
-        }
-
-        const tick = async () => {
-          if (!active) return;
-          const video = videoRef.current;
-          if (video && video.readyState >= 2) {
-            try {
-              if (detector) {
-                const codes = await detector.detect(video);
-                if (codes && codes.length > 0 && codes[0].rawValue) {
-                  const val = String(codes[0].rawValue);
-                  if (val !== lastScanned) {
-                    lastScanned = val;
-                    await handleCodeSubmit(val);
-                  }
-                }
-              } else if (canvasRef.current && jsQRFn) {
-                const canvas = canvasRef.current;
-                const w = video.videoWidth || 320;
-                const h = video.videoHeight || 240;
-                canvas.width = w;
-                canvas.height = h;
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                  ctx.drawImage(video, 0, 0, w, h);
-                  const imgData = ctx.getImageData(0, 0, w, h);
-                  const qr = jsQRFn(imgData.data, w, h);
-                  if (qr && qr.data && qr.data !== lastScanned) {
-                    lastScanned = qr.data;
-                    await handleCodeSubmit(qr.data);
-                  }
-                }
-              }
-            } catch {}
-          }
-          if (active) {
-            animId = window.setTimeout(tick, 400) as unknown as number;
-          }
-        };
-
-        tick();
-      } catch (e) {
-        console.warn('Camera stream error:', e);
-      }
-    };
-
-    startCamera();
-
-    return () => {
-      active = false;
-      if (animId !== null) clearTimeout(animId);
-      if (stream) {
-        stream.getTracks().forEach(t => t.stop());
-      }
-    };
-  }, [isOpen, eventId]);
-
   if (!isOpen) return null;
+
+  const allRegistrants = [
+    ...attendees.map((m: any) => ({
+      id: m.id,
+      name: m.name || 'Member',
+      kind: 'member' as const,
+      checked_in_at: m.checked_in_at
+    })),
+    ...combinedGuests.map((g: any) => ({
+      id: g.id,
+      name: g.name || 'Guest',
+      kind: 'guest' as const,
+      checked_in_at: g.checked_in_at
+    }))
+  ];
+
+  const totalCount = allRegistrants.length;
+  const checkedInCount = allRegistrants.filter(r => Boolean(r.checked_in_at)).length;
+  const normalizedManual = normalizeTicketCode(manualTicketCode);
+  const isManualCodeValid = isValidTicketCode(normalizedManual);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm grid place-items-center p-4">
       <div className="kw-card max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto border-[var(--gold)]/40">
-        <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
-          <h3 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">
-            <Camera className="w-4 h-4 text-[var(--gold-text)]" />
-            <span>Check in guests — {eventTitle}</span>
-          </h3>
+        <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3 gap-2">
+          <div className="space-y-0.5">
+            <h3 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">
+              <Camera className="w-4 h-4 text-[var(--gold-text)]" />
+              <span>Check in guests — {eventTitle}</span>
+            </h3>
+            <p className="text-xs font-semibold text-[var(--gold-text)]" data-testid="checkin-live-counter">
+              Checked in {checkedInCount} / {totalCount}
+            </p>
+          </div>
           <button
             type="button"
             onClick={onClose}
             className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
+            aria-label="Close scanner"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Camera Viewport */}
-        <div className="relative rounded-xl overflow-hidden bg-black aspect-video border border-[var(--card-border)] grid place-items-center">
-          <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
-          <canvas ref={canvasRef} className="hidden" />
-        </div>
+        {/* Shared QR Scanner with Viewfinder */}
+        <Suspense
+          fallback={
+            <div className="w-full max-w-[360px] mx-auto aspect-square rounded-2xl bg-[#070B12] border border-[var(--card-border)] grid place-items-center text-xs text-[var(--fg-muted)]">
+              Starting camera…
+            </div>
+          }
+        >
+          <LazyQrScanner onDetect={handleCodeSubmit} />
+        </Suspense>
 
-        {/* Scan / Check-in Feedback Banner */}
+        {/* Large & Clear Scan / Check-in Result Card */}
         {scanResult && (
           <div
-            className={`p-4 rounded-xl border text-xs font-bold flex items-center gap-2.5 ${
+            role="status"
+            data-testid="scanner-result-card"
+            className={`p-4 rounded-xl border text-sm font-bold flex items-center gap-3 ${
               scanResult.type === 'success'
                 ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
                 : scanResult.type === 'already'
@@ -200,13 +187,12 @@ export const HostScannerModal: React.FC<HostScannerModalProps> = ({
                 : 'bg-rose-500/20 border-rose-500/50 text-rose-300'
             }`}
           >
-            {scanResult.type === 'success' && <span className="text-lg">✓</span>}
             <span>
               {scanResult.type === 'success'
-                ? `✓ ${scanResult.name}`
+                ? `✓ Checked in — ${scanResult.name}`
                 : scanResult.type === 'already'
-                ? `Already checked in at ${scanResult.checkedInAt}`
-                : scanResult.message || 'Not a ticket for this event'}
+                ? `Already checked in at ${formatLocalTime(scanResult.checkedInAt)}`
+                : scanResult.message || 'This ticket is not for this event.'}
             </span>
           </div>
         )}
@@ -215,6 +201,7 @@ export const HostScannerModal: React.FC<HostScannerModalProps> = ({
         <form
           onSubmit={e => {
             e.preventDefault();
+            if (!isManualCodeValid) return;
             handleCodeSubmit(manualTicketCode);
           }}
           className="flex items-center gap-2"
@@ -222,15 +209,22 @@ export const HostScannerModal: React.FC<HostScannerModalProps> = ({
           <input
             type="text"
             value={manualTicketCode}
-            onChange={e => setManualTicketCode(e.target.value)}
-            placeholder="Enter ticket code or KWG1 payload..."
-            className="kw-input text-xs flex-1"
+            onChange={e => setManualTicketCode(formatLiveTicketInput(e.target.value))}
+            placeholder="ABCDE-FGHIJ"
+            autoCapitalize="characters"
+            autoComplete="off"
+            autoCorrect="off"
+            spellCheck={false}
+            maxLength={14}
+            aria-label="Ticket code"
+            className="kw-input text-xs font-mono tracking-wider uppercase flex-1"
           />
           <button
             type="submit"
-            className="kw-btn kw-btn-gold text-xs py-2 px-3.5 font-bold rounded-lg cursor-pointer"
+            disabled={!isManualCodeValid}
+            className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Verify Ticket
+            Check in
           </button>
         </form>
 
@@ -247,21 +241,12 @@ export const HostScannerModal: React.FC<HostScannerModalProps> = ({
             />
           </div>
           <div className="max-h-52 overflow-y-auto space-y-1.5">
-            {[
-              ...attendees.map((m: any) => ({
-                id: m.id,
-                name: m.name || 'Member',
-                kind: 'member' as const,
-                checked_in_at: m.checked_in_at
-              })),
-              ...combinedGuests.map((g: any) => ({
-                id: g.id,
-                name: g.name || 'Guest',
-                kind: 'guest' as const,
-                checked_in_at: g.checked_in_at
-              }))
-            ]
-              .filter(r => !scannerSearch.trim() || r.name.toLowerCase().includes(scannerSearch.trim().toLowerCase()))
+            {allRegistrants
+              .filter(
+                r =>
+                  !scannerSearch.trim() ||
+                  r.name.toLowerCase().includes(scannerSearch.trim().toLowerCase())
+              )
               .map(r => (
                 <div
                   key={`${r.kind}-${r.id}`}
@@ -270,7 +255,7 @@ export const HostScannerModal: React.FC<HostScannerModalProps> = ({
                   <span className="font-semibold text-[var(--fg)]">{r.name}</span>
                   {r.checked_in_at ? (
                     <span className="text-emerald-400 font-bold">
-                      ✓ Checked in ({new Date(r.checked_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                      ✓ Checked in ({formatLocalTime(r.checked_in_at)})
                     </span>
                   ) : (
                     <button

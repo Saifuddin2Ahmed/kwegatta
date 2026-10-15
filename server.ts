@@ -10,6 +10,7 @@ import { getAuth as getAdminAuth, type Auth as AdminAuth } from 'firebase-admin/
 import nodemailer from 'nodemailer';
 import { ISO_COUNTRIES, deriveLocation } from './src/lib/countries';
 import { ROLE_CHOICES, STAGE_CHOICES, INTENT_CHOICES, normalizeIntent } from './src/lib/profileChoices';
+import { normalizeTicketCode, isValidTicketCode, formatTicketCode } from './src/lib/ticketCode';
 
 export function filterRoles(inputRoles: any, existingRoles: string[] = []): string[] {
   if (!Array.isArray(inputRoles)) return existingRoles;
@@ -5302,7 +5303,7 @@ export function deriveTicketCode(eventId: string, holderKey: string, salt: strin
 }
 
 export function hashTicketCode(code: string): string {
-  return crypto.createHash('sha256').update(String(code).trim().toUpperCase()).digest('hex');
+  return crypto.createHash('sha256').update(normalizeTicketCode(code)).digest('hex');
 }
 
 export function isWithinCheckinWindow(item: any, nowMs: number = Date.now()): boolean {
@@ -7321,15 +7322,15 @@ app.post('/api/events/:id/checkin', async (req: Request, res: Response) => {
   let method: 'host_scan' | 'manual' = 'host_scan';
 
   if (typeof body.code === 'string' && body.code.trim()) {
-    let rawCode = body.code.trim();
-    if (rawCode.toUpperCase().startsWith('KWG1:')) {
+    const rawCode = body.code.trim();
+    if (/^kwg1:/i.test(rawCode)) {
       const parts = rawCode.split(':');
       if (parts.length < 3 || parts[1] !== id) {
         return res.status(404).json({ error: 'Not a ticket for this event' });
       }
-      rawCode = parts[2].trim();
     }
-    const candidateHash = hashTicketCode(rawCode);
+    const normalizedCode = normalizeTicketCode(rawCode);
+    const candidateHash = hashTicketCode(normalizedCode);
 
     // Search active member attendees of this event
     for (const attId of attendeeIds) {

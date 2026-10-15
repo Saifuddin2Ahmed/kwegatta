@@ -4,6 +4,15 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.2] - 2026-10-15
+
+### Added & Fixed (Release 1.9.2)
+- **Check-in scanner: viewfinder, faster auto-capture, clear camera errors; typo-tolerant ticket codes**:
+  - Created shared `src/components/QrScanner.tsx` with a square viewfinder, gold corner brackets, dimmed outer mask, scan line animation (`prefers-reduced-motion` safe), ~120ms `requestAnimationFrame` decode loop (`BarcodeDetector` with cropped `480×480` `jsQR` fallback), audio/haptic feedback, 1.5s post-detect flash & auto-resume, and a 3s per-code cooldown.
+  - Added clear camera status states ("Starting camera…", permission denied instructions with "Try again", "No camera available — use the ticket code below.", and "Switch camera").
+  - Updated `HostScannerModal.tsx` with live `"Checked in X / Y"` counter, clear status-mapped error messages (409, 404, 403, 503, network), and auto-formatted manual code input (`ABCDE-FGHIJ`).
+  - Added shared `src/lib/ticketCode.ts` (`normalizeTicketCode`, `isValidTicketCode`, `formatTicketCode`) used across server and client so lowercase, spaces, hyphens, `KWG1:` payloads, and `0→O`/`1→I`/`8→B` substitutions resolve seamlessly.
+
 ## [1.9.1] - 2026-10-15
 
 ### Fixed (Release 1.9.1)

@@ -277,8 +277,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.9.1
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.9.1'");
+    // 1. Cache name includes version kwegatta-1.9.2
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.9.2'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -5317,6 +5317,288 @@ describe('Release 1.5.0 Features', () => {
         expect(iconSvg?.classList.contains('w-4')).toBe(true);
         expect(iconSvg?.classList.contains('pointer-events-none')).toBe(true);
         // Icon occupies 14px (left-3.5) + 16px (w-4) = 30px; input padding-left is pl-10 (2.5rem = 40px >= 36px), leaving 10px gap with zero overlap
+      });
+    });
+
+    describe('Release 1.9.2: Check-in Scanner Viewfinder, Auto-Capture & Typo-Tolerant Ticket Codes', () => {
+      it('a) Unit tests for normalizeTicketCode (lowercase, spaces, dashes, KWG1 payload, 0/1/8 mapping), isValidTicketCode, formatTicketCode', async () => {
+        const { normalizeTicketCode, isValidTicketCode, formatTicketCode } = await import('../src/lib/ticketCode');
+
+        // Lowercase, spaces, dashes, dots, underscores
+        expect(normalizeTicketCode('  abcde - fghij  ')).toBe('ABCDEFGHIJ');
+        expect(normalizeTicketCode('abcde_fgh.ij')).toBe('ABCDEFGHIJ');
+
+        // KWG1 payload extraction (any case)
+        expect(normalizeTicketCode('KWG1:ev-123:abcde-fghij')).toBe('ABCDEFGHIJ');
+        expect(normalizeTicketCode('kwg1:ev-999:23456 7abcd')).toBe('234567ABCD');
+
+        // 0 -> O, 1 -> I, 8 -> B lookalike digit mapping
+        expect(normalizeTicketCode('018ab-cde23')).toBe('OIBABCDE23');
+        expect(normalizeTicketCode('KWG1:ev-1:0180182345')).toBe('OIBOIB2345');
+
+        // isValidTicketCode: exactly 10 chars of A-Z and 2-7
+        expect(isValidTicketCode('ABCDEFGH23')).toBe(true);
+        expect(isValidTicketCode('OIBOIB2345')).toBe(true);
+        expect(isValidTicketCode('ABCDE')).toBe(false);
+        expect(isValidTicketCode('ABCDEFGHIJKL')).toBe(false);
+        expect(isValidTicketCode('ABCDEFGH01')).toBe(false); // raw unnormalized 0/1 invalid until normalized
+        expect(isValidTicketCode('ABCDEFGH89')).toBe(false); // 8/9 invalid in raw Base32
+
+        // formatTicketCode: "ABCDE-FGHIJ"
+        expect(formatTicketCode('abcdefghij')).toBe('ABCDE-FGHIJ');
+        expect(formatTicketCode('018ab cde23')).toBe('OIBAB-CDE23');
+      });
+
+      it('b) Server test: a code typed as "abcde fghij" or "ABCDE-FGHIJ" checks in the same attendee as the raw code; wrong event KWG1 -> 404; outside window -> 409', async () => {
+        const { deriveTicketCode, hashTicketCode } = await import('../server');
+        const { formatTicketCode } = await import('../src/lib/ticketCode');
+
+        const now = Date.now();
+        const hostId = 'host-192-' + now;
+        const att1Id = 'att1-192-' + now;
+        const att2Id = 'att2-192-' + now;
+        const evId = 'ev-192-' + now;
+        const evOutsideId = 'ev-192-outside-' + now;
+
+        store.profiles.push(
+          { id: hostId, account_uid: hostId, name: 'Host 192', role: 'Founder' },
+          { id: att1Id, account_uid: att1Id, name: 'Attendee One 192', role: 'Developer' },
+          { id: att2Id, account_uid: att2Id, name: 'Attendee Two 192', role: 'Designer' }
+        );
+
+        const rsvpTime1 = new Date(now - 60000).toISOString();
+        const rsvpTime2 = new Date(now - 30000).toISOString();
+        const rawCode1 = deriveTicketCode(evId, `member:${att1Id}`, rsvpTime1);
+        const rawCode2 = deriveTicketCode(evId, `member:${att2Id}`, rsvpTime2);
+
+        store.events.push(
+          {
+            id: evId,
+            kind: 'event',
+            title: 'Scanner Checkin Test Event',
+            author_id: hostId,
+            starts_at: new Date(now + 30 * 60 * 1000).toISOString(),
+            ends_at: new Date(now + 120 * 60 * 1000).toISOString(),
+            attendee_ids: [att1Id, att2Id],
+            rsvp_times: { [att1Id]: rsvpTime1, [att2Id]: rsvpTime2 },
+            member_ticket_hashes: {
+              [att1Id]: hashTicketCode(rawCode1),
+              [att2Id]: hashTicketCode(rawCode2)
+            },
+            published: true,
+            status: 'approved'
+          },
+          {
+            id: evOutsideId,
+            kind: 'event',
+            title: 'Far Future Event Outside Window',
+            author_id: hostId,
+            starts_at: new Date(now + 48 * 3600 * 1000).toISOString(),
+            ends_at: new Date(now + 50 * 3600 * 1000).toISOString(),
+            attendee_ids: [att1Id],
+            rsvp_times: { [att1Id]: rsvpTime1 },
+            member_ticket_hashes: { [att1Id]: hashTicketCode(rawCode1) },
+            published: true,
+            status: 'approved'
+          }
+        );
+
+        // 1. Code typed as lowercase with space "abcde fghij" checks in Attendee One
+        const spacedLower = `${rawCode1.slice(0, 5).toLowerCase()} ${rawCode1.slice(5).toLowerCase()}`;
+        const res1 = await fetch(`${baseUrl}/api/events/${evId}/checkin`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${hostId}`
+          },
+          body: JSON.stringify({ code: spacedLower })
+        });
+        expect(res1.status).toBe(200);
+        const data1 = await res1.json();
+        expect(data1.status).toBe('checked_in');
+        expect(data1.name).toBe('Attendee One 192');
+
+        // 2. Submitting the same attendee's code formatted as "ABCDE-FGHIJ" recognizes the same attendee ("already")
+        const dashedCode1 = formatTicketCode(rawCode1);
+        const res1Again = await fetch(`${baseUrl}/api/events/${evId}/checkin`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${hostId}`
+          },
+          body: JSON.stringify({ code: dashedCode1 })
+        });
+        expect(res1Again.status).toBe(200);
+        const data1Again = await res1Again.json();
+        expect(data1Again.status).toBe('already');
+        expect(data1Again.name).toBe('Attendee One 192');
+
+        // 3. Code with 0/1/8 substituted for O/I/B and dash checks in Attendee Two
+        const typoCode2 = formatTicketCode(rawCode2)
+          .replace(/O/g, '0')
+          .replace(/I/g, '1')
+          .replace(/B/g, '8');
+        const res2 = await fetch(`${baseUrl}/api/events/${evId}/checkin`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${hostId}`
+          },
+          body: JSON.stringify({ code: typoCode2 })
+        });
+        expect(res2.status).toBe(200);
+        const data2 = await res2.json();
+        expect(data2.status).toBe('checked_in');
+        expect(data2.name).toBe('Attendee Two 192');
+
+        // 4. Wrong event KWG1 payload -> 404
+        const resWrongEv = await fetch(`${baseUrl}/api/events/${evId}/checkin`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${hostId}`
+          },
+          body: JSON.stringify({ code: `KWG1:wrong-event-id:${rawCode1}` })
+        });
+        expect(resWrongEv.status).toBe(404);
+
+        // 5. Outside check-in window -> 409
+        const resOutside = await fetch(`${baseUrl}/api/events/${evOutsideId}/checkin`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${hostId}`
+          },
+          body: JSON.stringify({ code: rawCode1 })
+        });
+        expect(resOutside.status).toBe(409);
+      });
+
+      it('c) Component test: QrScanner shows permission-denied message when getUserMedia rejects with NotAllowedError, and the same QR text is accepted again after the 3 s cooldown (fake timers)', async () => {
+        const { QrScanner } = await import('../src/components/QrScanner');
+
+        const origMediaDevices = navigator.mediaDevices;
+        const origBarcodeDetector = (window as any).BarcodeDetector;
+        const origRaf = window.requestAnimationFrame;
+        const origCaf = window.cancelAnimationFrame;
+
+        try {
+          // Part 1: Permission denied when getUserMedia rejects with NotAllowedError
+          const notAllowedErr = Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' });
+          const mockGetUserMediaDenied = vi.fn().mockRejectedValue(notAllowedErr);
+
+          Object.defineProperty(navigator, 'mediaDevices', {
+            configurable: true,
+            writable: true,
+            value: {
+              getUserMedia: mockGetUserMediaDenied,
+              enumerateDevices: vi.fn().mockResolvedValue([])
+            }
+          });
+
+          const onDetectDenied = vi.fn().mockResolvedValue('ok');
+          const { unmount } = render(React.createElement(QrScanner, { onDetect: onDetectDenied }));
+
+          await act(async () => {
+            await Promise.resolve();
+            await Promise.resolve();
+          });
+
+          expect(
+            screen.getByText(
+              /Camera access is blocked\. Allow camera for kwegatta\.ai\.studio in your browser settings, then tap Try again\./i
+            )
+          ).toBeTruthy();
+          expect(screen.getByRole('button', { name: /Try again/i })).toBeTruthy();
+
+          unmount();
+
+          // Part 2: Cooldown — same QR text ignored within 3s and accepted again after 3s (fake timers)
+          vi.useFakeTimers();
+
+          const mockTrack = {
+            stop: vi.fn(),
+            getCapabilities: () => ({ focusMode: ['continuous'] }),
+            applyConstraints: vi.fn().mockResolvedValue(undefined)
+          };
+          const mockStream = {
+            getTracks: () => [mockTrack],
+            getVideoTracks: () => [mockTrack]
+          };
+
+          Object.defineProperty(navigator, 'mediaDevices', {
+            configurable: true,
+            writable: true,
+            value: {
+              getUserMedia: vi.fn().mockResolvedValue(mockStream),
+              enumerateDevices: vi.fn().mockResolvedValue([{ kind: 'videoinput', deviceId: 'cam1' }])
+            }
+          });
+
+          // Force video readyState >= 2 in JSDOM
+          const readyStateSpy = vi
+            .spyOn(HTMLMediaElement.prototype, 'readyState', 'get')
+            .mockReturnValue(4);
+          const playSpy = vi
+            .spyOn(HTMLMediaElement.prototype, 'play')
+            .mockResolvedValue(undefined);
+
+          const detectMock = vi.fn().mockResolvedValue([{ rawValue: 'KWG1:ev-1:ABCDEFGH23' }]);
+          class MockBarcodeDetector {
+            static getSupportedFormats() {
+              return Promise.resolve(['qr_code']);
+            }
+            detect(video: any) {
+              return detectMock(video);
+            }
+          }
+          (window as any).BarcodeDetector = MockBarcodeDetector;
+
+          window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+            return setTimeout(() => cb(Date.now()), 50) as unknown as number;
+          }) as any;
+          window.cancelAnimationFrame = ((id: number) => {
+            clearTimeout(id as any);
+          }) as any;
+
+          const onDetectCooldown = vi.fn().mockResolvedValue('ok');
+          const { unmount: unmount2 } = render(
+            React.createElement(QrScanner, { onDetect: onDetectCooldown })
+          );
+
+          // Advance initial camera start + first frame detection
+          await act(async () => {
+            await vi.advanceTimersByTimeAsync(250);
+          });
+          expect(onDetectCooldown).toHaveBeenCalledTimes(1);
+          expect(onDetectCooldown).toHaveBeenLastCalledWith('KWG1:ev-1:ABCDEFGH23');
+
+          // Advance 1.8s (past the 1.5s post-detect pause, but still within the 3s same-code cooldown)
+          await act(async () => {
+            await vi.advanceTimersByTimeAsync(1800);
+          });
+          expect(onDetectCooldown).toHaveBeenCalledTimes(1);
+
+          // Advance past the 3s cooldown (total > 3.2s) -> same QR text is accepted again
+          await act(async () => {
+            await vi.advanceTimersByTimeAsync(1500);
+          });
+          expect(onDetectCooldown).toHaveBeenCalledTimes(2);
+
+          unmount2();
+          readyStateSpy.mockRestore();
+          playSpy.mockRestore();
+        } finally {
+          vi.useRealTimers();
+          Object.defineProperty(navigator, 'mediaDevices', {
+            configurable: true,
+            writable: true,
+            value: origMediaDevices
+          });
+          (window as any).BarcodeDetector = origBarcodeDetector;
+          window.requestAnimationFrame = origRaf;
+          window.cancelAnimationFrame = origCaf;
+        }
       });
     });
   });

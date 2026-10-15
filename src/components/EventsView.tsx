@@ -34,9 +34,11 @@ import {
   Tag,
   QrCode,
   ThumbsUp,
-  ThumbsDown
+  ThumbsDown,
+  Copy
 } from 'lucide-react';
 import { EventOpportunityItem, OpportunityType, Profile, EventQuestion, EventGuest } from '../types';
+import { formatTicketCode } from '../lib/ticketCode';
 
 const HostScannerModal = lazy(() => import('./HostScannerModal'));
 import { Avatar } from './Avatar';
@@ -2997,8 +2999,25 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     </div>
                   )}
                   {ticketCode && (
-                    <div className="p-2.5 rounded-lg bg-[var(--bg)] border border-[var(--card-border)] font-mono text-sm font-bold tracking-widest text-[var(--gold-text)]">
-                      {ticketCode}
+                    <div className="space-y-2">
+                      <div
+                        data-testid="my-ticket-formatted-code"
+                        className="p-3 rounded-lg bg-[var(--bg)] border border-[var(--card-border)] font-mono text-lg font-bold tracking-widest text-[var(--gold-text)] select-all"
+                      >
+                        {formatTicketCode(ticketCode)}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const formatted = formatTicketCode(ticketCode);
+                          navigator.clipboard?.writeText(formatted).catch(() => {});
+                          onToast('Ticket code copied!');
+                        }}
+                        className="kw-btn kw-btn-ghost text-xs py-1.5 px-3 rounded-lg border border-[var(--card-border)] inline-flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Copy className="w-3.5 h-3.5 text-[var(--gold-text)]" />
+                        <span>Copy code</span>
+                      </button>
                     </div>
                   )}
                   <p className="text-[11px] text-[var(--fg-subtle)]">
