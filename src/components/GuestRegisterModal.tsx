@@ -6,7 +6,8 @@ export interface GuestRegisterModalProps {
   isOpen: boolean;
   onClose: () => void;
   eventId: string;
-  onSuccess: (token: string) => void;
+  isWaitlist?: boolean;
+  onSuccess: (token: string, status?: 'going' | 'registered' | 'waitlisted' | 'waitlist', position?: number) => void;
   onToast: (msg: string) => void;
   onJoinClick?: () => void;
   triggerRef?: React.RefObject<HTMLButtonElement | null>;
@@ -16,6 +17,7 @@ export const GuestRegisterModal: React.FC<GuestRegisterModalProps> = ({
   isOpen,
   onClose,
   eventId,
+  isWaitlist = false,
   onSuccess,
   onToast,
   onJoinClick,
@@ -104,7 +106,7 @@ export const GuestRegisterModal: React.FC<GuestRegisterModalProps> = ({
         setGuestEmail('');
         setGuestAgree(false);
         setGuestWebsite('');
-        onSuccess(res.token);
+        onSuccess(res.token, res.status || 'going', res.position);
       }
     } catch (err: any) {
       onToast(err?.message || 'Failed to register');
@@ -126,8 +128,12 @@ export const GuestRegisterModal: React.FC<GuestRegisterModalProps> = ({
       >
         <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
           <div>
-            <h3 className="font-bold text-sm text-[var(--fg)]">Register for event</h3>
-            <p className="text-xs text-[var(--fg-muted)]">No account needed.</p>
+            <h3 className="font-bold text-sm text-[var(--fg)]">
+              {isWaitlist ? 'Join waitlist as guest' : 'Register for event'}
+            </h3>
+            <p className="text-xs text-[var(--fg-muted)]">
+              {isWaitlist ? "No account needed — you'll be promoted automatically if a spot opens." : 'No account needed.'}
+            </p>
           </div>
           <button
             type="button"
@@ -207,7 +213,7 @@ export const GuestRegisterModal: React.FC<GuestRegisterModalProps> = ({
               disabled={submittingGuest}
               className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold w-full cursor-pointer"
             >
-              {submittingGuest ? 'Registering...' : 'Register'}
+              {submittingGuest ? 'Submitting...' : isWaitlist ? 'Join waitlist as guest' : 'Register'}
             </button>
             <div className="flex items-center justify-between text-[13px] pt-1">
               {onJoinClick && (

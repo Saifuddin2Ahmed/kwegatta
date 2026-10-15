@@ -139,8 +139,10 @@ export interface NotificationItem {
   id: string;
   to_id: string;
   from_id?: string | null;
-  type: 'match' | 'follow' | 'connect' | 'welcome' | 'digest';
+  type: 'match' | 'follow' | 'connect' | 'welcome' | 'digest' | 'moderation' | 'question' | 'question_reply' | 'waitlist_promoted';
   body: string;
+  event_id?: string;
+  link?: string;
   read: boolean;
   created_at: string;
 }
@@ -183,6 +185,20 @@ export interface EventReport {
   created_at: string;
 }
 
+export interface EventWaitlistEntry {
+  position: number;
+  kind: 'member' | 'guest';
+  type: 'member' | 'guest';
+  id: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  avatar?: string;
+  role?: string;
+  headline?: string;
+  created_at: string;
+}
+
 export interface EventOpportunityItem {
   id: string;
   kind: 'event' | 'opportunity';
@@ -209,6 +225,10 @@ export interface EventOpportunityItem {
   contact_phone?: string; // WhatsApp or phone (international format)
   contact_email?: string; // valid host email
   capacity?: number; // optional maximum attendees capacity
+  waitlist_enabled?: boolean;
+  waitlist_count?: number;
+  my_waitlist_position?: number | null;
+  waitlist?: EventWaitlistEntry[];
   guest_count?: number; // count of guest registrations
   tags?: string[]; // up to 5 sanitized event tags
   venue?: string; // physical venue/address for in_person or hybrid

@@ -68,6 +68,8 @@ import {
   deleteEventQuestion,
   cancelEventGuest,
   fetchEventGuests,
+  deleteEventGuest,
+  removeEventAttendee,
   exportEventAttendeesCsv,
   fetchMyEventTicket,
   checkinEventAttendee,
@@ -227,6 +229,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [formRegLink, setFormRegLink] = useState('');
   const [formMapLink, setFormMapLink] = useState('');
   const [formCapacity, setFormCapacity] = useState('');
+  const [formWaitlistEnabled, setFormWaitlistEnabled] = useState(true);
   const [formTagsInput, setFormTagsInput] = useState('');
   const [formSelfCheckin, setFormSelfCheckin] = useState(false);
   const [formContactPhone, setFormContactPhone] = useState('');
@@ -506,17 +509,21 @@ export const EventsView: React.FC<EventsViewProps> = ({
     try {
       const res = await rsvpEvent(itemId);
       if (res.success) {
+        const isWaitlisted = res.status === 'waitlisted' || res.status === 'waitlist';
+        const isLeftWaitlist = res.status === 'left_waitlist';
         if (detailedItem && detailedItem.id === itemId) {
           setDetailedItem((prev: any) => {
             if (!prev) return prev;
             const updatedAttendeeIds = res.is_attending
-              ? [...(prev.attendee_ids || []), currentProfile.id]
+              ? Array.from(new Set([...(prev.attendee_ids || []), currentProfile.id]))
               : (prev.attendee_ids || []).filter((id: string) => id !== currentProfile.id);
             return {
               ...prev,
               is_attending: res.is_attending,
               attendee_count: res.attendee_count ?? updatedAttendeeIds.length,
-              attendee_ids: updatedAttendeeIds
+              attendee_ids: updatedAttendeeIds,
+              waitlist_count: res.waitlist_count ?? prev.waitlist_count ?? 0,
+              my_waitlist_position: isWaitlisted ? (res.position ?? res.my_waitlist_position ?? 1) : null
             };
           });
         }
@@ -524,14 +531,28 @@ export const EventsView: React.FC<EventsViewProps> = ({
         setItems(prev =>
           prev.map(it => {
             if (it.id !== itemId) return it;
+            const prevIds = Array.isArray(it.attendee_ids) ? it.attendee_ids : [];
             const newAttendees = res.is_attending
-              ? [...it.attendee_ids, currentProfile.id]
-              : it.attendee_ids.filter(id => id !== currentProfile.id);
-            return { ...it, attendee_ids: newAttendees };
+              ? Array.from(new Set([...prevIds, currentProfile.id]))
+              : prevIds.filter(id => id !== currentProfile.id);
+            return {
+              ...it,
+              attendee_ids: newAttendees,
+              attendee_count: res.attendee_count ?? newAttendees.length,
+              waitlist_count: res.waitlist_count ?? it.waitlist_count ?? 0,
+              my_waitlist_position: isWaitlisted ? (res.position ?? res.my_waitlist_position ?? 1) : null
+            };
           })
         );
 
-        onToast(res.is_attending ? "You're attending! Matches updated." : 'RSVP updated.');
+        if (isWaitlisted) {
+          onToast(`You're #${res.position || 1} on the waitlist — we'll notify you if a spot opens.`);
+        } else if (isLeftWaitlist) {
+          onToast('Removed from waitlist.');
+        } else {
+          onToast(res.is_attending ? "You're attending! Matches updated." : 'RSVP updated.');
+        }
+
         if (selectedItemId === itemId) {
           const guestToken = getGuestToken(itemId);
           fetchEventById(itemId, guestToken).then(fresh => {
@@ -548,7 +569,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
   const handleShare = (item: EventOpportunityItem, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    const shareUrl = `${PUBLIC_APP_URL}/#/events/${item.id}`;
+    const shareUrl = `${PUBLIC_APP_URL}/e/${item.id}`;
     if (navigator.share) {
       navigator.share({
         title: item.title,
@@ -581,6 +602,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
     setFormRegLink('');
     setFormMapLink('');
     setFormCapacity('');
+    setFormWaitlistEnabled(true);
     setFormTagsInput('');
     setFormSelfCheckin(false);
     setFormContactPhone('');
@@ -621,6 +643,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
     setFormJoinLink(item.join_link || '');
     setFormMapLink(item.map_link || '');
     setFormCapacity(item.capacity ? String(item.capacity) : '');
+    setFormWaitlistEnabled(item.waitlist_enabled !== false);
     setFormTagsInput(Array.isArray(item.tags) ? item.tags.join(', ') : '');
     setFormSelfCheckin(Boolean(item.self_checkin_enabled));
     setFormContactPhone(item.contact_phone || '');
@@ -789,6 +812,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
       if (formCapacity.trim()) {
         payload.capacity = Number(formCapacity.trim());
       }
+      payload.waitlist_enabled = formWaitlistEnabled;
       payload.cover_image = formCoverImage.trim() || undefined;
       payload.registration_link = formRegLink.trim() || undefined;
       payload.self_checkin_enabled = formSelfCheckin;
@@ -938,6 +962,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
       patch.cover_image = formCoverImage.trim() || undefined;
       patch.registration_link = formRegLink.trim() || undefined;
       patch.self_checkin_enabled = formSelfCheckin;
+      patch.waitlist_enabled = formWaitlistEnabled;
     } else {
       patch.opportunity_type = formOppType;
       patch.deadline = formDeadline.trim();
@@ -1041,9 +1066,14 @@ export const EventsView: React.FC<EventsViewProps> = ({
     }
   };
 
-  const handleGuestSuccess = (token: string) => {
+  const handleGuestSuccess = (token: string, status?: 'going' | 'registered' | 'waitlisted' | 'waitlist', position?: number) => {
     setIsGuestModalOpen(false);
-    onToast("You're registered!");
+    const isWaitlisted = status === 'waitlisted' || status === 'waitlist';
+    if (isWaitlisted) {
+      onToast(`You're #${position || 1} on the waitlist — we'll email you if a spot opens.`);
+    } else {
+      onToast("You're registered!");
+    }
     if (selectedItemId) {
       fetchEventById(selectedItemId, token).then(fresh => {
         if (fresh) {
@@ -1053,13 +1083,15 @@ export const EventsView: React.FC<EventsViewProps> = ({
             prev
               ? {
                   ...prev,
-                  attendee_count: (prev.attendee_count || 0) + 1,
-                  guest_info: { token }
+                  attendee_count: isWaitlisted ? (prev.attendee_count || 0) : (prev.attendee_count || 0) + 1,
+                  waitlist_count: isWaitlisted ? (prev.waitlist_count || 0) + 1 : (prev.waitlist_count || 0),
+                  guest_info: { token, status: isWaitlisted ? 'waitlist' : 'registered', position: position || null }
                 }
               : prev
           );
         }
       });
+      loadEventsList();
     }
   };
 
@@ -1409,12 +1441,32 @@ export const EventsView: React.FC<EventsViewProps> = ({
     for (const g of eventGuests) {
       if (g && g.id) guestMap.set(g.id, { ...guestMap.get(g.id), ...g });
     }
-    const combinedGuests = Array.from(guestMap.values());
+    const allEventGuests = Array.from(guestMap.values());
+    const combinedGuests = allEventGuests.filter((g: any) => g.status !== 'waitlist');
+    const waitlistEntries = Array.isArray(detailedItem.waitlist) ? detailedItem.waitlist : [];
 
     const attendeeCount = detailedItem.attendee_count ?? (attendees.length + combinedGuests.length);
+    const waitlistCount = detailedItem.waitlist_count ?? waitlistEntries.length;
+    const waitlistEnabled = detailedItem.waitlist_enabled !== false;
+    const myWaitlistPos: number | null = detailedItem.my_waitlist_position ?? null;
     const hasCapacity = typeof detailedItem.capacity === 'number' && detailedItem.capacity > 0;
     const spotsLeft = hasCapacity ? Math.max(0, detailedItem.capacity - attendeeCount) : null;
     const isFull = hasCapacity && spotsLeft === 0;
+
+    const handleRemoveEntry = async (kind: 'member' | 'guest', targetId: string, labelName: string) => {
+      try {
+        if (kind === 'member') {
+          await removeEventAttendee(detailedItem.id, targetId);
+        } else {
+          await deleteEventGuest(detailedItem.id, targetId);
+        }
+        onToast(`Removed ${labelName}.`);
+        refreshDetailAndGuests(detailedItem.id);
+        loadEventsList();
+      } catch (err: any) {
+        onToast(err?.message || 'Failed to remove attendee');
+      }
+    };
 
     const isPast = detailedItem.phase === 'past';
     const isLive = detailedItem.phase === 'live';
@@ -1738,6 +1790,27 @@ export const EventsView: React.FC<EventsViewProps> = ({
               {detailedItem.description}
             </p>
 
+            {/* Member Waitlist Status Banner */}
+            {isEvent && currentProfile && myWaitlistPos && !isAttending && !isCancelled && !isPast && (
+              <div
+                data-testid="member-waitlist-banner"
+                className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/40 flex flex-wrap items-center justify-between gap-3 text-xs"
+              >
+                <div className="flex items-center gap-2 text-amber-300 font-semibold">
+                  <Clock className="w-4 h-4 flex-shrink-0" />
+                  <span>{`You're #${myWaitlistPos} on the waitlist — we'll notify you if a spot opens.`}</span>
+                </div>
+                <button
+                  type="button"
+                  disabled={rsvpLoading}
+                  onClick={() => handleRsvp(detailedItem.id)}
+                  className="kw-btn text-xs py-1 px-3 rounded-lg border border-amber-500/40 text-amber-300 hover:bg-amber-500/20 font-bold cursor-pointer"
+                >
+                  Leave waitlist
+                </button>
+              </div>
+            )}
+
             {/* Action Bar */}
             <div className="pt-4 border-t border-[var(--card-border)] flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-3">
@@ -1762,13 +1835,33 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       >
                         Event ended
                       </button>
-                    ) : isFull && !isAttending ? (
+                    ) : myWaitlistPos && !isAttending ? (
                       <button
-                        disabled
-                        className="kw-btn px-6 py-2.5 text-xs font-bold rounded-lg bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
+                        onClick={() => handleRsvp(detailedItem.id)}
+                        disabled={rsvpLoading}
+                        className="kw-btn px-5 py-2.5 text-xs font-bold rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/40 hover:bg-amber-500/25 transition-all flex items-center gap-2 cursor-pointer"
                       >
-                        Full
+                        <Clock className="w-4 h-4" />
+                        <span>{`Waitlist #${myWaitlistPos} · Leave waitlist`}</span>
                       </button>
+                    ) : isFull && !isAttending ? (
+                      waitlistEnabled ? (
+                        <button
+                          onClick={() => handleRsvp(detailedItem.id)}
+                          disabled={rsvpLoading}
+                          className="kw-btn px-6 py-2.5 text-xs font-bold rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-all flex items-center gap-2 cursor-pointer"
+                        >
+                          <Clock className="w-4 h-4" />
+                          <span>Join waitlist</span>
+                        </button>
+                      ) : (
+                        <button
+                          disabled
+                          className="kw-btn px-6 py-2.5 text-xs font-bold rounded-lg bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
+                        >
+                          Full
+                        </button>
+                      )
                     ) : (
                       <button
                         onClick={() => handleRsvp(detailedItem.id)}
@@ -1803,8 +1896,53 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     const token = getGuestToken(detailedItem.id);
                     const isRegisteredGuest = Boolean(token || detailedItem.guest_info);
                     const activeToken = token || detailedItem.guest_info?.token;
+                    const guestStatus = detailedItem.guest_info?.status;
+                    const isWaitlistedGuest = guestStatus === 'waitlist' || guestStatus === 'waitlisted';
+                    const guestWaitlistPos = detailedItem.guest_info?.position || 1;
 
                     if (isRegisteredGuest) {
+                      if (isWaitlistedGuest) {
+                        return (
+                          <div className="kw-card p-4 space-y-3 border-amber-500/40 bg-amber-500/5">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 text-amber-300 font-bold text-xs">
+                                <Clock className="w-4 h-4" />
+                                <span>{`You're #${guestWaitlistPos} on the waitlist — we'll email you if a spot opens.`}</span>
+                              </div>
+                            </div>
+                            <p className="text-xs text-[var(--fg-muted)]">
+                              Keep your private link to check your status or leave the waitlist:
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                readOnly
+                                value={`${window.location.origin}/#/events/${detailedItem.id}?g=${activeToken || ''}`}
+                                className="kw-input text-xs flex-1 bg-[var(--bg)]"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const link = `${window.location.origin}/#/events/${detailedItem.id}?g=${activeToken || ''}`;
+                                  navigator.clipboard.writeText(link);
+                                  onToast('Link copied to clipboard');
+                                }}
+                                className="kw-btn text-xs py-1.5 px-3 border border-[var(--card-border)] hover:border-[var(--gold)]"
+                              >
+                                Copy link
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={handleCancelGuestRegistration}
+                              className="text-xs text-rose-400 hover:underline cursor-pointer"
+                            >
+                              Leave waitlist
+                            </button>
+                          </div>
+                        );
+                      }
+
                       return (
                         <div className="kw-card p-4 space-y-3 border-emerald-500/40 bg-emerald-500/5">
                           <div className="flex items-center justify-between gap-2">
@@ -1855,6 +1993,19 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     }
 
                     if (isFull) {
+                      if (waitlistEnabled) {
+                        return (
+                          <button
+                            ref={registerBtnRef}
+                            type="button"
+                            onClick={() => setIsGuestModalOpen(true)}
+                            className="kw-btn py-2.5 px-5 font-bold text-xs rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 flex items-center gap-2 cursor-pointer"
+                          >
+                            <Clock className="w-4 h-4" />
+                            Join waitlist as guest
+                          </button>
+                        );
+                      }
                       return (
                         <button
                           type="button"
@@ -1936,8 +2087,19 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   <Users className="w-3.5 h-3.5 text-[var(--gold-text)]" />
                   <strong className="text-[var(--fg)]">{attendeeCount}</strong> going
                   {hasCapacity && (
-                    <span className="ml-1 text-[11px] font-semibold text-[var(--gold-text)]">
-                      · {isFull ? 'Full' : `${spotsLeft} ${spotsLeft === 1 ? 'spot' : 'spots'} left`}
+                    <span
+                      className={`ml-1 text-[11px] font-semibold ${
+                        isFull && !waitlistEnabled ? 'text-rose-400' : 'text-[var(--gold-text)]'
+                      }`}
+                    >
+                      ·{' '}
+                      {isFull
+                        ? waitlistEnabled
+                          ? waitlistCount > 0
+                            ? `Full · ${waitlistCount} on waitlist`
+                            : 'Full · Waitlist open'
+                          : 'Full'
+                        : `${spotsLeft} ${spotsLeft === 1 ? 'spot' : 'spots'} left`}
                     </span>
                   )}
                 </span>
@@ -2479,6 +2641,65 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       ))}
                     </div>
                   )}
+
+                  {/* Host / Admin Waitlist Section */}
+                  {waitlistEntries.length > 0 && (
+                    <div className="pt-4 border-t border-[var(--card-border)] space-y-3" data-testid="host-waitlist-section">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-bold text-xs text-[var(--fg)] flex items-center gap-2">
+                          <Clock className="w-3.5 h-3.5 text-amber-400" />
+                          <span>{`Waitlist (${waitlistEntries.length})`}</span>
+                        </h4>
+                        <span className="text-[11px] text-[var(--fg-muted)]">
+                          Promoted automatically in FIFO order when a spot opens
+                        </span>
+                      </div>
+                      <div className="space-y-2">
+                        {waitlistEntries.map((w: any, idx: number) => (
+                          <div
+                            key={`wl-${w.kind}-${w.id}`}
+                            className="p-3 rounded-xl bg-[var(--bg)] border border-amber-500/30 flex flex-wrap items-center justify-between gap-3 text-xs"
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span className="px-2 py-0.5 rounded-md font-mono font-bold text-[11px] bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                                #{w.position || idx + 1}
+                              </span>
+                              <Avatar profile={{ id: w.id, name: w.name, avatar: w.avatar }} size="sm" />
+                              <div className="min-w-0 space-y-0.5">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-bold text-[var(--fg)] truncate">{w.name}</span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                                      w.kind === 'member'
+                                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                        : 'bg-amber-500/15 text-[var(--gold-text)] border border-amber-500/30'
+                                    }`}
+                                  >
+                                    {w.kind === 'member' ? 'Member' : 'Guest'}
+                                  </span>
+                                </div>
+                                {w.kind === 'guest' && w.email && (
+                                  <p className="text-[12px] text-[var(--gold-text)] truncate">{w.email}</p>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveEntry(w.kind, w.id, w.name)}
+                                className="kw-btn text-[11px] py-1 px-2 rounded-lg border border-rose-500/40 text-rose-400 hover:bg-rose-500/10 font-semibold cursor-pointer"
+                              >
+                                Remove
+                              </button>
+                              <span className="text-[11px] text-[var(--fg-subtle)]">
+                                {w.created_at ? new Date(w.created_at).toLocaleDateString() : ''}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </>
               );
             })()}
@@ -2540,6 +2761,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
           isOpen={isGuestModalOpen}
           onClose={() => setIsGuestModalOpen(false)}
           eventId={selectedItemId}
+          isWaitlist={Boolean(isFull && waitlistEnabled)}
           onSuccess={handleGuestSuccess}
           onToast={onToast}
           onJoinClick={onJoinClick}
@@ -2798,6 +3020,15 @@ export const EventsView: React.FC<EventsViewProps> = ({
                         />
                       </div>
                     </div>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-xs text-[var(--fg)] pt-1">
+                      <input
+                        type="checkbox"
+                        checked={formWaitlistEnabled}
+                        onChange={e => setFormWaitlistEnabled(e.target.checked)}
+                      />
+                      <span className="font-semibold">Enable waitlist when full</span>
+                    </label>
 
                     <label className="flex items-center gap-2 cursor-pointer text-xs text-[var(--fg)] pt-1">
                       <input
@@ -3258,8 +3489,19 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       <Users className="w-3 h-3 text-[var(--gold-text)]" />
                       <span>{cardAttendeeCount}</span>
                       {hasCapacity && (
-                        <span className="text-[10px] font-semibold text-[var(--gold-text)]">
-                          · {isFull ? 'Full' : `${spotsLeft} ${spotsLeft === 1 ? 'spot' : 'spots'} left`}
+                        <span
+                          className={`text-[10px] font-semibold ${
+                            isFull && item.waitlist_enabled === false ? 'text-rose-400' : 'text-[var(--gold-text)]'
+                          }`}
+                        >
+                          ·{' '}
+                          {isFull
+                            ? item.waitlist_enabled !== false
+                              ? (item.waitlist_count || 0) > 0
+                                ? `Full · ${item.waitlist_count} on waitlist`
+                                : 'Full · Waitlist open'
+                              : 'Full'
+                            : `${spotsLeft} ${spotsLeft === 1 ? 'spot' : 'spots'} left`}
                         </span>
                       )}
                     </span>
@@ -3378,13 +3620,35 @@ export const EventsView: React.FC<EventsViewProps> = ({
                           >
                             Event ended
                           </button>
-                        ) : isFull && !isAttending ? (
+                        ) : item.my_waitlist_position && !isAttending ? (
                           <button
-                            disabled
-                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
+                            onClick={e => {
+                              e.stopPropagation();
+                              handleRsvp(item.id);
+                            }}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500/15 text-amber-300 border border-amber-500/40 cursor-pointer"
                           >
-                            Full
+                            {`Waitlist #${item.my_waitlist_position}`}
                           </button>
+                        ) : isFull && !isAttending ? (
+                          item.waitlist_enabled !== false ? (
+                            <button
+                              onClick={e => {
+                                e.stopPropagation();
+                                handleRsvp(item.id);
+                              }}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 cursor-pointer"
+                            >
+                              Join waitlist
+                            </button>
+                          ) : (
+                            <button
+                              disabled
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700/50 text-zinc-400 cursor-not-allowed"
+                            >
+                              Full
+                            </button>
+                          )
                         ) : (
                           <button
                             onClick={e => {
@@ -3741,6 +4005,24 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       />
                     </div>
                   </div>
+
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-[var(--fg)] pt-1">
+                    <input
+                      type="checkbox"
+                      checked={formWaitlistEnabled}
+                      onChange={e => setFormWaitlistEnabled(e.target.checked)}
+                    />
+                    <span className="font-semibold">Enable waitlist when full</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-[var(--fg)] pt-1">
+                    <input
+                      type="checkbox"
+                      checked={formWaitlistEnabled}
+                      onChange={e => setFormWaitlistEnabled(e.target.checked)}
+                    />
+                    <span className="font-semibold">Enable waitlist when full</span>
+                  </label>
 
                   <label className="flex items-center gap-2 cursor-pointer text-xs text-[var(--fg)] pt-1">
                     <input

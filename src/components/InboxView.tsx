@@ -187,7 +187,10 @@ export const InboxView: React.FC<InboxViewProps> = ({
           onViewProfile={onViewProfile}
           onFollowBack={onToggleFollow}
           onOpenRelated={n => {
-            if (n.from_id) {
+            if (n.event_id) {
+              window.location.hash = `#/events/${n.event_id}`;
+              window.dispatchEvent(new HashChangeEvent('hashchange'));
+            } else if (n.from_id) {
               onViewProfile(n.from_id);
             }
           }}

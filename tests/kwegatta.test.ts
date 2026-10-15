@@ -3928,7 +3928,8 @@ describe('Release 1.5.0 Features', () => {
             timezone: 'Africa/Kampala',
             format: 'in_person',
             venue: 'Makerere Innovation Lab',
-            capacity: 2
+            capacity: 2,
+            waitlist_enabled: false
           })
         });
         expect(createRes.status).toBe(200);
@@ -5599,6 +5600,532 @@ describe('Release 1.5.0 Features', () => {
           window.requestAnimationFrame = origRaf;
           window.cancelAnimationFrame = origCaf;
         }
+      });
+    });
+
+    describe('Release 1.10.0: Rich Link Previews (/e/:id & /og/event/:id.jpg) + Event Waitlist with Automatic Promotion', () => {
+      it('a) GET /e/:id: injects escaped OG/Twitter/canonical tags without duplicating generic tags for public events, and serves generic index.html (200) for missing/pending/unpublished events', async () => {
+        const pubId = 'ev-og-public-1100';
+        const pendingId = 'ev-og-pending-1100';
+        const unpubId = 'ev-og-unpub-1100';
+
+        store.events.push(
+          {
+            id: pubId,
+            kind: 'event',
+            title: 'Kampala AI & <script>alert("xss")</script> Meetup',
+            description: 'Hands-on session with "Gemma 4" & builders.\x00\x07   Bring your laptop!',
+            starts_at: '2026-11-20T14:00:00.000Z',
+            ends_at: '2026-11-20T17:00:00.000Z',
+            timezone: 'Africa/Kampala',
+            format: 'in_person',
+            venue: 'Outbox Hub, Kampala',
+            author_id: 'host-1100',
+            published: true,
+            status: 'approved',
+            attendee_ids: [],
+            created_at: new Date().toISOString()
+          } as any,
+          {
+            id: pendingId,
+            kind: 'event',
+            title: 'Secret Pending Event 1100',
+            description: 'Should not leak in OG tags.',
+            starts_at: '2026-11-21T14:00:00.000Z',
+            timezone: 'Africa/Kampala',
+            format: 'online',
+            author_id: 'host-1100',
+            published: true,
+            status: 'pending',
+            attendee_ids: [],
+            created_at: new Date().toISOString()
+          } as any,
+          {
+            id: unpubId,
+            kind: 'event',
+            title: 'Hidden Unpublished Event 1100',
+            description: 'Should not leak in OG tags.',
+            starts_at: '2026-11-22T14:00:00.000Z',
+            timezone: 'Africa/Kampala',
+            format: 'online',
+            author_id: 'host-1100',
+            published: false,
+            status: 'approved',
+            attendee_ids: [],
+            created_at: new Date().toISOString()
+          } as any
+        );
+
+        // 1. Public event
+        const resPub = await fetch(`${baseUrl}/e/${pubId}`);
+        expect(resPub.status).toBe(200);
+        expect(resPub.headers.get('cache-control')).toContain('max-age=300');
+        const htmlPub = await resPub.text();
+
+        // Escaped title & no raw <script>alert("xss")</script>
+        expect(htmlPub).toContain('<title>Kampala AI &amp; &lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt; Meetup · Kwegatta</title>');
+        expect(htmlPub).not.toContain('<script>alert("xss")</script>');
+        expect(htmlPub).toContain('property="og:image"');
+        expect(htmlPub).toContain(`/og/event/${pubId}.jpg?v=`);
+        expect(htmlPub).toContain('property="og:image:width" content="1200"');
+        expect(htmlPub).toContain('property="og:image:height" content="630"');
+        expect(htmlPub).toContain('property="og:image:type" content="image/jpeg"');
+        expect(htmlPub).toContain('name="twitter:card" content="summary_large_image"');
+        expect(htmlPub).toContain(`/e/${pubId}"`);
+        expect(htmlPub).toContain(`/#/events/${pubId}`);
+
+        // Ensure generic og:title / <title> was replaced, not duplicated
+        const titleMatches = htmlPub.match(/<title>/gi) || [];
+        expect(titleMatches.length).toBe(1);
+        const ogTitleMatches = htmlPub.match(/property=["']og:title["']/gi) || [];
+        expect(ogTitleMatches.length).toBe(1);
+
+        // 2. Pending, unpublished, and non-existent events return 200 with generic HTML
+        for (const hiddenId of [pendingId, unpubId, 'non-existent-event-1100']) {
+          const resHidden = await fetch(`${baseUrl}/e/${hiddenId}`);
+          expect(resHidden.status).toBe(200);
+          const htmlHidden = await resHidden.text();
+          expect(htmlHidden).not.toContain('Secret Pending Event 1100');
+          expect(htmlHidden).not.toContain('Hidden Unpublished Event 1100');
+          expect(htmlHidden).toContain('<title>Kwegatta');
+        }
+      });
+
+      it('b) GET /og/event/:id.jpg: generates 1200x630 JPEG (<300 KB) with and without cover image, supports ETag/304, and 302 redirects to /og-image.png when missing/private', async () => {
+        const sharpMod = (await import('sharp')).default;
+        // Create a valid 20x20 PNG data URL for cover testing
+        const samplePngBuf = await sharpMod({
+          create: { width: 20, height: 20, channels: 3, background: { r: 30, g: 64, b: 175 } }
+        })
+          .png()
+          .toBuffer();
+        const coverDataUrl = `data:image/png;base64,${samplePngBuf.toString('base64')}`;
+
+        const evWithCoverId = 'ev-og-cover-1100';
+        const evNoCoverId = 'ev-og-nocover-1100';
+        const evPendingId = 'ev-og-img-pending-1100';
+
+        store.events.push(
+          {
+            id: evWithCoverId,
+            kind: 'event',
+            title: 'Builder Demo Day With Cover Image & Special <Chars>',
+            description: 'Live demos in Kampala.',
+            starts_at: '2026-11-25T15:00:00.000Z',
+            timezone: 'Africa/Kampala',
+            format: 'in_person',
+            venue: 'Innovation Village Ntinda',
+            cover_image: coverDataUrl,
+            author_id: 'host-1100',
+            published: true,
+            status: 'approved',
+            attendee_ids: [],
+            created_at: new Date().toISOString()
+          } as any,
+          {
+            id: evNoCoverId,
+            kind: 'event',
+            title: 'Online Architecture Office Hours',
+            description: 'Weekly session.',
+            starts_at: '2026-11-26T16:00:00.000Z',
+            timezone: 'Africa/Kampala',
+            format: 'online',
+            author_id: 'host-1100',
+            published: true,
+            status: 'approved',
+            attendee_ids: [],
+            created_at: new Date().toISOString()
+          } as any,
+          {
+            id: evPendingId,
+            kind: 'event',
+            title: 'Pending Event Image Test',
+            starts_at: '2026-11-27T16:00:00.000Z',
+            published: true,
+            status: 'pending',
+            attendee_ids: [],
+            created_at: new Date().toISOString()
+          } as any
+        );
+
+        // 1. With cover image -> 200 image/jpeg, 1200x630, < 300 KB
+        const resCover = await fetch(`${baseUrl}/og/event/${evWithCoverId}.jpg`);
+        expect(resCover.status).toBe(200);
+        expect(resCover.headers.get('content-type')).toBe('image/jpeg');
+        expect(resCover.headers.get('cache-control')).toContain('max-age=86400');
+        const etag = resCover.headers.get('etag');
+        expect(etag).toBeTruthy();
+
+        const bufCover = Buffer.from(await resCover.arrayBuffer());
+        expect(bufCover[0]).toBe(0xff);
+        expect(bufCover[1]).toBe(0xd8);
+        expect(bufCover.length).toBeLessThan(300 * 1024);
+        const metaCover = await sharpMod(bufCover).metadata();
+        expect(metaCover.width).toBe(1200);
+        expect(metaCover.height).toBe(630);
+
+        // 2. Conditional GET with If-None-Match -> 304
+        const res304 = await fetch(`${baseUrl}/og/event/${evWithCoverId}.jpg`, {
+          headers: { 'If-None-Match': etag! }
+        });
+        expect(res304.status).toBe(304);
+
+        // 3. Without cover image -> 200 image/jpeg, 1200x630, < 300 KB
+        const resNoCover = await fetch(`${baseUrl}/og/event/${evNoCoverId}.jpg`);
+        expect(resNoCover.status).toBe(200);
+        const bufNoCover = Buffer.from(await resNoCover.arrayBuffer());
+        expect(bufNoCover[0]).toBe(0xff);
+        expect(bufNoCover[1]).toBe(0xd8);
+        expect(bufNoCover.length).toBeLessThan(300 * 1024);
+        const metaNoCover = await sharpMod(bufNoCover).metadata();
+        expect(metaNoCover.width).toBe(1200);
+        expect(metaNoCover.height).toBe(630);
+
+        // 4. Pending or missing event -> 302 redirect to /og-image.png
+        const resPending = await fetch(`${baseUrl}/og/event/${evPendingId}.jpg`, {
+          redirect: 'manual'
+        });
+        expect(resPending.status).toBe(302);
+        expect(resPending.headers.get('location')).toBe('/og-image.png');
+
+        const resMissing = await fetch(`${baseUrl}/og/event/does-not-exist-1100.jpg`, {
+          redirect: 'manual'
+        });
+        expect(resMissing.status).toBe(302);
+        expect(resMissing.headers.get('location')).toBe('/og-image.png');
+      });
+
+      it('c) Public event links in .ics and sitemap.xml use /e/:id', async () => {
+        const { generateEventIcsContent } = await import('../server');
+        const futureStart = new Date(Date.now() + 7 * 86400000).toISOString();
+        const futureEnd = new Date(Date.now() + 7 * 86400000 + 7200000).toISOString();
+        const evId = 'ev-share-links-1100';
+        const evObj = {
+          id: evId,
+          kind: 'event',
+          title: 'Sitemap & ICS Share Link Event',
+          description: 'Verifying /e/:id in ICS and sitemap.',
+          starts_at: futureStart,
+          ends_at: futureEnd,
+          timezone: 'Africa/Kampala',
+          format: 'online',
+          author_id: 'host-1100',
+          published: true,
+          status: 'approved',
+          attendee_ids: [],
+          created_at: new Date().toISOString()
+        };
+        store.events.push(evObj as any);
+
+        const icsText = generateEventIcsContent(evObj);
+        expect(icsText).toContain(`URL:${baseUrl.startsWith('http') ? '' : ''}`);
+        expect(icsText).toContain(`/e/${evId}`);
+
+        const sitemapRes = await fetch(`${baseUrl}/sitemap.xml`);
+        expect(sitemapRes.status).toBe(200);
+        const sitemapXml = await sitemapRes.text();
+        expect(sitemapXml).toContain(`/e/${evId}</loc>`);
+      });
+
+      it('d) Waitlist join, leave, max length, and FIFO automatic promotion across members & guests (un-RSVP, guest cancel, host removal, capacity increase, cascadeDeleteMemberData) + CSV status', async () => {
+        const hostId = 'wl-host-1100';
+        const m1Id = 'wl-m1-1100';
+        const m2Id = 'wl-m2-1100';
+        const m3Id = 'wl-m3-1100';
+        const m4Id = 'wl-m4-1100';
+
+        for (const [id, name] of [
+          [hostId, 'WL Host'],
+          [m1Id, 'Member One Confirmed'],
+          [m2Id, 'Member Two Waitlisted'],
+          [m3Id, 'Member Three Waitlisted'],
+          [m4Id, 'Member Four Waitlisted']
+        ]) {
+          store.profiles.push({
+            id,
+            account_uid: id,
+            name,
+            email: `${id}@kwegatta.test`,
+            role: 'Builder',
+            headline: 'Builder',
+            bio: 'Bio',
+            offers: 'Code',
+            needs: 'Design',
+            created_at: new Date().toISOString()
+          } as any);
+        }
+
+        // Create event with capacity 1 (waitlist_enabled defaults to true, maxWaitlist = min(200, 1*3) = 3)
+        const createRes = await fetch(`${baseUrl}/api/events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hostId}` },
+          body: JSON.stringify({
+            kind: 'event',
+            title: 'Waitlist Promotion Event 1100',
+            description: 'Testing FIFO waitlist and auto-promotion.',
+            start_date: '2026-12-20',
+            start_time: '14:00',
+            timezone: 'Africa/Kampala',
+            format: 'in_person',
+            venue: 'Kampala Innovation Hub',
+            capacity: 1
+          })
+        });
+        expect(createRes.status).toBe(200);
+        const createdEv = (await createRes.json()).item;
+        const evId = createdEv.id;
+        expect(createdEv.waitlist_enabled).toBe(true);
+
+        // 1. m1 RSVPs -> takes the 1 confirmed seat
+        const rsvpM1 = await fetch(`${baseUrl}/api/events/${evId}/rsvp`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${m1Id}` }
+        });
+        expect(rsvpM1.status).toBe(200);
+        expect((await rsvpM1.json()).status).toBe('going');
+
+        // 2. Event is now full (1/1). m2 RSVPs -> waitlisted at position 1
+        const rsvpM2 = await fetch(`${baseUrl}/api/events/${evId}/rsvp`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${m2Id}` }
+        });
+        expect(rsvpM2.status).toBe(200);
+        const rsvpM2Json = await rsvpM2.json();
+        expect(rsvpM2Json.status).toBe('waitlisted');
+        expect(rsvpM2Json.position).toBe(1);
+
+        // 3. m2 RSVPs again while waitlisted -> leaves waitlist, then re-joins
+        const leaveM2 = await fetch(`${baseUrl}/api/events/${evId}/rsvp`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${m2Id}` }
+        });
+        expect(leaveM2.status).toBe(200);
+        expect((await leaveM2.json()).status).toBe('left_waitlist');
+
+        // Wait 5ms so guest1 has an earlier timestamp than m2's re-join
+        await new Promise(r => setTimeout(r, 5));
+
+        // 4. Guest 1 registers while full -> waitlisted at position 1
+        const guest1Res = await fetch(`${baseUrl}/api/events/${evId}/guest-register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': '203.0.113.10' },
+          body: JSON.stringify({
+            name: 'Guest One Waitlist',
+            email: 'guestone1100@example.com',
+            agree: true
+          })
+        });
+        expect(guest1Res.status).toBe(200);
+        const guest1Json = await guest1Res.json();
+        expect(guest1Json.status).toBe('waitlisted');
+        expect(guest1Json.position).toBe(1);
+        expect(guest1Json.token).toBeTruthy();
+        const guest1Id = guest1Json.guest_id;
+
+        await new Promise(r => setTimeout(r, 5));
+
+        // 5. m2 re-joins waitlist -> position 2; m3 joins -> position 3 (now at maxWaitlist = 3)
+        const rejoinM2 = await fetch(`${baseUrl}/api/events/${evId}/rsvp`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${m2Id}` }
+        });
+        expect((await rejoinM2.json()).position).toBe(2);
+
+        await new Promise(r => setTimeout(r, 5));
+
+        const joinM3 = await fetch(`${baseUrl}/api/events/${evId}/rsvp`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${m3Id}` }
+        });
+        expect((await joinM3.json()).position).toBe(3);
+
+        // 6. Waitlist is now at max length (min(200, 1*3) = 3) -> m4 is rejected with 400
+        const joinM4Full = await fetch(`${baseUrl}/api/events/${evId}/rsvp`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${m4Id}` }
+        });
+        expect(joinM4Full.status).toBe(400);
+
+        // 7. Waitlisted member (m2) and waitlisted guest (guest1) cannot get a ticket yet (409)
+        const wlTicketMember = await fetch(`${baseUrl}/api/events/${evId}/my-ticket`, {
+          headers: { Authorization: `Bearer ${m2Id}` }
+        });
+        expect(wlTicketMember.status).toBe(409);
+
+        const wlTicketGuest = await fetch(`${baseUrl}/api/events/${evId}/my-ticket`, {
+          headers: { 'X-Guest-Token': guest1Json.token }
+        });
+        expect(wlTicketGuest.status).toBe(409);
+
+        // 8. m1 un-RSVPs -> Guest 1 (position 1 in FIFO) is automatically promoted to 'registered'!
+        const unRsvpM1 = await fetch(`${baseUrl}/api/events/${evId}/rsvp`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${m1Id}` }
+        });
+        expect(unRsvpM1.status).toBe(200);
+
+        const g1Record = store.event_guests.find((g: any) => g.id === guest1Id);
+        expect(g1Record?.status).toBe('registered');
+        expect(g1Record?.code_hash).toBeTruthy();
+
+        // Guest 1 can now fetch their ticket!
+        const promotedGuestTicket = await fetch(`${baseUrl}/api/events/${evId}/my-ticket`, {
+          headers: { 'X-Guest-Token': guest1Json.token }
+        });
+        expect(promotedGuestTicket.status).toBe(200);
+
+        // 9. Guest 1 cancels -> m2 (next in FIFO) is automatically promoted to confirmed attendee!
+        const cancelG1 = await fetch(`${baseUrl}/api/events/${evId}/guest-cancel`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: guest1Json.token })
+        });
+        expect(cancelG1.status).toBe(200);
+
+        const evAfterG1Cancel = store.events.find((e: any) => e.id === evId)!;
+        expect(evAfterG1Cancel.attendee_ids).toContain(m2Id);
+        expect(evAfterG1Cancel.waitlist_ids).not.toContain(m2Id);
+        expect((evAfterG1Cancel as any).member_ticket_hashes?.[m2Id]).toBeTruthy();
+
+        // Verify m2 received an in-app waitlist_promoted notification
+        const m2PromoNotif = store.notifications.find(
+          (n: any) => n.to_id === m2Id && n.type === 'waitlist_promoted' && n.event_id === evId
+        );
+        expect(m2PromoNotif).toBeTruthy();
+
+        // 10. Host increases capacity from 1 to 2 via PATCH -> m3 is automatically promoted!
+        const patchCapRes = await fetch(`${baseUrl}/api/events/${evId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${hostId}` },
+          body: JSON.stringify({ capacity: 2 })
+        });
+        expect(patchCapRes.status).toBe(200);
+        const evAfterCapIncrease = store.events.find((e: any) => e.id === evId)!;
+        expect(evAfterCapIncrease.attendee_ids).toContain(m2Id);
+        expect(evAfterCapIncrease.attendee_ids).toContain(m3Id);
+        expect(evAfterCapIncrease.waitlist_ids).toHaveLength(0);
+
+        // 11. m4 joins waitlist (now 2/2 full), then m3 deletes account -> cascadeDeleteMemberData promotes m4!
+        const joinM4 = await fetch(`${baseUrl}/api/events/${evId}/rsvp`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${m4Id}` }
+        });
+        expect((await joinM4.json()).status).toBe('waitlisted');
+
+        const delM3 = await fetch(`${baseUrl}/api/account`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${m3Id}` }
+        });
+        expect(delM3.status).toBe(200);
+
+        const evAfterDelete = store.events.find((e: any) => e.id === evId)!;
+        expect(evAfterDelete.attendee_ids).not.toContain(m3Id);
+        expect(evAfterDelete.attendee_ids).toContain(m4Id);
+
+        // 12. Add m1 back onto waitlist so CSV export has both going and waitlist rows
+        const m1Waitlist = await fetch(`${baseUrl}/api/events/${evId}/rsvp`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${m1Id}` }
+        });
+        expect((await m1Waitlist.json()).status).toBe('waitlisted');
+
+        const csvRes = await fetch(`${baseUrl}/api/events/${evId}/attendees.csv`, {
+          headers: { Authorization: `Bearer ${hostId}` }
+        });
+        expect(csvRes.status).toBe(200);
+        const csvText = await csvRes.text();
+        expect(csvText).toContain('"going"');
+        expect(csvText).toContain('"waitlist"');
+      });
+
+      it('e) Render: full event with waitlist enabled shows "Join waitlist" and waitlisted member sees "Waitlist #1 · Leave waitlist"', async () => {
+        const viewerProfile = {
+          id: 'viewer-wl-1100',
+          account_uid: 'viewer-wl-1100',
+          name: 'Viewer Waitlist 1100',
+          role: 'Builder',
+          headline: 'Full-stack',
+          bio: 'Bio',
+          offers: 'React',
+          needs: 'Product',
+          tags: [],
+          skills: [],
+          created_at: new Date().toISOString()
+        };
+
+        const fullEventObj: any = {
+          id: 'ev-ui-wl-1100',
+          kind: 'event',
+          title: 'Full Capacity UI Event 1100',
+          description: 'Testing waitlist buttons in EventsView.',
+          author_id: 'other-host-1100',
+          author_name: 'Host 1100',
+          starts_at: new Date(Date.now() + 86400000).toISOString(),
+          ends_at: new Date(Date.now() + 90000000).toISOString(),
+          timezone: 'Africa/Kampala',
+          format: 'in_person',
+          venue: 'Kampala Tech Hub',
+          capacity: 2,
+          waitlist_enabled: true,
+          waitlist_count: 1,
+          my_waitlist_position: null,
+          attendee_ids: ['a1', 'a2'],
+          attendee_count: 2,
+          is_attending: false,
+          attendees: [
+            { id: 'a1', name: 'Att 1', type: 'member' },
+            { id: 'a2', name: 'Att 2', type: 'member' }
+          ],
+          guests: [],
+          phase: 'upcoming',
+          published: true
+        };
+
+        vi.spyOn(apiModule, 'fetchEvents').mockResolvedValue([fullEventObj]);
+        vi.spyOn(apiModule, 'fetchEventById').mockResolvedValue(fullEventObj);
+        vi.spyOn(apiModule, 'fetchEventQuestions').mockResolvedValue([]);
+
+        const { cleanup, waitFor } = await import('@testing-library/react');
+        cleanup();
+
+        const { unmount } = render(
+          React.createElement(EventsView, {
+            currentProfile: viewerProfile as any,
+            allProfiles: [viewerProfile as any],
+            initialItemId: fullEventObj.id,
+            onViewProfile: vi.fn(),
+            onToast: vi.fn()
+          })
+        );
+
+        await waitFor(() => {
+          expect(screen.getAllByText(/Join waitlist/i).length).toBeGreaterThan(0);
+          expect(screen.getAllByText(/Full · 1 on waitlist/i).length).toBeGreaterThan(0);
+        });
+        unmount();
+
+        // Now render as waitlisted at #1
+        const waitlistedEventObj = {
+          ...fullEventObj,
+          my_waitlist_position: 1
+        };
+        vi.spyOn(apiModule, 'fetchEvents').mockResolvedValue([waitlistedEventObj]);
+        vi.spyOn(apiModule, 'fetchEventById').mockResolvedValue(waitlistedEventObj);
+
+        const { unmount: unmount2 } = render(
+          React.createElement(EventsView, {
+            currentProfile: viewerProfile as any,
+            allProfiles: [viewerProfile as any],
+            initialItemId: waitlistedEventObj.id,
+            onViewProfile: vi.fn(),
+            onToast: vi.fn()
+          })
+        );
+
+        await waitFor(() => {
+          expect(screen.getAllByText(/Waitlist #1 · Leave waitlist/i).length).toBeGreaterThan(0);
+        });
+        unmount2();
       });
     });
   });

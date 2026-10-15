@@ -11,4 +11,9 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+const sharePathMatch = window.location.pathname.match(/^\/e\/([^/]+)\/?$/);
+if (sharePathMatch && !window.location.hash) {
+  window.history.replaceState(null, '', `/#/events/${sharePathMatch[1]}`);
+}
+
 createRoot(document.getElementById('root')!).render(<App />);

@@ -296,6 +296,21 @@ export function formatEventDateTime(
   }
 }
 
+export function getPublicAppBaseUrl(): string {
+  const envUrl = (import.meta as any).env?.VITE_PUBLIC_APP_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
+    return envUrl.trim().replace(/\/$/, '');
+  }
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin.replace(/\/$/, '');
+  }
+  return 'https://kwegatta.ai.studio';
+}
+
+export function getPublicEventShareUrl(eventId: string): string {
+  return `${getPublicAppBaseUrl()}/e/${eventId}`;
+}
+
 /**
  * Generates an RFC 5545 compliant .ics calendar file content.
  */
@@ -323,6 +338,8 @@ export function generateIcsFile(event: {
     return '\\' + match;
   });
 
+  const shareUrl = getPublicEventShareUrl(event.id);
+
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
@@ -337,6 +354,7 @@ export function generateIcsFile(event: {
     `SUMMARY:${escapeIcs(event.title)}`,
     `DESCRIPTION:${escapeIcs(event.description)}`,
     event.location ? `LOCATION:${escapeIcs(event.location)}` : '',
+    `URL:${shareUrl}`,
     'END:VEVENT',
     'END:VCALENDAR'
   ].filter(Boolean);

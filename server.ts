@@ -8,6 +8,7 @@ import { initializeApp, getApps, type App } from 'firebase-admin/app';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { getAuth as getAdminAuth, type Auth as AdminAuth } from 'firebase-admin/auth';
 import nodemailer from 'nodemailer';
+import sharp from 'sharp';
 import { ISO_COUNTRIES, deriveLocation } from './src/lib/countries';
 import { ROLE_CHOICES, STAGE_CHOICES, INTENT_CHOICES, normalizeIntent } from './src/lib/profileChoices';
 import { normalizeTicketCode, isValidTicketCode, formatTicketCode } from './src/lib/ticketCode';
@@ -4144,6 +4145,21 @@ export async function cascadeDeleteMemberData(memberId: string, memberUid?: stri
         }
       }
     }
+    if (Array.isArray(ev.waitlist_ids)) {
+      const origWlLen = ev.waitlist_ids.length;
+      ev.waitlist_ids = ev.waitlist_ids.filter((wId: string) => !matchesMember(wId));
+      if (ev.waitlist_ids.length !== origWlLen) {
+        changed = true;
+      }
+    }
+    if (ev.waitlist_times && typeof ev.waitlist_times === 'object') {
+      for (const k of Object.keys(ev.waitlist_times)) {
+        if (matchesMember(k)) {
+          delete ev.waitlist_times[k];
+          changed = true;
+        }
+      }
+    }
     if (Array.isArray(ev.reports)) {
       for (const r of ev.reports) {
         if (matchesMember(r.reporter_id)) {
@@ -4155,6 +4171,7 @@ export async function cascadeDeleteMemberData(memberId: string, memberUid?: stri
     if (changed) {
       await persistDoc('events', ev.id, ev);
     }
+    await promoteFromWaitlist(ev);
   }
 
   // 8. Reports the member filed: keep them for moderation, but set reporter_id to 'deleted-member'
@@ -4238,6 +4255,37 @@ app.delete('/api/profiles/:id', async (req: Request, res: Response) => {
     success: true,
     deleted: initialCount !== store.profiles.length,
     message: 'Profile and associated personal data deleted permanently.'
+  });
+});
+
+// Delete own account permanently
+app.delete('/api/account', async (req: Request, res: Response) => {
+  const authUserId = resolveAuthUserId(req);
+  if (!authUserId) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  const existing = store.profiles.find((p: any) => p.id === authUserId || p.account_uid === authUserId);
+  const id = existing ? existing.id : authUserId;
+
+  const initialCount = store.profiles.length;
+  await cascadeDeleteMemberData(id, existing?.account_uid || authUserId);
+  store.profiles = store.profiles.filter((p: any) => p.id !== id && p.account_uid !== authUserId);
+
+  const firebaseUidToDelete = existing?.account_uid || (id.startsWith('user-') || id.startsWith('demo-') ? null : id) || authUserId;
+  if (adminAuth && firebaseUidToDelete) {
+    try {
+      await adminAuth.deleteUser(firebaseUidToDelete);
+      console.log(`[Firebase Admin] Deleted user account ${firebaseUidToDelete} with profile ${id}`);
+    } catch (authDelErr: any) {
+      console.warn(`[Firebase Admin] Could not delete user account ${firebaseUidToDelete}:`, authDelErr?.message || authDelErr);
+    }
+  }
+
+  return res.json({
+    success: true,
+    deleted: true,
+    message: 'Account and associated personal data deleted permanently.'
   });
 });
 
@@ -4521,6 +4569,359 @@ app.get('/api/event-image/:id', (req: Request, res: Response) => {
   }
 
   return res.status(404).send('Event image not found');
+});
+
+/* =========================================================================
+   RELEASE 1.10.0 PART 1: RICH LINK PREVIEWS (/e/:id AND /og/event/:id.jpg)
+   ========================================================================= */
+
+let cachedIndexHtmlTemplate: string | null = null;
+try {
+  const distIdx = path.join(__dirname, 'dist', 'index.html');
+  const rootIdx = path.join(__dirname, 'index.html');
+  if (fs.existsSync(distIdx)) {
+    cachedIndexHtmlTemplate = fs.readFileSync(distIdx, 'utf-8');
+  } else if (fs.existsSync(rootIdx)) {
+    cachedIndexHtmlTemplate = fs.readFileSync(rootIdx, 'utf-8');
+  }
+} catch (_) {}
+
+function getIndexHtmlTemplate(): string {
+  const isDev = process.env.NODE_ENV === 'development';
+  const distIdx = path.join(__dirname, 'dist', 'index.html');
+  const rootIdx = path.join(__dirname, 'index.html');
+  if (!isDev && cachedIndexHtmlTemplate) {
+    return cachedIndexHtmlTemplate;
+  }
+  try {
+    if (!isDev && fs.existsSync(distIdx)) {
+      cachedIndexHtmlTemplate = fs.readFileSync(distIdx, 'utf-8');
+      return cachedIndexHtmlTemplate;
+    }
+    if (fs.existsSync(rootIdx)) {
+      const content = fs.readFileSync(rootIdx, 'utf-8');
+      if (!isDev) cachedIndexHtmlTemplate = content;
+      return content;
+    }
+  } catch (_) {}
+  return (
+    cachedIndexHtmlTemplate ||
+    '<!doctype html><html lang="en"><head><meta charset="UTF-8" /><title>Kwegatta: find the people you should build and learn with</title></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>'
+  );
+}
+
+export function stripControlChars(val: any): string {
+  return String(val ?? '')
+    .replace(/[\x00-\x1F\x7F]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function escapeHtml(val: any): string {
+  const clean = stripControlChars(val);
+  return clean
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+export function isEventPubliclyVisible(item: any): boolean {
+  if (!item) return false;
+  if (item.published === false) return false;
+  if (item.status === 'pending' || item.status === 'rejected') return false;
+  if (item.hidden_by_moderation) return false;
+  return true;
+}
+
+export function computeEventOgVersionHash(item: any): string {
+  const raw = `${item?.cover_image || ''}|${item?.title || ''}|${item?.starts_at || item?.datetime || ''}`;
+  return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 10);
+}
+
+export function formatEventOgDatePart(item: any): { dateTimeText: string; tz: string } {
+  const tz = stripControlChars(item?.timezone || 'Africa/Kampala') || 'Africa/Kampala';
+  const startRaw = item?.starts_at;
+  if (startRaw) {
+    const d = new Date(startRaw);
+    if (!isNaN(d.getTime())) {
+      try {
+        const weekdayDayMonth = new Intl.DateTimeFormat('en-GB', {
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+          timeZone: tz
+        }).format(d);
+        const timeStr = new Intl.DateTimeFormat('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+          timeZone: tz
+        }).format(d);
+        return { dateTimeText: `${weekdayDayMonth} · ${timeStr}`, tz };
+      } catch (_) {}
+    }
+  }
+  const fallback = stripControlChars(item?.datetime || 'Upcoming Event');
+  return { dateTimeText: fallback, tz };
+}
+
+export function buildEventMetaDescription(item: any): string {
+  const { dateTimeText, tz } = formatEventOgDatePart(item);
+  const venuePart =
+    item?.format === 'online'
+      ? 'Online'
+      : stripControlChars(item?.venue || item?.location || 'Online') || 'Online';
+  const descCollapsed = stripControlChars(item?.description || '').slice(0, 150);
+  const combined = descCollapsed
+    ? `${dateTimeText} (${tz}) · ${venuePart} — ${descCollapsed}`
+    : `${dateTimeText} (${tz}) · ${venuePart}`;
+  return combined.length > 200 ? combined.slice(0, 199).trimEnd() + '…' : combined;
+}
+
+export function getPublicAppUrl(): string {
+  return (process.env.APP_URL || process.env.VITE_PUBLIC_APP_URL || 'https://kwegatta.ai.studio').replace(/\/$/, '');
+}
+
+export function injectEventOgIntoHtml(baseHtml: string, item: any): string {
+  const appBase = getPublicAppUrl();
+  const safeId = encodeURIComponent(String(item.id || ''));
+  const rawTitle = stripControlChars(item.title || 'Event');
+  const escapedTitle = escapeHtml(rawTitle);
+  const rawDesc = buildEventMetaDescription(item);
+  const escapedDesc = escapeHtml(rawDesc);
+  const vHash = computeEventOgVersionHash(item);
+  const canonicalUrl = `${appBase}/e/${safeId}`;
+  const ogImageUrl = `${appBase}/og/event/${safeId}.jpg?v=${vHash}`;
+
+  // Remove existing generic title, description, og:*, twitter:*, and canonical tags so we never duplicate them
+  let cleaned = baseHtml
+    .replace(/<title>[\s\S]*?<\/title>\s*/gi, '')
+    .replace(/<meta\s+name=["']description["'][^>]*>\s*/gi, '')
+    .replace(/<meta\s+property=["']og:[^"']+["'][^>]*>\s*/gi, '')
+    .replace(/<meta\s+name=["']twitter:[^"']+["'][^>]*>\s*/gi, '')
+    .replace(/<link\s+rel=["']canonical["'][^>]*>\s*/gi, '');
+
+  const injectedBlock = [
+    `<title>${escapedTitle} · Kwegatta</title>`,
+    `    <meta name="description" content="${escapedDesc}" />`,
+    `    <meta property="og:type" content="website" />`,
+    `    <meta property="og:site_name" content="Kwegatta" />`,
+    `    <meta property="og:title" content="${escapedTitle}" />`,
+    `    <meta property="og:description" content="${escapedDesc}" />`,
+    `    <meta property="og:url" content="${escapeHtml(canonicalUrl)}" />`,
+    `    <meta property="og:image" content="${escapeHtml(ogImageUrl)}" />`,
+    `    <meta property="og:image:width" content="1200" />`,
+    `    <meta property="og:image:height" content="630" />`,
+    `    <meta property="og:image:type" content="image/jpeg" />`,
+    `    <meta property="og:image:alt" content="${escapedTitle}" />`,
+    `    <meta name="twitter:card" content="summary_large_image" />`,
+    `    <meta name="twitter:title" content="${escapedTitle}" />`,
+    `    <meta name="twitter:description" content="${escapedDesc}" />`,
+    `    <meta name="twitter:image" content="${escapeHtml(ogImageUrl)}" />`,
+    `    <link rel="canonical" href="${escapeHtml(canonicalUrl)}" />`,
+    `    <script>(function(){try{if(window.location.pathname.indexOf('/e/')===0){window.history.replaceState(null,'','/#/events/${safeId}');}}catch(_){}})();</script>`
+  ].join('\n');
+
+  if (cleaned.includes('</head>')) {
+    return cleaned.replace('</head>', `    ${injectedBlock}\n  </head>`);
+  }
+  return `${injectedBlock}\n${cleaned}`;
+}
+
+app.get('/e/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  const baseHtml = getIndexHtmlTemplate();
+
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=300');
+
+  if (!isEventPubliclyVisible(item)) {
+    return res.status(200).send(baseHtml);
+  }
+
+  const html = injectEventOgIntoHtml(baseHtml, item);
+  return res.status(200).send(html);
+});
+
+const ogImageLruCache = new Map<string, Buffer>();
+const OG_IMAGE_LRU_MAX = 100;
+
+function wrapTitleLines(rawTitle: string, maxCharsPerLine = 34): [string, string?] {
+  const clean = stripControlChars(rawTitle || 'Kwegatta Event');
+  if (clean.length <= maxCharsPerLine) return [clean];
+  const words = clean.split(' ');
+  let line1 = '';
+  let i = 0;
+  while (i < words.length) {
+    const candidate = line1 ? `${line1} ${words[i]}` : words[i];
+    if (candidate.length <= maxCharsPerLine || !line1) {
+      line1 = candidate.slice(0, maxCharsPerLine);
+      i++;
+    } else {
+      break;
+    }
+  }
+  if (i >= words.length) return [line1];
+  const rest = words.slice(i).join(' ');
+  const line2 = rest.length > maxCharsPerLine ? rest.slice(0, maxCharsPerLine - 1).trimEnd() + '…' : rest;
+  return [line1, line2];
+}
+
+function resolveCoverImageBuffer(coverImage?: string): Buffer | null {
+  if (!coverImage || typeof coverImage !== 'string') return null;
+  if (coverImage.startsWith('data:')) {
+    const match = coverImage.match(/^data:image\/(?:jpeg|jpg|png|webp);base64,([A-Za-z0-9+/=\s]+)$/i);
+    if (match) {
+      try {
+        return Buffer.from(match[1], 'base64');
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+  // Allow only local static files under public/ (never fetch arbitrary remote URLs)
+  if (coverImage.startsWith('/') && !coverImage.startsWith('//') && !coverImage.startsWith('/api/')) {
+    try {
+      const publicRoot = path.resolve(__dirname, 'public');
+      const resolved = path.resolve(publicRoot, '.' + coverImage);
+      if (resolved.startsWith(publicRoot + path.sep) && fs.existsSync(resolved)) {
+        return fs.readFileSync(resolved);
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
+async function renderEventOgJpeg(item: any): Promise<Buffer> {
+  const [line1, line2] = wrapTitleLines(item.title || 'Kwegatta Event', 34);
+  const safeLine1 = escapeHtml(line1);
+  const safeLine2 = line2 ? escapeHtml(line2) : '';
+
+  const { dateTimeText, tz } = formatEventOgDatePart(item);
+  const venuePart =
+    item?.format === 'online'
+      ? 'Online'
+      : stripControlChars(item?.venue || item?.location || 'Kampala') || 'Kampala';
+  const rawMetaLine = `${dateTimeText} (${tz}) · ${venuePart}`;
+  const safeMetaLine = escapeHtml(rawMetaLine.length > 76 ? rawMetaLine.slice(0, 75) + '…' : rawMetaLine);
+
+  const coverBuf = resolveCoverImageBuffer(item.cover_image);
+
+  const titleY1 = safeLine2 ? 450 : 495;
+  const titleY2 = 510;
+  const metaY = 568;
+
+  if (coverBuf) {
+    const overlaySvg = `<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#070B12" stop-opacity="0.18"/>
+          <stop offset="45%" stop-color="#070B12" stop-opacity="0.55"/>
+          <stop offset="100%" stop-color="#070B12" stop-opacity="0.95"/>
+        </linearGradient>
+      </defs>
+      <rect width="1200" height="630" fill="url(#grad)"/>
+      <rect x="64" y="48" width="168" height="42" rx="10" fill="#070B12" fill-opacity="0.82" stroke="#F59E0B" stroke-width="1.5"/>
+      <text x="148" y="75" text-anchor="middle" fill="#F59E0B" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="18" font-weight="800" letter-spacing="2">KWEGATTA</text>
+      <text x="64" y="${titleY1}" fill="#FAFAFC" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="48" font-weight="800">${safeLine1}</text>
+      ${safeLine2 ? `<text x="64" y="${titleY2}" fill="#FAFAFC" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="48" font-weight="800">${safeLine2}</text>` : ''}
+      <text x="64" y="${metaY}" fill="#F59E0B" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="24" font-weight="600">${safeMetaLine}</text>
+    </svg>`;
+
+    const baseImage = sharp(coverBuf)
+      .resize(1200, 630, { fit: 'cover', position: 'attention' })
+      .composite([{ input: Buffer.from(overlaySvg), top: 0, left: 0 }]);
+
+    let out = await baseImage.jpeg({ quality: 80 }).toBuffer();
+    if (out.length > 300 * 1024) {
+      out = await sharp(out).jpeg({ quality: 65 }).toBuffer();
+    }
+    return out;
+  } else {
+    const brandSvg = `<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#070B12"/>
+          <stop offset="60%" stop-color="#0E1525"/>
+          <stop offset="100%" stop-color="#1A160B"/>
+        </linearGradient>
+      </defs>
+      <rect width="1200" height="630" fill="url(#bg)"/>
+      <circle cx="1060" cy="120" r="240" fill="#F59E0B" fill-opacity="0.08"/>
+      <rect x="40" y="40" width="1120" height="550" rx="24" fill="none" stroke="#F59E0B" stroke-opacity="0.3" stroke-width="2"/>
+      <rect x="72" y="72" width="168" height="42" rx="10" fill="#F59E0B" fill-opacity="0.15" stroke="#F59E0B" stroke-width="1.5"/>
+      <text x="156" y="99" text-anchor="middle" fill="#F59E0B" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="18" font-weight="800" letter-spacing="2">KWEGATTA</text>
+      <text x="72" y="${titleY1}" fill="#FAFAFC" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="48" font-weight="800">${safeLine1}</text>
+      ${safeLine2 ? `<text x="72" y="${titleY2}" fill="#FAFAFC" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="48" font-weight="800">${safeLine2}</text>` : ''}
+      <text x="72" y="${metaY - 12}" fill="#F59E0B" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="24" font-weight="600">${safeMetaLine}</text>
+    </svg>`;
+
+    let out = await sharp(Buffer.from(brandSvg))
+      .resize(1200, 630)
+      .jpeg({ quality: 80 })
+      .toBuffer();
+    if (out.length > 300 * 1024) {
+      out = await sharp(out).jpeg({ quality: 65 }).toBuffer();
+    }
+    return out;
+  }
+}
+
+app.get('/og/event/:id.jpg', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!isEventPubliclyVisible(item)) {
+    return res.redirect(302, '/og-image.png');
+  }
+
+  const vHash = computeEventOgVersionHash(item);
+  const cacheKey = `${id}:${vHash}`;
+  const etag = `"${id}-${vHash}"`;
+
+  if (req.headers['if-none-match'] === etag && ogImageLruCache.has(cacheKey)) {
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.status(304).end();
+  }
+
+  const cached = ogImageLruCache.get(cacheKey);
+  if (cached) {
+    // Refresh LRU order
+    ogImageLruCache.delete(cacheKey);
+    ogImageLruCache.set(cacheKey, cached);
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('ETag', etag);
+    return res.status(200).send(cached);
+  }
+
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(new Error('OG image render timeout')), 5000);
+    });
+    const jpegBuffer = await Promise.race([renderEventOgJpeg(item), timeoutPromise]);
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+
+    if (ogImageLruCache.size >= OG_IMAGE_LRU_MAX) {
+      const oldestKey = ogImageLruCache.keys().next().value;
+      if (oldestKey) ogImageLruCache.delete(oldestKey);
+    }
+    ogImageLruCache.set(cacheKey, jpegBuffer);
+
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('ETag', etag);
+    return res.status(200).send(jpegBuffer);
+  } catch (err: any) {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+    console.warn('[OG Image] Failed to render event OG image:', err?.message || err);
+    return res.redirect(302, '/og-image.png');
+  }
 });
 
 // Mark Notification as Read (own notifications only)
@@ -5140,6 +5541,55 @@ export function filterEventsForCaller(
   });
 }
 
+export function getCombinedWaitlistQueue(item: any): Array<{
+  kind: 'member' | 'guest';
+  id: string;
+  timestamp: string;
+  seq: number;
+}> {
+  if (!item) return [];
+  const entries: Array<{ kind: 'member' | 'guest'; id: string; timestamp: string; seq: number }> = [];
+  let seq = 0;
+
+  const waitlistIds = Array.isArray(item.waitlist_ids) ? item.waitlist_ids : [];
+  const waitlistTimes = (item.waitlist_times && typeof item.waitlist_times === 'object') ? item.waitlist_times : {};
+  for (const mId of waitlistIds) {
+    entries.push({
+      kind: 'member',
+      id: mId,
+      timestamp: waitlistTimes[mId] || item.created_at || '1970-01-01T00:00:00.000Z',
+      seq: seq++
+    });
+  }
+
+  const waitlistedGuests = (store.event_guests || []).filter(
+    (g: any) => g.event_id === item.id && g.status === 'waitlist'
+  );
+  for (const g of waitlistedGuests) {
+    entries.push({
+      kind: 'guest',
+      id: g.id,
+      timestamp: g.waitlist_at || g.created_at || '1970-01-01T00:00:00.000Z',
+      seq: seq++
+    });
+  }
+
+  entries.sort((a, b) => {
+    const cmp = String(a.timestamp).localeCompare(String(b.timestamp));
+    return cmp !== 0 ? cmp : a.seq - b.seq;
+  });
+
+  return entries;
+}
+
+export function getWaitlistPosition(item: any, kind: 'member' | 'guest', targetId: string, altId?: string | null): number | null {
+  const queue = getCombinedWaitlistQueue(item);
+  const idx = queue.findIndex(
+    e => e.kind === kind && (e.id === targetId || (altId ? e.id === altId : false))
+  );
+  return idx >= 0 ? idx + 1 : null;
+}
+
 export function canViewHostContact(item: any, callerId?: string | null, isAdmin: boolean = false, guestToken?: string): boolean {
   if (!item) return false;
   if (isAdmin) return true;
@@ -5153,7 +5603,7 @@ export function canViewHostContact(item: any, callerId?: string | null, isAdmin:
   if (guestToken) {
     const tokenHash = crypto.createHash('sha256').update(guestToken).digest('hex');
     const isValidGuest = (store.event_guests || []).some(
-      (g: any) => g.event_id === item.id && g.token_hash === tokenHash
+      (g: any) => g.event_id === item.id && g.token_hash === tokenHash && g.status !== 'waitlist'
     );
     if (isValidGuest) return true;
   }
@@ -5196,8 +5646,16 @@ export function sanitizeEventForPublic(
   const isPast = phase === 'past';
   const hasRealTimes = Boolean(item.starts_at && item.ends_at);
 
-  const guestCount = (store.event_guests || []).filter((g: any) => g.event_id === item.id).length;
+  const guestCount = (store.event_guests || []).filter(
+    (g: any) => g.event_id === item.id && g.status !== 'waitlist'
+  ).length;
   const totalAttendeeCount = attendeeIds.length + guestCount;
+
+  const waitlistQueue = getCombinedWaitlistQueue(item);
+  const waitlistCount = waitlistQueue.length;
+  const myWaitlistPosition = callerId
+    ? getWaitlistPosition(item, 'member', callerProfileId || callerId, callerId)
+    : null;
 
   const coverImage = item.cover_image
     ? (item.cover_image.startsWith('/') ? item.cover_image : `/api/event-image/${item.id}`)
@@ -5225,6 +5683,9 @@ export function sanitizeEventForPublic(
     link: item.link,
     registration_link: item.registration_link,
     capacity: item.capacity,
+    waitlist_enabled: item.waitlist_enabled !== false,
+    waitlist_count: waitlistCount,
+    my_waitlist_position: myWaitlistPosition,
     author_id: item.author_id,
     author_name: item.author_name,
     published: item.published,
@@ -5379,6 +5840,7 @@ export function generateEventIcsContent(item: any): string {
     : toIcsUtc(new Date(new Date(item.starts_at || item.datetime || Date.now()).getTime() + 7200000).toISOString());
   const loc = item.format === 'online' ? (item.join_link || 'Online') : (item.venue || item.location || 'Kampala');
   const clean = (s: string) => String(s || '').replace(/\r?\n/g, '\\n');
+  const shareUrl = `${getPublicAppUrl()}/e/${item.id}`;
 
   return [
     'BEGIN:VCALENDAR',
@@ -5392,6 +5854,7 @@ export function generateEventIcsContent(item: any): string {
     `SUMMARY:${clean(item.title)}`,
     `DESCRIPTION:${clean(item.description)}`,
     `LOCATION:${clean(loc)}`,
+    `URL:${shareUrl}`,
     'END:VEVENT',
     'END:VCALENDAR'
   ].join('\r\n');
@@ -5411,7 +5874,8 @@ export async function sendEventConfirmationEmail(
   item: any,
   recipientEmail: string | undefined,
   recipientName: string,
-  ticketUrl: string
+  ticketUrl: string,
+  isPromotion: boolean = false
 ): Promise<boolean> {
   if (!recipientEmail || !recipientEmail.includes('@')) return false;
   const smtpUser = process.env.SMTP_USER ? process.env.SMTP_USER.trim() : '';
@@ -5446,19 +5910,23 @@ export async function sendEventConfirmationEmail(
     ? `Online link: ${item.join_link || 'Provided on event page'}`
     : `Venue: ${item.venue || item.location || 'See event page'}`;
 
+  const publicEventUrl = `${getPublicAppUrl()}/e/${item.id}`;
   const icsContent = generateEventIcsContent(item);
   const mailOptions: any = {
     from: smtpUser,
     to: recipientEmail,
     ...(item.contact_email ? { replyTo: item.contact_email } : {}),
-    subject: `Confirmation: ${item.title}`,
+    subject: isPromotion ? `A spot opened up: ${item.title}` : `Confirmation: ${item.title}`,
     text: [
       `Hi ${recipientName || 'there'},`,
       '',
-      `You are registered for "${item.title}" on Kwegatta.`,
+      isPromotion
+        ? `A spot opened up — you're now registered for "${item.title}" on Kwegatta.`
+        : `You are registered for "${item.title}" on Kwegatta.`,
       `Date & Time: ${formattedDate}`,
       placeLine,
       '',
+      `Event page: ${publicEventUrl}`,
       `View your ticket: ${ticketUrl}`,
       '',
       'An .ics calendar invite is attached to this email.'
@@ -5496,6 +5964,94 @@ export async function sendEventConfirmationEmail(
     console.warn('[Email] Could not send event confirmation email:', err?.message || err);
     return false;
   }
+}
+
+export async function promoteFromWaitlist(eventOrId: string | any): Promise<number> {
+  const eventId = typeof eventOrId === 'string' ? eventOrId : eventOrId?.id;
+  if (!eventId) return 0;
+  const item =
+    typeof eventOrId === 'object' && eventOrId
+      ? eventOrId
+      : (store.events || []).find((e: any) => e.id === eventId);
+  if (!item || item.is_cancelled) return 0;
+
+  if (!Array.isArray(item.attendee_ids)) item.attendee_ids = [];
+  if (!Array.isArray(item.waitlist_ids)) item.waitlist_ids = [];
+  if (!item.waitlist_times || typeof item.waitlist_times !== 'object') item.waitlist_times = {};
+  if (!item.rsvp_times || typeof item.rsvp_times !== 'object') item.rsvp_times = {};
+  if (!item.member_ticket_hashes || typeof item.member_ticket_hashes !== 'object') item.member_ticket_hashes = {};
+
+  let promotedCount = 0;
+
+  while (true) {
+    const queue = getCombinedWaitlistQueue(item);
+    if (queue.length === 0) break;
+
+    const regGuestCount = (store.event_guests || []).filter(
+      (g: any) => g.event_id === eventId && g.status !== 'waitlist'
+    ).length;
+    const currentTotal = item.attendee_ids.length + regGuestCount;
+
+    if (item.capacity && item.capacity > 0 && currentTotal >= item.capacity) {
+      break;
+    }
+
+    const next = queue[0];
+    const promotedAt = new Date().toISOString();
+
+    if (next.kind === 'member') {
+      item.waitlist_ids = item.waitlist_ids.filter((wId: string) => wId !== next.id);
+      delete item.waitlist_times[next.id];
+
+      if (!item.attendee_ids.includes(next.id)) {
+        item.attendee_ids.push(next.id);
+        item.rsvp_times[next.id] = promotedAt;
+        const code = deriveTicketCode(eventId, `member:${next.id}`, promotedAt);
+        item.member_ticket_hashes[next.id] = hashTicketCode(code);
+        await persistDoc('events', item.id, item);
+
+        const memberProfile = store.profiles.find((p: any) => p.id === next.id || p.account_uid === next.id);
+        const notif = {
+          id: 'notif-promo-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
+          to_id: memberProfile?.id || next.id,
+          from_id: item.author_id || 'organiser',
+          type: 'waitlist_promoted',
+          body: `A spot opened up — you're now registered for ${item.title}.`,
+          link: `${getPublicAppUrl()}/e/${eventId}`,
+          event_id: eventId,
+          read: false,
+          created_at: promotedAt
+        };
+        store.notifications.unshift(notif);
+        await persistDoc('notifications', notif.id, notif);
+
+        if (memberProfile?.email) {
+          const ticketUrl = `${getPublicAppUrl()}/#/events/${eventId}/ticket`;
+          await sendEventConfirmationEmail(item, memberProfile.email, memberProfile.name || 'Member', ticketUrl, true);
+        }
+        promotedCount++;
+      } else {
+        await persistDoc('events', item.id, item);
+      }
+    } else {
+      const guestRec = (store.event_guests || []).find((g: any) => g.event_id === eventId && g.id === next.id);
+      if (!guestRec || guestRec.status !== 'waitlist') {
+        break;
+      }
+      guestRec.status = 'registered';
+      const code = deriveTicketCode(eventId, `guest:${guestRec.id}`, guestRec.created_at || promotedAt);
+      guestRec.code_hash = hashTicketCode(code);
+      await persistDoc('event_guests', guestRec.id, guestRec);
+
+      if (guestRec.email) {
+        const ticketUrl = `${getPublicAppUrl()}/e/${eventId}`;
+        await sendEventConfirmationEmail(item, guestRec.email, guestRec.name || 'Guest', ticketUrl, true);
+      }
+      promotedCount++;
+    }
+  }
+
+  return promotedCount;
 }
 
 app.get('/api/events', (req: Request, res: Response) => {
@@ -5566,6 +6122,39 @@ app.get('/api/events', (req: Request, res: Response) => {
   });
   return res.json(sanitizedList);
 });
+
+function buildWaitlistDetails(item: any): any[] {
+  const queue = getCombinedWaitlistQueue(item);
+  return queue.map((entry, idx) => {
+    if (entry.kind === 'member') {
+      const prof = store.profiles.find((p: any) => p.id === entry.id || p.account_uid === entry.id);
+      return {
+        position: idx + 1,
+        kind: 'member',
+        type: 'member',
+        id: prof?.id || entry.id,
+        name: prof?.name || 'Member',
+        avatar: prof ? `/api/avatar/${prof.id}` : undefined,
+        role: prof?.role,
+        headline: prof?.headline,
+        created_at: entry.timestamp
+      };
+    } else {
+      const g = (store.event_guests || []).find((guest: any) => guest.event_id === item.id && guest.id === entry.id);
+      return {
+        position: idx + 1,
+        kind: 'guest',
+        type: 'guest',
+        id: g?.id || entry.id,
+        name: g?.name || 'Guest',
+        email: g?.email,
+        phone: g?.phone,
+        waitlist_at: g?.waitlist_at || g?.created_at || entry.timestamp,
+        created_at: g?.waitlist_at || g?.created_at || entry.timestamp
+      };
+    }
+  });
+}
 
 app.get('/api/events/:id', (req: Request, res: Response) => {
   cleanupExpiredGuestRecords();
@@ -5678,18 +6267,21 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
     const tokenHash = crypto.createHash('sha256').update(guestToken).digest('hex');
     const guestRec = (store.event_guests || []).find((g: any) => g.event_id === id && g.token_hash === tokenHash);
     if (guestRec) {
+      const gStatus = guestRec.status === 'waitlist' ? 'waitlist' : 'registered';
       guestInfo = {
         id: guestRec.id,
         name: guestRec.name,
         phone: guestRec.phone,
         email: guestRec.email,
+        status: gStatus,
+        waitlist_position: gStatus === 'waitlist' ? getWaitlistPosition(item, 'guest', guestRec.id) : null,
         created_at: guestRec.created_at
       };
     }
   }
 
   const canSeeAttendees = isAdmin || isAuthor || isAttending;
-  const rawGuests = (store.event_guests || []).filter((g: any) => g.event_id === id);
+  const rawGuests = (store.event_guests || []).filter((g: any) => g.event_id === id && g.status !== 'waitlist');
   const guestsForCaller = ((callerId || isAdmin) && canSeeAttendees)
     ? rawGuests.map((g: any) => {
         const chk = (isAuthor || isAdmin)
@@ -5700,6 +6292,7 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
           event_id: g.event_id,
           name: g.name,
           type: 'guest',
+          status: 'registered',
           created_at: g.created_at,
           registered_at: g.created_at
         };
@@ -5718,10 +6311,113 @@ app.get('/api/events/:id', (req: Request, res: Response) => {
     ...sanitized,
     attendees: ((callerId || isAdmin) && canSeeAttendees) ? attendeeProfiles : undefined,
     guests: guestsForCaller,
+    waitlist: (isAuthor || isAdmin) ? buildWaitlistDetails(item) : undefined,
     people_to_meet: callerId ? peopleToMeet : undefined,
     is_attending: isAttending,
     guest_info: guestInfo
   });
+});
+
+app.get('/api/events/:id/attendees', (req: Request, res: Response) => {
+  cleanupExpiredGuestRecords();
+  const { id } = req.params;
+  const callerId = resolveAuthUserId(req);
+  const isAdmin = checkAdmin(req);
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
+
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) {
+    return res.status(404).json({ error: 'Event not found' });
+  }
+
+  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
+  const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
+  const isAttending = Boolean(callerId && (attendeeIds.includes(callerId) || (callerProfileId && attendeeIds.includes(callerProfileId))));
+
+  if (!isAdmin && !isAuthor && !isAttending) {
+    return res.status(403).json({ error: 'Forbidden: Only attendees, the host, or an admin can view the attendee list.' });
+  }
+
+  const attendees = store.profiles
+    .filter((p: any) => attendeeIds.includes(p.id) && !p.hidden && !p.suspended)
+    .map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      avatar: `/api/avatar/${p.id}`,
+      role: p.role,
+      headline: p.headline,
+      type: 'member',
+      registered_at: (item.rsvp_times && item.rsvp_times[p.id]) || item.created_at || p.created_at
+    }));
+
+  const confirmedGuests = (store.event_guests || []).filter((g: any) => g.event_id === id && g.status !== 'waitlist');
+  const waitlistQueue = getCombinedWaitlistQueue(item);
+
+  return res.json({
+    attendees,
+    guest_count: confirmedGuests.length,
+    waitlist_count: waitlistQueue.length,
+    ...((isAuthor || isAdmin) ? {
+      guests: confirmedGuests.map((g: any) => ({
+        id: g.id,
+        event_id: g.event_id,
+        name: g.name,
+        email: g.email,
+        phone: g.phone,
+        status: 'registered',
+        created_at: g.created_at
+      })),
+      waitlist: buildWaitlistDetails(item)
+    } : {})
+  });
+});
+
+app.delete('/api/events/:id/attendees/:memberId', async (req: Request, res: Response) => {
+  cleanupExpiredGuestRecords();
+  const callerId = resolveAuthUserId(req);
+  const isAdmin = checkAdmin(req);
+  const { id, memberId } = req.params;
+
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!item) return res.status(404).json({ error: 'Event not found.' });
+
+  const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
+  const callerProfileId = callerProfile?.id || callerId;
+  const isAuthor = Boolean(callerProfileId && (item.author_id === callerProfileId || item.author_id === callerId));
+
+  if (!isAuthor && !isAdmin) {
+    return res.status(403).json({ error: 'Forbidden: Only the event host or an admin can remove attendees.' });
+  }
+
+  if (!Array.isArray(item.attendee_ids)) item.attendee_ids = [];
+  if (!Array.isArray(item.waitlist_ids)) item.waitlist_ids = [];
+
+  const attIdx = item.attendee_ids.indexOf(memberId);
+  const waitIdx = item.waitlist_ids.indexOf(memberId);
+  if (attIdx < 0 && waitIdx < 0) {
+    return res.status(404).json({ error: 'Attendee not found on this event.' });
+  }
+
+  let freedSeat = false;
+  if (attIdx >= 0) {
+    item.attendee_ids.splice(attIdx, 1);
+    if (item.rsvp_times && typeof item.rsvp_times === 'object') delete item.rsvp_times[memberId];
+    if (item.member_ticket_hashes && typeof item.member_ticket_hashes === 'object') delete item.member_ticket_hashes[memberId];
+    freedSeat = true;
+  }
+  if (waitIdx >= 0) {
+    item.waitlist_ids.splice(waitIdx, 1);
+    if (item.waitlist_times && typeof item.waitlist_times === 'object') delete item.waitlist_times[memberId];
+  }
+
+  await persistDoc('events', item.id, item);
+  if (freedSeat) {
+    await promoteFromWaitlist(id);
+  }
+  if (storageMode === 'disk') saveStore(store);
+
+  return res.json({ success: true });
 });
 
 app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
@@ -5752,12 +6448,22 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
   if (!Array.isArray(item.attendee_ids)) {
     item.attendee_ids = [];
   }
+  if (!Array.isArray(item.waitlist_ids)) {
+    item.waitlist_ids = [];
+  }
+  if (!item.waitlist_times || typeof item.waitlist_times !== 'object') {
+    item.waitlist_times = {};
+  }
 
-  const index = item.attendee_ids.indexOf(memberId);
-  let isGoing = false;
+  const attIndex = item.attendee_ids.findIndex((aId: string) => aId === memberId || aId === callerId);
+  const waitIndex = item.waitlist_ids.findIndex((wId: string) => wId === memberId || wId === callerId);
 
-  if (index >= 0) {
-    item.attendee_ids.splice(index, 1);
+  let rsvpStatus: 'going' | 'waitlisted' | 'left_waitlist' | 'none' = 'none';
+  let waitlistPosition: number | null = null;
+  let freedConfirmedSeat = false;
+
+  if (attIndex >= 0) {
+    item.attendee_ids.splice(attIndex, 1);
     if (item.rsvp_times && typeof item.rsvp_times === 'object') {
       delete item.rsvp_times[memberId];
       if (callerId) delete item.rsvp_times[callerId];
@@ -5781,45 +6487,70 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
     if (Array.isArray(item.match_optout_ids)) {
       item.match_optout_ids = item.match_optout_ids.filter((optId: string) => optId !== memberId && optId !== callerId);
     }
-    isGoing = false;
+    rsvpStatus = 'none';
+    freedConfirmedSeat = true;
+  } else if (waitIndex >= 0) {
+    item.waitlist_ids.splice(waitIndex, 1);
+    delete item.waitlist_times[memberId];
+    if (callerId) delete item.waitlist_times[callerId];
+    rsvpStatus = 'left_waitlist';
   } else {
-    if (item.capacity && item.capacity > 0) {
-      const guestCount = (store.event_guests || []).filter((g: any) => g.event_id === id).length;
-      const currentTotal = item.attendee_ids.length + guestCount;
-      if (currentTotal >= item.capacity) {
+    const regGuestCount = (store.event_guests || []).filter(
+      (g: any) => g.event_id === id && g.status !== 'waitlist'
+    ).length;
+    const currentTotal = item.attendee_ids.length + regGuestCount;
+    const isFull = Boolean(item.capacity && item.capacity > 0 && currentTotal >= item.capacity);
+
+    if (isFull) {
+      if (item.waitlist_enabled === false) {
         return res.status(400).json({ error: 'Event is at full capacity.' });
       }
-    }
-    item.attendee_ids.push(memberId);
-    if (!item.rsvp_times || typeof item.rsvp_times !== 'object') {
-      item.rsvp_times = {};
-    }
-    const rsvpNow = new Date().toISOString();
-    item.rsvp_times[memberId] = rsvpNow;
-    if (!item.member_ticket_hashes || typeof item.member_ticket_hashes !== 'object') {
-      item.member_ticket_hashes = {};
-    }
-    const code = deriveTicketCode(id, `member:${memberId}`, rsvpNow);
-    item.member_ticket_hashes[memberId] = hashTicketCode(code);
-
-    if (!Array.isArray(item.match_optout_ids)) {
-      item.match_optout_ids = [];
-    }
-    const rawBody = req.body || {};
-    const optIn = rawBody.opt_in !== undefined ? Boolean(rawBody.opt_in) : (rawBody.show_in_people_to_meet !== undefined ? Boolean(rawBody.show_in_people_to_meet) : (rawBody.match_optout !== undefined ? !rawBody.match_optout : true));
-    if (!optIn) {
-      if (!item.match_optout_ids.includes(memberId)) item.match_optout_ids.push(memberId);
+      const maxWaitlist = Math.min(200, (item.capacity || 0) * 3);
+      if (getCombinedWaitlistQueue(item).length >= maxWaitlist) {
+        return res.status(400).json({ error: 'Event is at full capacity (waitlist full).' });
+      }
+      const waitNow = new Date().toISOString();
+      if (!item.waitlist_ids.includes(memberId)) {
+        item.waitlist_ids.push(memberId);
+      }
+      item.waitlist_times[memberId] = waitNow;
+      rsvpStatus = 'waitlisted';
+      waitlistPosition = getWaitlistPosition(item, 'member', memberId, callerId);
     } else {
-      item.match_optout_ids = item.match_optout_ids.filter((optId: string) => optId !== memberId && optId !== callerId);
-    }
+      item.attendee_ids.push(memberId);
+      if (!item.rsvp_times || typeof item.rsvp_times !== 'object') {
+        item.rsvp_times = {};
+      }
+      const rsvpNow = new Date().toISOString();
+      item.rsvp_times[memberId] = rsvpNow;
+      if (!item.member_ticket_hashes || typeof item.member_ticket_hashes !== 'object') {
+        item.member_ticket_hashes = {};
+      }
+      const code = deriveTicketCode(id, `member:${memberId}`, rsvpNow);
+      item.member_ticket_hashes[memberId] = hashTicketCode(code);
 
-    isGoing = true;
+      if (!Array.isArray(item.match_optout_ids)) {
+        item.match_optout_ids = [];
+      }
+      const rawBody = req.body || {};
+      const optIn = rawBody.opt_in !== undefined ? Boolean(rawBody.opt_in) : (rawBody.show_in_people_to_meet !== undefined ? Boolean(rawBody.show_in_people_to_meet) : (rawBody.match_optout !== undefined ? !rawBody.match_optout : true));
+      if (!optIn) {
+        if (!item.match_optout_ids.includes(memberId)) item.match_optout_ids.push(memberId);
+      } else {
+        item.match_optout_ids = item.match_optout_ids.filter((optId: string) => optId !== memberId && optId !== callerId);
+      }
+
+      rsvpStatus = 'going';
+    }
   }
 
   await persistDoc('events', item.id, item);
+  if (freedConfirmedSeat) {
+    await promoteFromWaitlist(id);
+  }
   if (storageMode === 'disk') saveStore(store);
 
-  if (isGoing) {
+  if (rsvpStatus === 'going') {
     let memberEmail = callerProfile?.email || (req as any).authUser?.email || '';
     if (!memberEmail && adminAuth && callerId) {
       try {
@@ -5827,16 +6558,24 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
         if (u?.email) memberEmail = u.email;
       } catch (_) {}
     }
-    const appBase = (process.env.APP_URL || 'https://kwegatta.ai.studio').replace(/\/$/, '');
+    const appBase = getPublicAppUrl();
     const ticketUrl = `${appBase}/#/events/${item.id}/ticket`;
     await sendEventConfirmationEmail(item, memberEmail, callerProfile?.name || 'Member', ticketUrl);
   }
 
-  const guestCount = (store.event_guests || []).filter((g: any) => g.event_id === id).length;
+  const regGuestCountAfter = (store.event_guests || []).filter(
+    (g: any) => g.event_id === id && g.status !== 'waitlist'
+  ).length;
+  const waitlistCountAfter = getCombinedWaitlistQueue(item).length;
+
   return res.json({
     success: true,
-    is_attending: isGoing,
-    attendee_count: item.attendee_ids.length + guestCount
+    status: rsvpStatus,
+    ...(rsvpStatus === 'waitlisted' ? { position: waitlistPosition } : {}),
+    is_attending: rsvpStatus === 'going',
+    attendee_count: item.attendee_ids.length + regGuestCountAfter,
+    waitlist_count: waitlistCountAfter,
+    my_waitlist_position: rsvpStatus === 'waitlisted' ? waitlistPosition : null
   });
 });
 
@@ -5959,6 +6698,7 @@ app.post('/api/events', async (req: Request, res: Response) => {
   const status = 'published';
   const published = true;
   const resolvedVenue = timeValidation.location || (raw.venue ? sanitizeText(raw.venue, 200) : (raw.location ? sanitizeText(raw.location, 200) : undefined));
+  const waitlist_enabled = raw.waitlist_enabled !== undefined ? Boolean(raw.waitlist_enabled) : true;
 
   const item: any = {
     id: (kind === 'event' ? 'event-' : 'opp-') + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
@@ -5975,6 +6715,9 @@ app.post('/api/events', async (req: Request, res: Response) => {
     map_link,
     tags,
     capacity,
+    waitlist_enabled,
+    waitlist_ids: [],
+    waitlist_times: {},
     join_link: timeValidation.join_link,
     contact_phone,
     contact_email,
@@ -6025,6 +6768,8 @@ app.post('/api/events', async (req: Request, res: Response) => {
       from_id: 'organiser',
       type: 'digest',
       body: notifBody,
+      event_id: item.id,
+      link: `${getPublicAppUrl()}/e/${item.id}`,
       read: false,
       created_at: new Date().toISOString()
     };
@@ -6098,15 +6843,27 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
     if (timeValidation.time_needs_update !== undefined) item.time_needs_update = timeValidation.time_needs_update;
   }
 
+  const prevCapacity = item.capacity;
+  let shouldPromote = false;
   if (raw.capacity !== undefined) {
     if (raw.capacity === null || raw.capacity === '') {
       delete item.capacity;
+      if (prevCapacity) shouldPromote = true;
     } else {
       const capNum = Number(raw.capacity);
       if (!Number.isInteger(capNum) || capNum < 1 || capNum > 5000) {
         return res.status(400).json({ error: 'Capacity must be an integer between 1 and 5000.' });
       }
       item.capacity = capNum;
+      if (!prevCapacity || capNum > prevCapacity) {
+        shouldPromote = true;
+      }
+    }
+  }
+  if (raw.waitlist_enabled !== undefined) {
+    item.waitlist_enabled = Boolean(raw.waitlist_enabled);
+    if (item.waitlist_enabled) {
+      shouldPromote = true;
     }
   }
 
@@ -6184,6 +6941,9 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
   }
 
   await persistDoc('events', item.id, item);
+  if (shouldPromote) {
+    await promoteFromWaitlist(item.id);
+  }
 
   const auditEntry = {
     id: 'audit-' + Date.now(),
@@ -6635,11 +7395,18 @@ app.post('/api/events/:id/guest-register', async (req: Request, res: Response) =
   }
 
   // Capacity check
-  if (item.capacity && item.capacity > 0) {
-    const guestCount = (store.event_guests || []).filter((g: any) => g.event_id === id).length;
-    const currentTotal = (Array.isArray(item.attendee_ids) ? item.attendee_ids.length : 0) + guestCount;
-    if (currentTotal >= item.capacity) {
+  const regGuestCount = (store.event_guests || []).filter(
+    (g: any) => g.event_id === id && g.status !== 'waitlist'
+  ).length;
+  const currentTotal = (Array.isArray(item.attendee_ids) ? item.attendee_ids.length : 0) + regGuestCount;
+  const isFull = Boolean(item.capacity && item.capacity > 0 && currentTotal >= item.capacity);
+  if (isFull) {
+    if (item.waitlist_enabled === false) {
       return res.status(400).json({ error: 'Event is at full capacity.' });
+    }
+    const maxWaitlist = Math.min(200, (item.capacity || 0) * 3);
+    if (getCombinedWaitlistQueue(item).length >= maxWaitlist) {
+      return res.status(400).json({ error: 'Event is at full capacity (waitlist full).' });
     }
   }
 
@@ -6688,15 +7455,50 @@ app.post('/api/events/:id/guest-register', async (req: Request, res: Response) =
   const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
   const guestId = 'guest-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex');
   const createdAt = new Date().toISOString();
+
+  // Record IP hits
+  eventTs.push(now);
+  ipRecord.eventRegistrations.set(id, eventTs);
+  ipRecord.totalTimestamps.push(now);
+
+  if (isFull) {
+    const guestRecord: any = {
+      id: guestId,
+      event_id: id,
+      name,
+      phone,
+      email,
+      status: 'waitlist',
+      waitlist_at: createdAt,
+      created_at: createdAt,
+      token_hash: tokenHash
+    };
+
+    if (!Array.isArray(store.event_guests)) store.event_guests = [];
+    store.event_guests.push(guestRecord);
+    await persistDoc('event_guests', guestRecord.id, guestRecord);
+
+    const position = getWaitlistPosition(item, 'guest', guestRecord.id) || 1;
+    return res.json({
+      success: true,
+      status: 'waitlisted',
+      position,
+      token: rawToken,
+      guest_id: guestRecord.id,
+      event_id: id
+    });
+  }
+
   const ticketCode = deriveTicketCode(id, `guest:${guestId}`, createdAt);
   const codeHash = hashTicketCode(ticketCode);
 
-  const guestRecord = {
+  const guestRecord: any = {
     id: guestId,
     event_id: id,
     name,
     phone,
     email,
+    status: 'registered',
     created_at: createdAt,
     token_hash: tokenHash,
     code_hash: codeHash
@@ -6706,19 +7508,15 @@ app.post('/api/events/:id/guest-register', async (req: Request, res: Response) =
   store.event_guests.push(guestRecord);
   await persistDoc('event_guests', guestRecord.id, guestRecord);
 
-  // Record IP hits
-  eventTs.push(now);
-  ipRecord.eventRegistrations.set(id, eventTs);
-  ipRecord.totalTimestamps.push(now);
-
   if (email) {
-    const appBase = (process.env.APP_URL || 'https://kwegatta.ai.studio').replace(/\/$/, '');
+    const appBase = getPublicAppUrl();
     const ticketUrl = `${appBase}/#/events/${id}/ticket?g=${encodeURIComponent(rawToken)}`;
     await sendEventConfirmationEmail(item, email, name, ticketUrl);
   }
 
   return res.json({
     success: true,
+    status: 'going',
     token: rawToken,
     guest_id: guestRecord.id,
     event_id: id,
@@ -6743,9 +7541,15 @@ app.post('/api/events/:id/guest-cancel', async (req: Request, res: Response) => 
     return res.status(400).json({ error: 'Invalid registration token.' });
   }
 
-  const guestId = store.event_guests[guestIndex].id;
+  const guestRec = store.event_guests[guestIndex];
+  const wasRegistered = guestRec.status !== 'waitlist';
+  const guestId = guestRec.id;
   store.event_guests.splice(guestIndex, 1);
   await removeDoc('event_guests', guestId);
+
+  if (wasRegistered) {
+    await promoteFromWaitlist(id);
+  }
 
   return res.json({ success: true, message: 'Registration cancelled.' });
 });
@@ -6775,6 +7579,7 @@ app.get('/api/events/:id/guests', (req: Request, res: Response) => {
       name: g.name,
       phone: g.phone,
       email: g.email,
+      status: g.status || 'registered',
       created_at: g.created_at
     }));
 
@@ -6801,8 +7606,13 @@ app.delete('/api/events/:id/guests/:gid', async (req: Request, res: Response) =>
   const guestIndex = (store.event_guests || []).findIndex((g: any) => g.id === gid && g.event_id === id);
   if (guestIndex < 0) return res.status(404).json({ error: 'Guest registration not found.' });
 
+  const wasRegistered = store.event_guests[guestIndex].status !== 'waitlist';
   store.event_guests.splice(guestIndex, 1);
   await removeDoc('event_guests', gid);
+
+  if (wasRegistered) {
+    await promoteFromWaitlist(id);
+  }
 
   return res.json({ success: true });
 });
@@ -6858,6 +7668,7 @@ app.post('/api/admin/events/:id/hide', async (req: Request, res: Response) => {
         type: 'moderation',
         body: `Your event "${item.title}" was hidden by a moderator. Reason: ${reasonStr}.`,
         event_id: id,
+        link: `${getPublicAppUrl()}/e/${id}`,
         read: false,
         created_at: new Date().toISOString()
       };
@@ -6905,6 +7716,7 @@ app.post('/api/admin/events/:id/restore', async (req: Request, res: Response) =>
         type: 'moderation',
         body: `Your event "${item.title}" is visible again.`,
         event_id: id,
+        link: `${getPublicAppUrl()}/e/${id}`,
         read: false,
         created_at: new Date().toISOString()
       };
@@ -7139,6 +7951,8 @@ app.post('/api/events/:id/update', async (req: Request, res: Response) => {
       from_id: item.author_id || 'organiser',
       type: 'digest',
       body: `📢 Update on "${item.title}" from ${authorName}: ${message}`,
+      event_id: id,
+      link: `${getPublicAppUrl()}/e/${id}`,
       read: false,
       created_at: new Date().toISOString()
     };
@@ -7154,7 +7968,7 @@ app.post('/api/events/:id/update', async (req: Request, res: Response) => {
   return res.json({ success: true, count: attendeeIds.length });
 });
 
-app.get('/api/events/:id/export', (req: Request, res: Response) => {
+app.get(['/api/events/:id/export', '/api/events/:id/attendees.csv'], (req: Request, res: Response) => {
   cleanupExpiredGuestRecords();
   const isAdmin = checkAdmin(req);
   const callerId = resolveAuthUserId(req);
@@ -7179,26 +7993,35 @@ app.get('/api/events/:id/export', (req: Request, res: Response) => {
 
   const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
   const attendeeProfiles = store.profiles.filter((p: any) => attendeeIds.includes(p.id) && !p.hidden && !p.suspended);
-  const guests = (store.event_guests || []).filter((g: any) => g.event_id === id);
+  const confirmedGuests = (store.event_guests || []).filter((g: any) => g.event_id === id && g.status !== 'waitlist');
   const eventCheckins = (store.event_checkins || []).filter((c: any) => c.event_id === id);
 
-  let csv = 'name,type,email,registered_at,checked_in_at,method\n';
+  let csv = 'name,type,email,registered_at,checked_in_at,method,status\n';
   for (const p of attendeeProfiles) {
     const cleanName = (p.name || '').replace(/"/g, '""');
     const regAt = ((item.rsvp_times && item.rsvp_times[p.id]) || item.created_at || '').replace(/"/g, '""');
     const chk = eventCheckins.find((c: any) => c.kind === 'member' && (c.ref_id === p.id || c.ref_id === p.account_uid));
     const checkedInAt = (chk?.checked_in_at || '').replace(/"/g, '""');
     const method = (chk?.method || '').replace(/"/g, '""');
-    csv += `"${cleanName}","Member","","${regAt}","${checkedInAt}","${method}"\n`;
+    csv += `"${cleanName}","Member","","${regAt}","${checkedInAt}","${method}","going"\n`;
   }
-  for (const g of guests) {
+  for (const g of confirmedGuests) {
     const cleanName = (g.name || '').replace(/"/g, '""');
     const cleanEmail = (g.email || '').replace(/"/g, '""');
     const regAt = (g.created_at || '').replace(/"/g, '""');
     const chk = eventCheckins.find((c: any) => c.kind === 'guest' && c.ref_id === g.id);
     const checkedInAt = (chk?.checked_in_at || '').replace(/"/g, '""');
     const method = (chk?.method || '').replace(/"/g, '""');
-    csv += `"${cleanName}","Guest","${cleanEmail}","${regAt}","${checkedInAt}","${method}"\n`;
+    csv += `"${cleanName}","Guest","${cleanEmail}","${regAt}","${checkedInAt}","${method}","going"\n`;
+  }
+
+  const waitlistDetails = buildWaitlistDetails(item);
+  for (const w of waitlistDetails) {
+    const cleanName = (w.name || '').replace(/"/g, '""');
+    const cleanEmail = w.kind === 'guest' ? (w.email || '').replace(/"/g, '""') : '';
+    const regAt = (w.created_at || '').replace(/"/g, '""');
+    const typeLabel = w.kind === 'guest' ? 'Guest' : 'Member';
+    csv += `"${cleanName}","${typeLabel}","${cleanEmail}","${regAt}","","","waitlist"\n`;
   }
 
   res.setHeader('Content-Type', 'text/csv');
@@ -7255,12 +8078,22 @@ app.get('/api/events/:id/my-ticket', async (req: Request, res: Response) => {
         qr_payload: `KWG1:${id}:${code}`
       });
     }
+
+    const waitlistIds = Array.isArray(item.waitlist_ids) ? item.waitlist_ids : [];
+    if (waitlistIds.includes(memberId) || waitlistIds.includes(callerId)) {
+      const pos = getWaitlistPosition(item, 'member', memberId, callerId) || 1;
+      return res.status(409).json({ error: `You're #${pos} on the waitlist` });
+    }
   }
 
   if (guestToken) {
     const tokenHash = crypto.createHash('sha256').update(guestToken).digest('hex');
     const guestRec = (store.event_guests || []).find((g: any) => g.event_id === id && g.token_hash === tokenHash);
     if (guestRec) {
+      if (guestRec.status === 'waitlist') {
+        const pos = getWaitlistPosition(item, 'guest', guestRec.id) || 1;
+        return res.status(409).json({ error: `You're #${pos} on the waitlist` });
+      }
       const code = deriveTicketCode(id, `guest:${guestRec.id}`, guestRec.created_at || '');
       const codeHash = hashTicketCode(code);
       if (guestRec.code_hash !== codeHash) {
@@ -7315,6 +8148,7 @@ app.post('/api/events/:id/checkin', async (req: Request, res: Response) => {
 
   const body = req.body || {};
   const attendeeIds = Array.isArray(item.attendee_ids) ? item.attendee_ids : [];
+  const waitlistIds = Array.isArray(item.waitlist_ids) ? item.waitlist_ids : [];
   let kind: 'member' | 'guest' | null = null;
   let refId = '';
   let attendeeName = '';
@@ -7352,9 +8186,9 @@ app.post('/api/events/:id/checkin', async (req: Request, res: Response) => {
       }
     }
 
-    // If not a member, search guest registrations for this event
+    // If not a member, search confirmed guest registrations for this event
     if (!kind) {
-      const eventGuests = (store.event_guests || []).filter((g: any) => g.event_id === id);
+      const eventGuests = (store.event_guests || []).filter((g: any) => g.event_id === id && g.status !== 'waitlist');
       for (const g of eventGuests) {
         const gHash = g.code_hash || hashTicketCode(deriveTicketCode(id, `guest:${g.id}`, g.created_at || ''));
         if (gHash === candidateHash) {
@@ -7378,6 +8212,11 @@ app.post('/api/events/:id/checkin', async (req: Request, res: Response) => {
       const prof = store.profiles.find((p: any) => p.id === targetRef || p.account_uid === targetRef);
       const isAtt = attendeeIds.includes(targetRef) || (prof && attendeeIds.includes(prof.id));
       if (!isAtt) {
+        const isWait = waitlistIds.includes(targetRef) || (prof && waitlistIds.includes(prof.id));
+        if (isWait) {
+          const pos = getWaitlistPosition(item, 'member', prof?.id || targetRef, targetRef) || 1;
+          return res.status(409).json({ error: `You're #${pos} on the waitlist` });
+        }
         return res.status(404).json({ error: 'Not a ticket for this event' });
       }
       kind = 'member';
@@ -7388,6 +8227,10 @@ app.post('/api/events/:id/checkin', async (req: Request, res: Response) => {
       const g = (store.event_guests || []).find((guest: any) => guest.event_id === id && guest.id === targetRef);
       if (!g) {
         return res.status(404).json({ error: 'Not a ticket for this event' });
+      }
+      if (g.status === 'waitlist') {
+        const pos = getWaitlistPosition(item, 'guest', g.id) || 1;
+        return res.status(409).json({ error: `You're #${pos} on the waitlist` });
       }
       kind = 'guest';
       refId = g.id;
@@ -7460,7 +8303,7 @@ app.get('/api/events/:id/checkin-token', (req: Request, res: Response) => {
 
   return res.json({
     token,
-    url: `https://kwegatta.ai.studio/#/checkin/${id}/${token}`,
+    url: `${getPublicAppUrl()}/#/checkin/${id}/${token}`,
     checked_in_count: checkedInCount,
     expires_in_ms: 30000
   });
@@ -7533,6 +8376,11 @@ app.post('/api/events/:id/self-checkin', async (req: Request, res: Response) => 
       return res.status(404).json({ error: 'No guest registration found matching that email for this event.' });
     }
 
+    if (matchedGuest.status === 'waitlist') {
+      const pos = getWaitlistPosition(item, 'guest', matchedGuest.id) || 1;
+      return res.status(409).json({ error: `You're #${pos} on the waitlist` });
+    }
+
     const existing = store.event_checkins.find(
       (c: any) => c.event_id === id && c.kind === 'guest' && c.ref_id === matchedGuest.id
     );
@@ -7578,6 +8426,11 @@ app.post('/api/events/:id/self-checkin', async (req: Request, res: Response) => 
   const isRegistered = attendeeIds.includes(memberId) || attendeeIds.includes(callerId);
 
   if (!isRegistered) {
+    const waitlistIds = Array.isArray(item.waitlist_ids) ? item.waitlist_ids : [];
+    if (waitlistIds.includes(memberId) || waitlistIds.includes(callerId)) {
+      const pos = getWaitlistPosition(item, 'member', memberId, callerId) || 1;
+      return res.status(409).json({ error: `You're #${pos} on the waitlist` });
+    }
     return res.status(409).json({ error: "You're not registered for this event" });
   }
 
@@ -8277,14 +9130,23 @@ app.get('/robots.txt', (_req: Request, res: Response) => {
 
 app.get('/sitemap.xml', (_req: Request, res: Response) => {
   res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  const baseUrl = getPublicAppUrl();
+  const upcomingEventUrls = (store.events || [])
+    .filter((ev: any) => isEventPubliclyVisible(ev) && !ev.is_cancelled && computeEventPhase(ev) !== 'past')
+    .map(
+      (ev: any) =>
+        `  <url><loc>${escapeHtml(`${baseUrl}/e/${encodeURIComponent(String(ev.id))}`)}</loc><changefreq>daily</changefreq><priority>0.8</priority></url>`
+    )
+    .join('\n');
+
   return res.send(`<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://kwegatta.ai.studio/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>
-  <url><loc>https://kwegatta.ai.studio/#/people</loc><changefreq>daily</changefreq><priority>0.9</priority></url>
-  <url><loc>https://kwegatta.ai.studio/#/events</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
-  <url><loc>https://kwegatta.ai.studio/#/about</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
-  <url><loc>https://kwegatta.ai.studio/#/privacy</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
-  <url><loc>https://kwegatta.ai.studio/#/license</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>
+  <url><loc>${baseUrl}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>
+  <url><loc>${baseUrl}/#/people</loc><changefreq>daily</changefreq><priority>0.9</priority></url>
+  <url><loc>${baseUrl}/#/events</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>${baseUrl}/#/about</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
+  <url><loc>${baseUrl}/#/privacy</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>
+  <url><loc>${baseUrl}/#/license</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>${upcomingEventUrls ? `\n${upcomingEventUrls}` : ''}
 </urlset>`);
 });
 

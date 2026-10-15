@@ -42,6 +42,7 @@ import {
   Linkedin
 } from 'lucide-react';
 import { Profile, Post, EventOpportunityItem, TeamMember } from '../types';
+import { getPublicEventShareUrl } from '../utils';
 import { SetupView } from './SetupView';
 import { EventPhotosModal } from './EventPhotosModal';
 import { useEventPhotos } from '../hooks/useEventPhotos';
@@ -1203,8 +1204,19 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           </div>
                         </div>
 
-                        {/* Actions: Hide, Restore, Delete, Block/Unblock author (Part 5) */}
+                        {/* Actions: Copy link, Hide, Restore, Delete, Block/Unblock author (Part 5) */}
                         <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+                          <button
+                            onClick={() => {
+                              const shareUrl = getPublicEventShareUrl(item.id);
+                              navigator.clipboard?.writeText(shareUrl).catch(() => {});
+                              onToast('Event link copied to clipboard');
+                            }}
+                            className="kw-btn text-xs py-1.5 px-2.5 font-semibold"
+                            title="Copy event share link"
+                          >
+                            Copy link
+                          </button>
                           {item.hidden_by_moderation ? (
                             <button
                               onClick={() => openModModal(item.id, item.title, 'restore')}
@@ -1496,6 +1508,17 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => {
+                          const shareUrl = getPublicEventShareUrl(item.id);
+                          navigator.clipboard?.writeText(shareUrl).catch(() => {});
+                          onToast('Event link copied to clipboard');
+                        }}
+                        className="kw-btn text-xs py-1.5 px-2.5"
+                        title="Copy event share link"
+                      >
+                        Copy link
+                      </button>
                       <button
                         onClick={() => setViewingAttendeesEvent(item)}
                         className="kw-btn text-xs py-1.5 px-2.5 font-medium"

@@ -1109,7 +1109,18 @@ export async function fetchEventById(id: string, guestToken?: string): Promise<a
   }
 }
 
-export async function rsvpEvent(id: string, opts?: { show_in_people_to_meet?: boolean; match_optout?: boolean }): Promise<{ success: boolean; is_attending: boolean; attendee_count: number }> {
+export async function rsvpEvent(
+  id: string,
+  opts?: { show_in_people_to_meet?: boolean; match_optout?: boolean }
+): Promise<{
+  success: boolean;
+  status?: 'going' | 'waitlisted' | 'waitlist' | 'left_waitlist' | 'none';
+  position?: number | null;
+  is_attending: boolean;
+  attendee_count: number;
+  waitlist_count?: number;
+  my_waitlist_position?: number | null;
+}> {
   await getFreshAuthToken();
   const res = await fetch(`/api/events/${encodeURIComponent(id)}/rsvp`, {
     method: 'POST',
@@ -1271,7 +1282,10 @@ export async function deleteEventQuestion(eventId: string, qid: string): Promise
   return true;
 }
 
-export async function registerEventGuest(eventId: string, payload: { name: string; phone?: string; email?: string; agree: boolean; website?: string }): Promise<{ token: string; guest_id: string; code?: string }> {
+export async function registerEventGuest(
+  eventId: string,
+  payload: { name: string; phone?: string; email?: string; agree: boolean; website?: string }
+): Promise<{ status?: 'going' | 'registered' | 'waitlisted' | 'waitlist'; position?: number; token: string; guest_id: string; code?: string }> {
   const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/guest-register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1369,6 +1383,16 @@ export async function fetchEventGuests(eventId: string): Promise<any[]> {
 export async function removeEventGuest(eventId: string, gid: string): Promise<boolean> {
   await getFreshAuthToken();
   const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/guests/${encodeURIComponent(gid)}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders()
+  });
+  return res.ok;
+}
+export const deleteEventGuest = removeEventGuest;
+
+export async function removeEventAttendee(eventId: string, memberId: string): Promise<boolean> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/events/${encodeURIComponent(eventId)}/attendees/${encodeURIComponent(memberId)}`, {
     method: 'DELETE',
     headers: getAuthHeaders()
   });
