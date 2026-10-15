@@ -5202,6 +5202,7 @@ export function sanitizeEventForPublic(
     attendee_count: totalAttendeeCount,
     i_am_going: isAttending,
     self_checkin_enabled: Boolean(item.self_checkin_enabled),
+    checkin_configured: isCheckinConfigured(),
     allow_walkins: item.allow_walkins !== false,
     checked_in_count: canSeeInternalFields
       ? (store.event_checkins || []).filter((c: any) => c.event_id === item.id).length
@@ -5232,11 +5233,28 @@ export function sanitizeEventForPublic(
    ========================================================================= */
 
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-const SERVER_TICKET_SECRET = process.env.TICKET_HMAC_SECRET || process.env.ADMIN_CODE || 'kw-ticket-secret-2026-v180';
+const TEST_PER_RUN_TICKET_SECRET = crypto.randomBytes(32).toString('hex');
+
+export function getTicketSecret(): string {
+  const envSecret = process.env.TICKET_HMAC_SECRET;
+  if (envSecret && envSecret.length >= 32) {
+    return envSecret;
+  }
+  if (isTestEnv() && process.env.NODE_ENV !== 'production' && envSecret === undefined) {
+    return TEST_PER_RUN_TICKET_SECRET;
+  }
+  return '';
+}
+
+export function isCheckinConfigured(): boolean {
+  return getTicketSecret().length >= 32;
+}
 
 export function deriveTicketCode(eventId: string, holderKey: string, salt: string): string {
+  const secret = getTicketSecret();
+  if (!secret) return '';
   const digest = crypto
-    .createHmac('sha256', SERVER_TICKET_SECRET)
+    .createHmac('sha256', secret)
     .update(`${eventId}:${holderKey}:${salt}`)
     .digest();
   let out = '';
@@ -5260,8 +5278,10 @@ export function isWithinCheckinWindow(item: any, nowMs: number = Date.now()): bo
 }
 
 function computeWindowHmac(eventId: string, windowNum: number): string {
+  const secret = getTicketSecret();
+  if (!secret) return '';
   return crypto
-    .createHmac('sha256', SERVER_TICKET_SECRET)
+    .createHmac('sha256', secret)
     .update(`self-checkin:${eventId}:${windowNum}`)
     .digest('hex')
     .slice(0, 32);
@@ -7140,6 +7160,9 @@ const selfCheckinGuestFailMap = new Map<string, { fails: number; blockedUntil: n
 
 // GET /api/events/:id/my-ticket — signed-in attendee or registered guest with X-Guest-Token
 app.get('/api/events/:id/my-ticket', async (req: Request, res: Response) => {
+  if (!isCheckinConfigured()) {
+    return res.status(503).json({ error: 'Check-in is not configured' });
+  }
   const { id } = req.params;
   const item = (store.events || []).find((e: any) => e.id === id);
   if (!item) {
@@ -7203,6 +7226,9 @@ app.get('/api/events/:id/my-ticket', async (req: Request, res: Response) => {
 
 // POST /api/events/:id/checkin — Mode 1: Host scans tickets or checks in manually (author or admin only)
 app.post('/api/events/:id/checkin', async (req: Request, res: Response) => {
+  if (!isCheckinConfigured()) {
+    return res.status(503).json({ error: 'Check-in is not configured' });
+  }
   const { id } = req.params;
   const item = (store.events || []).find((e: any) => e.id === id);
   if (!item) {
@@ -7357,6 +7383,9 @@ app.post('/api/events/:id/checkin', async (req: Request, res: Response) => {
 
 // GET /api/events/:id/checkin-token — Host/Admin rotating venue QR token (30s window)
 app.get('/api/events/:id/checkin-token', (req: Request, res: Response) => {
+  if (!isCheckinConfigured()) {
+    return res.status(503).json({ error: 'Check-in is not configured' });
+  }
   const { id } = req.params;
   const item = (store.events || []).find((e: any) => e.id === id);
   if (!item) {
@@ -7386,6 +7415,9 @@ app.get('/api/events/:id/checkin-token', (req: Request, res: Response) => {
 
 // POST /api/events/:id/self-checkin — Mode 2: Venue QR self check-in
 app.post('/api/events/:id/self-checkin', async (req: Request, res: Response) => {
+  if (!isCheckinConfigured()) {
+    return res.status(503).json({ error: 'Check-in is not configured' });
+  }
   const { id } = req.params;
   const item = (store.events || []).find((e: any) => e.id === id);
   if (!item) {

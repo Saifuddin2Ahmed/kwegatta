@@ -4,6 +4,13 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-10-15
+
+### Fixed & Security (Release 1.8.1)
+- **Lockfile & CI**: Updated `package-lock.json` with missing dependencies (`nodemailer`, `@types/nodemailer`, `jsqr`) for `npm ci` compatibility; removed `bun.lock`; added CI lockfile integrity test.
+- **Ticket Secret Security**: Restricted HMAC derivation exclusively to `TICKET_HMAC_SECRET` (removing fallback to `ADMIN_CODE` and hardcoded secrets). Gracefully disables ticket endpoints with HTTP 503 "Check-in is not configured" when secret is unconfigured or under 32 characters in production.
+- **Bundle Optimization**: Converted `jsQR` and host camera scanner UI to lazy-loaded dynamic imports (`React.lazy` / `import()`), returning main bundle to 1.6.0 size.
+
 ## [1.8.0] - 2026-10-14
 
 ### Added & Improved (Release 1.8.0)

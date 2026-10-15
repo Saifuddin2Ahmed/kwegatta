@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { EventsView } from '../src/components/EventsView';
@@ -275,8 +277,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.8.0
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.8.0'");
+    // 1. Cache name includes version kwegatta-1.8.1
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.8.1'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -4715,6 +4717,76 @@ describe('Release 1.5.0 Features', () => {
           else process.env.SMTP_USER = prevUser;
           if (prevPass === undefined) delete process.env.SMTP_PASS;
           else process.env.SMTP_PASS = prevPass;
+        }
+      });
+    });
+
+    describe('Release 1.8.1: Lockfile CI, Ticket HMAC Secret Security & Bundle Optimization', () => {
+      it('a) No hard-coded secret: grep server.ts for kw-ticket-secret -> none; SERVER_TICKET_SECRET does not read ADMIN_CODE', () => {
+        const serverContent = fs.readFileSync(path.join(process.cwd(), 'server.ts'), 'utf-8');
+        expect(serverContent).not.toContain('kw-ticket-secret');
+        expect(serverContent).not.toMatch(/process\.env\.ADMIN_CODE.*ticket/i);
+      });
+
+      it('b) With TICKET_HMAC_SECRET unset (production mode simulated) -> my-ticket, checkin and self-checkin return 503', async () => {
+        const origEnv = process.env.NODE_ENV;
+        const origSecret = process.env.TICKET_HMAC_SECRET;
+        try {
+          process.env.NODE_ENV = 'production';
+          delete process.env.TICKET_HMAC_SECRET;
+
+          const evId = 'ev-test-503';
+          const resTicket = await fetch(`${baseUrl}/api/events/${evId}/my-ticket`);
+          expect(resTicket.status).toBe(503);
+          const ticketBody = await resTicket.json();
+          expect(ticketBody.error).toBe('Check-in is not configured');
+
+          const resCheckin = await fetch(`${baseUrl}/api/events/${evId}/checkin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: 'ABC' })
+          });
+          expect(resCheckin.status).toBe(503);
+
+          const resSelf = await fetch(`${baseUrl}/api/events/${evId}/self-checkin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: 'XYZ' })
+          });
+          expect(resSelf.status).toBe(503);
+        } finally {
+          process.env.NODE_ENV = origEnv;
+          if (origSecret === undefined) {
+            delete process.env.TICKET_HMAC_SECRET;
+          } else {
+            process.env.TICKET_HMAC_SECRET = origSecret;
+          }
+        }
+      });
+
+      it('c) lockfile integrity: bun.lock does not exist, and all package.json dependencies exist in package-lock.json', () => {
+        expect(fs.existsSync(path.join(process.cwd(), 'bun.lock'))).toBe(false);
+
+        const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf-8'));
+        const lock = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package-lock.json'), 'utf-8'));
+
+        const requiredDeps = {
+          ...(pkg.dependencies || {}),
+          ...(pkg.devDependencies || {})
+        };
+
+        const lockDeps = {
+          ...(lock.packages?.['']?.dependencies || {}),
+          ...(lock.packages?.['']?.devDependencies || {}),
+          ...(lock.dependencies || {})
+        };
+
+        for (const depName of Object.keys(requiredDeps)) {
+          const inLock = Boolean(
+            lockDeps[depName] ||
+            lock.packages?.[`node_modules/${depName}`]
+          );
+          expect(inLock, `Missing ${depName} in package-lock.json`).toBe(true);
         }
       });
     });
