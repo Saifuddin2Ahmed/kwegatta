@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, cleanup } from '@testing-library/react';
 import { EventsView } from '../src/components/EventsView';
 import { FeedView } from '../src/components/FeedView';
 import { OnboardingChat } from '../src/components/OnboardingChat';
@@ -278,7 +278,7 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
     // 1. Cache name includes version kwegatta-1.8.1
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.8.1'");
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.8.2'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -4788,6 +4788,177 @@ describe('Release 1.5.0 Features', () => {
           );
           expect(inLock, `Missing ${depName} in package-lock.json`).toBe(true);
         }
+      });
+    });
+
+    describe('Release 1.8.2: Form Validation & Cover Image Cards', () => {
+      beforeEach(() => {
+        cleanup();
+        window.location.hash = '';
+        window.history.pushState({}, '', '/');
+      });
+
+      it('a) Render: submit the create form with an empty venue (in_person) -> inline error shown under venue, aria-invalid="true", and no API call made', async () => {
+        const profile = { id: 'u1', account_uid: 'u1', name: 'Alice Host', headline: 'Founder', is_admin: false };
+        const mockCreate = vi.spyOn(apiModule, 'createEvent').mockImplementation(async () => null as any);
+        const onToast = vi.fn();
+
+        render(
+          React.createElement(EventsView, {
+            currentProfile: profile as any,
+            allProfiles: [profile as any],
+            onViewProfile: vi.fn(),
+            onToast
+          })
+        );
+
+        const createBtn = screen.getByRole('button', { name: /create event/i });
+        fireEvent.click(createBtn);
+
+        const titleInput = screen.getByLabelText(/Title \*/i);
+        fireEvent.change(titleInput, { target: { value: 'Test Event Title' } });
+
+        const descInput = screen.getByLabelText(/Description \*/i);
+        fireEvent.change(descInput, { target: { value: 'Test Event Description' } });
+
+        const startDateInput = screen.getByLabelText(/Start Date \*/i);
+        fireEvent.change(startDateInput, { target: { value: '2026-11-01' } });
+
+        const startTimeInput = screen.getByLabelText(/Start Time \*/i);
+        fireEvent.change(startTimeInput, { target: { value: '10:00' } });
+
+        const venueInput = screen.getByLabelText(/Venue \/ address \*/i);
+        fireEvent.change(venueInput, { target: { value: '' } });
+
+        const submitBtn = screen.getByRole('button', { name: /Create & Publish Event/i });
+        fireEvent.click(submitBtn);
+
+        expect(venueInput.getAttribute('aria-invalid')).toBe('true');
+        expect(screen.getByText("Add a bit more detail, e.g. 'EIIC, MUBS, Kampala'")).toBeTruthy();
+        expect(onToast).toHaveBeenCalledWith("Add a bit more detail, e.g. 'EIIC, MUBS, Kampala'");
+        expect(mockCreate).not.toHaveBeenCalled();
+
+        mockCreate.mockRestore();
+      });
+
+      it('b) Render: submit with an http:// map link -> inline error; with https://maps.app.goo.gl/abc -> no error', async () => {
+        const profile = { id: 'u1', account_uid: 'u1', name: 'Alice Host', headline: 'Founder', is_admin: false };
+        const mockCreate = vi.spyOn(apiModule, 'createEvent').mockImplementation(async (p: any) => ({ id: 'ev1', ...p }));
+        const onToast = vi.fn();
+
+        render(
+          React.createElement(EventsView, {
+            currentProfile: profile as any,
+            allProfiles: [profile as any],
+            onViewProfile: vi.fn(),
+            onToast
+          })
+        );
+
+        const createBtn = screen.getByRole('button', { name: /create event/i });
+        fireEvent.click(createBtn);
+
+        fireEvent.change(screen.getByLabelText(/Title \*/i), { target: { value: 'Test Event Title' } });
+        fireEvent.change(screen.getByLabelText(/Description \*/i), { target: { value: 'Test Event Description' } });
+        fireEvent.change(screen.getByLabelText(/Start Date \*/i), { target: { value: '2026-11-01' } });
+        fireEvent.change(screen.getByLabelText(/Start Time \*/i), { target: { value: '10:00' } });
+        fireEvent.change(screen.getByLabelText(/Venue \/ address \*/i), { target: { value: 'EIIC, MUBS Campus, Kampala' } });
+
+        const mapInput = screen.getByLabelText(/Map link \(optional\)/i);
+        fireEvent.change(mapInput, { target: { value: 'http://maps.google.com/123' } });
+
+        const submitBtn = screen.getByRole('button', { name: /Create & Publish Event/i });
+        fireEvent.click(submitBtn);
+
+        expect(mapInput.getAttribute('aria-invalid')).toBe('true');
+        expect(screen.getByText('Map link must be an https:// Google Maps or OpenStreetMap link.')).toBeTruthy();
+        expect(mockCreate).not.toHaveBeenCalled();
+
+        fireEvent.change(mapInput, { target: { value: 'https://maps.app.goo.gl/abc' } });
+        fireEvent.click(submitBtn);
+
+        expect(mockCreate).toHaveBeenCalled();
+
+        mockCreate.mockRestore();
+      });
+
+      it('c) Render: a server 400 response -> toast text is visible and the button is re-enabled', async () => {
+        const profile = { id: 'u1', account_uid: 'u1', name: 'Alice Host', headline: 'Founder', is_admin: false };
+        const mockCreate = vi.spyOn(apiModule, 'createEvent').mockRejectedValue(new Error('Server error: venue blacklisted'));
+        const onToast = vi.fn();
+
+        render(
+          React.createElement(EventsView, {
+            currentProfile: profile as any,
+            allProfiles: [profile as any],
+            onViewProfile: vi.fn(),
+            onToast
+          })
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: /create event/i }));
+        fireEvent.change(screen.getByLabelText(/Title \*/i), { target: { value: 'Test Event Title' } });
+        fireEvent.change(screen.getByLabelText(/Description \*/i), { target: { value: 'Test Event Description' } });
+        fireEvent.change(screen.getByLabelText(/Start Date \*/i), { target: { value: '2026-11-01' } });
+        fireEvent.change(screen.getByLabelText(/Start Time \*/i), { target: { value: '10:00' } });
+        fireEvent.change(screen.getByLabelText(/Venue \/ address \*/i), { target: { value: 'EIIC, MUBS Campus, Kampala' } });
+
+        const submitBtn = screen.getByRole('button', { name: /Create & Publish Event/i });
+        await act(async () => {
+          fireEvent.click(submitBtn);
+        });
+
+        expect(onToast).toHaveBeenCalledWith('Server error: venue blacklisted');
+        expect(submitBtn.hasAttribute('disabled')).toBe(false);
+
+        mockCreate.mockRestore();
+      });
+
+      it('d) Render: an event card with cover_image renders <img> with src and loading="lazy"; without it, placeholder renders', async () => {
+        const mockEvents = [
+          { id: 'ev-cover', title: 'With Cover Event', description: 'Desc', kind: 'event', cover_image: 'https://example.com/cover.jpg', phase: 'upcoming', attendee_ids: [] },
+          { id: 'ev-nocover', title: 'No Cover Event', description: 'Desc', kind: 'event', cover_image: undefined, phase: 'upcoming', attendee_ids: [] }
+        ];
+
+        const mockFetch = vi.spyOn(apiModule, 'fetchEvents').mockResolvedValue(mockEvents as any);
+
+        render(
+          React.createElement(EventsView, {
+            currentProfile: null,
+            allProfiles: [],
+            onViewProfile: vi.fn(),
+            onToast: vi.fn()
+          })
+        );
+
+        await act(async () => {});
+
+        const img = screen.getByAltText('With Cover Event') as HTMLImageElement;
+        expect(img).toBeTruthy();
+        expect(img.src).toContain('https://example.com/cover.jpg');
+        expect(img.getAttribute('loading')).toBe('lazy');
+
+        expect(screen.getByText('N')).toBeTruthy();
+
+        mockFetch.mockRestore();
+      });
+
+      it('e) GET /api/event-image/:id -> has Cache-Control and ETag headers', async () => {
+        const testEventId = 'test-ev-img-' + Date.now();
+        const sampleDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+        store.events.push({
+          id: testEventId,
+          title: 'Image Test Event',
+          cover_image: sampleDataUrl,
+          published: true,
+          status: 'approved',
+          author_id: 'u1'
+        });
+
+        const res = await fetch(`${baseUrl}/api/event-image/${testEventId}`);
+        expect(res.status).toBe(200);
+        expect(res.headers.get('cache-control')).toContain('public, max-age=3600');
+        expect(res.headers.get('etag')).toBeTruthy();
       });
     });
   });

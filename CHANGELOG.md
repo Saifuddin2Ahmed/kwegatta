@@ -4,6 +4,13 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.2] - 2026-10-15
+
+### Fixed (Release 1.8.2)
+- **Form Validation for Events**: Added `noValidate` to event creation and editing forms. Implemented inline field validation error messaging, scrolling and focusing the first invalid field, displaying error toasts (rendered above modals via `z-[100]`), and re-enabling submit buttons on completion or failure.
+- **Cover Image Cards**: Event list cards display a 16:9 cover image banner with rounded top corners, `loading="lazy"`, `decoding="async"`, and `alt` text, or a gradient placeholder with the event's first letter when no cover image is provided.
+- **Image Caching**: Updated `/api/event-image/:id` response headers to send `Cache-Control: public, max-age=3600` alongside `ETag`.
+
 ## [1.8.1] - 2026-10-15
 
 ### Fixed & Security (Release 1.8.1)

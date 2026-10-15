@@ -209,6 +209,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [formDeadline, setFormDeadline] = useState('');
   const [formLink, setFormLink] = useState('');
   const [formSubmitting, setFormSubmitting] = useState(false);
+  const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
 
   // Events list search
   const [searchQuery, setSearchQuery] = useState('');
@@ -499,6 +501,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
     setFormOppType('Hackathon');
     setFormDeadline('');
     setFormLink('');
+    setCreateErrors({});
+    setEditErrors({});
   };
 
   const openCreateModal = () => {
@@ -557,6 +561,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
     setFormOppType(item.opportunity_type || 'Hackathon');
     setFormDeadline(item.deadline || '');
     setFormLink(item.link || '');
+    setCreateErrors({});
+    setEditErrors({});
     setIsEditModalOpen(true);
   };
 
@@ -576,26 +582,94 @@ export const EventsView: React.FC<EventsViewProps> = ({
       return;
     }
 
-    if (formRegLink && !formRegLink.trim().toLowerCase().startsWith('https://')) {
-      onToast('Registration link must start with https://');
-      return;
+    const errors: Record<string, string> = {};
+
+    if (!formTitle.trim()) {
+      errors.title = 'Title is required';
     }
-    if (formLink && !formLink.trim().toLowerCase().startsWith('https://')) {
-      onToast('Opportunity link must start with https://');
-      return;
+    if (!formDescription.trim()) {
+      errors.description = 'Description is required';
+    }
+
+    if (formKind === 'event') {
+      if (!formStartDate) {
+        errors.start_date = 'Please specify a start date and time.';
+      } else if (!formStartTime) {
+        errors.start_time = 'Please specify a start date and time.';
+      }
+
+      if (formFormat === 'in_person' || formFormat === 'hybrid') {
+        if (formLocation.trim().length < 5) {
+          errors.venue = "Add a bit more detail, e.g. 'EIIC, MUBS, Kampala'";
+        }
+        if (formMapLink.trim() && !isValidMapLinkClient(formMapLink)) {
+          errors.map_link = 'Map link must be an https:// Google Maps or OpenStreetMap link.';
+        }
+      }
+
+      if (formFormat === 'online' || formFormat === 'hybrid') {
+        if (!formJoinLink.trim() || !formJoinLink.trim().toLowerCase().startsWith('https://')) {
+          errors.join_link = 'Join link must start with https://';
+        }
+      }
+
+      if (formCapacity.trim()) {
+        const capNum = Number(formCapacity.trim());
+        if (!Number.isInteger(capNum) || capNum < 1 || capNum > 5000) {
+          errors.capacity = 'Capacity must be a whole number between 1 and 5000.';
+        }
+      }
+
+      if (formEndDate && formEndTime && formStartDate && formStartTime) {
+        const tz = formTimezone || 'Africa/Kampala';
+        const startIso = zonedTimeToUtcIso(formStartDate, formStartTime, tz);
+        const endIso = zonedTimeToUtcIso(formEndDate, formEndTime, tz);
+        if (new Date(endIso).getTime() <= new Date(startIso).getTime()) {
+          errors.end_date = 'End time must be after start time.';
+        }
+      }
+    } else {
+      if (!formDeadline.trim()) {
+        errors.deadline = 'Please specify a deadline date.';
+      }
+      if (formLink.trim() && !formLink.trim().toLowerCase().startsWith('https://')) {
+        errors.link = 'Opportunity link must start with https://';
+      }
+    }
+
+    if (formRegLink.trim() && !formRegLink.trim().toLowerCase().startsWith('https://')) {
+      errors.reg_link = 'Registration link must start with https://';
     }
 
     if (formContactPhone.trim()) {
       const cleanPhone = formContactPhone.replace(/[\s-]/g, '');
       if (!/^\+?[0-9]{7,15}$/.test(cleanPhone)) {
-        onToast('Phone number must be valid (7-15 digits with optional +).');
-        return;
+        errors.contact_phone = 'Phone number must be valid (7-15 digits with optional +).';
       }
     }
+
     if (formContactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formContactEmail.trim())) {
-      onToast('Email must be a valid email address.');
+      errors.contact_email = 'Email must be a valid email address.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setCreateErrors(errors);
+      const firstKey = Object.keys(errors)[0];
+      const firstMsg = errors[firstKey];
+      onToast(firstMsg);
+      setTimeout(() => {
+        const el = document.getElementById(`create-${firstKey}`);
+        if (el) {
+          if (typeof el.scrollIntoView === 'function') {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          el.focus();
+        }
+      }, 50);
       return;
     }
+
+    setCreateErrors({});
 
     const payload: any = {
       kind: formKind,
@@ -607,27 +681,6 @@ export const EventsView: React.FC<EventsViewProps> = ({
     };
 
     if (formKind === 'event') {
-      if (!formStartDate || !formStartTime) {
-        onToast('Please specify a start date and time.');
-        return;
-      }
-      if ((formFormat === 'in_person' || formFormat === 'hybrid') && formLocation.trim().length < 5) {
-        onToast('Venue / address must be at least 5 characters for in-person and hybrid events.');
-        return;
-      }
-      if (formMapLink.trim() && !isValidMapLinkClient(formMapLink)) {
-        onToast('Map link must be an https:// Google Maps or OpenStreetMap link.');
-        return;
-      }
-      if (formCapacity.trim()) {
-        const capNum = Number(formCapacity.trim());
-        if (!Number.isInteger(capNum) || capNum < 1 || capNum > 5000) {
-          onToast('Capacity must be a whole number between 1 and 5000.');
-          return;
-        }
-        payload.capacity = capNum;
-      }
-
       const tz = formTimezone || 'Africa/Kampala';
       const startIso = zonedTimeToUtcIso(formStartDate, formStartTime, tz);
       payload.starts_at = startIso;
@@ -635,10 +688,6 @@ export const EventsView: React.FC<EventsViewProps> = ({
       let endIso: string;
       if (formEndDate && formEndTime) {
         endIso = zonedTimeToUtcIso(formEndDate, formEndTime, tz);
-        if (new Date(endIso).getTime() <= new Date(startIso).getTime()) {
-          onToast('End time must be after start time.');
-          return;
-        }
       } else {
         endIso = new Date(new Date(startIso).getTime() + 2 * 60 * 60 * 1000).toISOString();
       }
@@ -650,6 +699,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
       payload.venue = formLocation.trim();
       payload.map_link = formMapLink.trim() || undefined;
       payload.join_link = formJoinLink.trim() || undefined;
+      if (formCapacity.trim()) {
+        payload.capacity = Number(formCapacity.trim());
+      }
       payload.cover_image = formCoverImage.trim() || undefined;
       payload.registration_link = formRegLink.trim() || undefined;
       payload.self_checkin_enabled = formSelfCheckin;
@@ -669,6 +721,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
         loadEventsList();
       }
     } catch (err: any) {
+      console.error('Create event error:', err);
       onToast(err?.message || 'Could not save the event. Please try again.');
     } finally {
       setFormSubmitting(false);
@@ -679,26 +732,88 @@ export const EventsView: React.FC<EventsViewProps> = ({
     e.preventDefault();
     if (!editingItem) return;
 
-    if (formRegLink && !formRegLink.trim().toLowerCase().startsWith('https://')) {
-      onToast('Registration link must start with https://');
-      return;
+    const errors: Record<string, string> = {};
+
+    if (!formTitle.trim()) {
+      errors.title = 'Title is required';
     }
-    if (formLink && !formLink.trim().toLowerCase().startsWith('https://')) {
-      onToast('Opportunity link must start with https://');
-      return;
+    if (!formDescription.trim()) {
+      errors.description = 'Description is required';
+    }
+
+    if (editingItem.kind === 'event') {
+      if (formFormat === 'in_person' || formFormat === 'hybrid') {
+        if (formLocation.trim().length < 5) {
+          errors.venue = "Add a bit more detail, e.g. 'EIIC, MUBS, Kampala'";
+        }
+        if (formMapLink.trim() && !isValidMapLinkClient(formMapLink)) {
+          errors.map_link = 'Map link must be an https:// Google Maps or OpenStreetMap link.';
+        }
+      }
+
+      if (formFormat === 'online' || formFormat === 'hybrid') {
+        if (!formJoinLink.trim() || !formJoinLink.trim().toLowerCase().startsWith('https://')) {
+          errors.join_link = 'Join link must start with https://';
+        }
+      }
+
+      if (formCapacity.trim()) {
+        const capNum = Number(formCapacity.trim());
+        if (!Number.isInteger(capNum) || capNum < 1 || capNum > 5000) {
+          errors.capacity = 'Capacity must be a whole number between 1 and 5000.';
+        }
+      }
+
+      if (formEndDate && formEndTime && formStartDate && formStartTime) {
+        const tz = formTimezone || editingItem.timezone || 'Africa/Kampala';
+        const startIso = zonedTimeToUtcIso(formStartDate, formStartTime, tz);
+        const endIso = zonedTimeToUtcIso(formEndDate, formEndTime, tz);
+        if (new Date(endIso).getTime() <= new Date(startIso).getTime()) {
+          errors.end_date = 'End time must be after start time.';
+        }
+      }
+    } else {
+      if (!formDeadline.trim()) {
+        errors.deadline = 'Please specify a deadline date.';
+      }
+      if (formLink.trim() && !formLink.trim().toLowerCase().startsWith('https://')) {
+        errors.link = 'Opportunity link must start with https://';
+      }
+    }
+
+    if (formRegLink.trim() && !formRegLink.trim().toLowerCase().startsWith('https://')) {
+      errors.reg_link = 'Registration link must start with https://';
     }
 
     if (formContactPhone.trim()) {
       const cleanPhone = formContactPhone.replace(/[\s-]/g, '');
       if (!/^\+?[0-9]{7,15}$/.test(cleanPhone)) {
-        onToast('Phone number must be valid (7-15 digits with optional +).');
-        return;
+        errors.contact_phone = 'Phone number must be valid (7-15 digits with optional +).';
       }
     }
+
     if (formContactEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formContactEmail.trim())) {
-      onToast('Email must be a valid email address.');
+      errors.contact_email = 'Email must be a valid email address.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setEditErrors(errors);
+      const firstKey = Object.keys(errors)[0];
+      const firstMsg = errors[firstKey];
+      onToast(firstMsg);
+      setTimeout(() => {
+        const el = document.getElementById(`edit-${firstKey}`);
+        if (el) {
+          if (typeof el.scrollIntoView === 'function') {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          el.focus();
+        }
+      }, 50);
       return;
     }
+
+    setEditErrors({});
 
     const patch: any = {
       title: formTitle.trim(),
@@ -709,21 +824,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
     };
 
     if (editingItem.kind === 'event') {
-      if ((formFormat === 'in_person' || formFormat === 'hybrid') && formLocation.trim().length < 5) {
-        onToast('Venue / address must be at least 5 characters for in-person and hybrid events.');
-        return;
-      }
-      if (formMapLink.trim() && !isValidMapLinkClient(formMapLink)) {
-        onToast('Map link must be an https:// Google Maps or OpenStreetMap link.');
-        return;
-      }
       if (formCapacity.trim()) {
-        const capNum = Number(formCapacity.trim());
-        if (!Number.isInteger(capNum) || capNum < 1 || capNum > 5000) {
-          onToast('Capacity must be a whole number between 1 and 5000.');
-          return;
-        }
-        patch.capacity = capNum;
+        patch.capacity = Number(formCapacity.trim());
       } else {
         patch.capacity = null;
       }
@@ -735,10 +837,6 @@ export const EventsView: React.FC<EventsViewProps> = ({
         let endIso: string;
         if (formEndDate && formEndTime) {
           endIso = zonedTimeToUtcIso(formEndDate, formEndTime, tz);
-          if (new Date(endIso).getTime() <= new Date(startIso).getTime()) {
-            onToast('End time must be after start time.');
-            return;
-          }
         } else {
           endIso = new Date(new Date(startIso).getTime() + 2 * 60 * 60 * 1000).toISOString();
         }
@@ -772,6 +870,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
         }
       }
     } catch (err: any) {
+      console.error('Update event error:', err);
       onToast(err?.message || 'Could not save the event. Please try again.');
     } finally {
       setFormSubmitting(false);
@@ -2243,65 +2342,119 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 </button>
               </div>
 
-              <form onSubmit={handleEditSubmit} className="space-y-4 text-xs">
+              <form noValidate onSubmit={handleEditSubmit} className="space-y-4 text-xs">
                 <div>
-                  <label className="font-semibold text-[var(--fg)] block mb-1">Title *</label>
+                  <label htmlFor="edit-title" className="font-semibold text-[var(--fg)] block mb-1">Title *</label>
                   <input
+                    id="edit-title"
                     type="text"
                     value={formTitle}
-                    onChange={e => setFormTitle(e.target.value)}
-                    required
-                    className="kw-input text-xs"
+                    onChange={e => {
+                      setFormTitle(e.target.value);
+                      if (editErrors.title) setEditErrors(prev => ({ ...prev, title: '' }));
+                    }}
+                    aria-invalid={Boolean(editErrors.title)}
+                    aria-describedby={editErrors.title ? "edit-title-error" : undefined}
+                    className={`kw-input text-xs ${editErrors.title ? 'border-rose-500 focus:border-rose-500' : ''}`}
                   />
+                  {editErrors.title && (
+                    <p id="edit-title-error" className="text-rose-400 text-[11px] mt-1 font-medium" role="alert">
+                      {editErrors.title}
+                    </p>
+                  )}
                 </div>
 
                 <div>
-                  <label className="font-semibold text-[var(--fg)] block mb-1">Description *</label>
+                  <label htmlFor="edit-description" className="font-semibold text-[var(--fg)] block mb-1">Description *</label>
                   <textarea
+                    id="edit-description"
                     value={formDescription}
-                    onChange={e => setFormDescription(e.target.value)}
+                    onChange={e => {
+                      setFormDescription(e.target.value);
+                      if (editErrors.description) setEditErrors(prev => ({ ...prev, description: '' }));
+                    }}
                     rows={3}
-                    required
-                    className="kw-textarea text-xs"
+                    aria-invalid={Boolean(editErrors.description)}
+                    aria-describedby={editErrors.description ? "edit-description-error" : undefined}
+                    className={`kw-textarea text-xs ${editErrors.description ? 'border-rose-500 focus:border-rose-500' : ''}`}
                   />
+                  {editErrors.description && (
+                    <p id="edit-description-error" className="text-rose-400 text-[11px] mt-1 font-medium" role="alert">
+                      {editErrors.description}
+                    </p>
+                  )}
                 </div>
 
                 {editingItem.kind === 'event' && (
                   <>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="font-semibold text-[var(--fg)] block mb-1">Start Date</label>
+                        <label htmlFor="edit-start_date" className="font-semibold text-[var(--fg)] block mb-1">Start Date</label>
                         <input
+                          id="edit-start_date"
                           type="date"
                           value={formStartDate}
-                          onChange={e => setFormStartDate(e.target.value)}
-                          className="kw-input text-xs"
+                          onChange={e => {
+                            setFormStartDate(e.target.value);
+                            if (editErrors.start_date) setEditErrors(prev => ({ ...prev, start_date: '' }));
+                          }}
+                          aria-invalid={Boolean(editErrors.start_date)}
+                          aria-describedby={editErrors.start_date ? "edit-start_date-error" : undefined}
+                          className={`kw-input text-xs ${editErrors.start_date ? 'border-rose-500 focus:border-rose-500' : ''}`}
                         />
+                        {editErrors.start_date && (
+                          <p id="edit-start_date-error" className="text-rose-400 text-[11px] mt-1 font-medium" role="alert">
+                            {editErrors.start_date}
+                          </p>
+                        )}
                       </div>
                       <div>
-                        <label className="font-semibold text-[var(--fg)] block mb-1">Start Time</label>
+                        <label htmlFor="edit-start_time" className="font-semibold text-[var(--fg)] block mb-1">Start Time</label>
                         <input
+                          id="edit-start_time"
                           type="time"
                           value={formStartTime}
-                          onChange={e => setFormStartTime(e.target.value)}
-                          className="kw-input text-xs"
+                          onChange={e => {
+                            setFormStartTime(e.target.value);
+                            if (editErrors.start_time) setEditErrors(prev => ({ ...prev, start_time: '' }));
+                          }}
+                          aria-invalid={Boolean(editErrors.start_time)}
+                          aria-describedby={editErrors.start_time ? "edit-start_time-error" : undefined}
+                          className={`kw-input text-xs ${editErrors.start_time ? 'border-rose-500 focus:border-rose-500' : ''}`}
                         />
+                        {editErrors.start_time && (
+                          <p id="edit-start_time-error" className="text-rose-400 text-[11px] mt-1 font-medium" role="alert">
+                            {editErrors.start_time}
+                          </p>
+                        )}
                       </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="font-semibold text-[var(--fg)] block mb-1">End Date</label>
+                        <label htmlFor="edit-end_date" className="font-semibold text-[var(--fg)] block mb-1">End Date</label>
                         <input
+                          id="edit-end_date"
                           type="date"
                           value={formEndDate}
-                          onChange={e => setFormEndDate(e.target.value)}
-                          className="kw-input text-xs"
+                          onChange={e => {
+                            setFormEndDate(e.target.value);
+                            if (editErrors.end_date) setEditErrors(prev => ({ ...prev, end_date: '' }));
+                          }}
+                          aria-invalid={Boolean(editErrors.end_date)}
+                          aria-describedby={editErrors.end_date ? "edit-end_date-error" : undefined}
+                          className={`kw-input text-xs ${editErrors.end_date ? 'border-rose-500 focus:border-rose-500' : ''}`}
                         />
+                        {editErrors.end_date && (
+                          <p id="edit-end_date-error" className="text-rose-400 text-[11px] mt-1 font-medium" role="alert">
+                            {editErrors.end_date}
+                          </p>
+                        )}
                       </div>
                       <div>
-                        <label className="font-semibold text-[var(--fg)] block mb-1">End Time</label>
+                        <label htmlFor="edit-end_time" className="font-semibold text-[var(--fg)] block mb-1">End Time</label>
                         <input
+                          id="edit-end_time"
                           type="time"
                           value={formEndTime}
                           onChange={e => setFormEndTime(e.target.value)}
@@ -2311,8 +2464,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     </div>
 
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">Timezone</label>
+                      <label htmlFor="edit-timezone" className="font-semibold text-[var(--fg)] block mb-1">Timezone</label>
                       <input
+                        id="edit-timezone"
                         type="text"
                         value={formTimezone}
                         onChange={e => setFormTimezone(e.target.value)}
@@ -2323,55 +2477,97 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     {(formFormat === 'in_person' || formFormat === 'hybrid') && (
                       <>
                         <div>
-                          <label className="font-semibold text-[var(--fg)] block mb-1">Venue / address *</label>
+                          <label htmlFor="edit-venue" className="font-semibold text-[var(--fg)] block mb-1">Venue / address *</label>
                           <input
+                            id="edit-venue"
                             type="text"
                             value={formLocation}
-                            onChange={e => setFormLocation(e.target.value)}
-                            minLength={5}
-                            required
+                            onChange={e => {
+                              setFormLocation(e.target.value);
+                              if (editErrors.venue) setEditErrors(prev => ({ ...prev, venue: '' }));
+                            }}
                             placeholder="Venue name and street address (min 5 chars)"
-                            className="kw-input text-xs"
+                            aria-invalid={Boolean(editErrors.venue)}
+                            aria-describedby={editErrors.venue ? "edit-venue-error" : undefined}
+                            className={`kw-input text-xs ${editErrors.venue ? 'border-rose-500 focus:border-rose-500' : ''}`}
                           />
+                          {editErrors.venue && (
+                            <p id="edit-venue-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                              {editErrors.venue}
+                            </p>
+                          )}
                         </div>
 
                         <div>
-                          <label className="font-semibold text-[var(--fg)] block mb-1">Map link (optional)</label>
+                          <label htmlFor="edit-map_link" className="font-semibold text-[var(--fg)] block mb-1">Map link (optional)</label>
                           <input
-                            type="url"
+                            id="edit-map_link"
+                            type="text"
                             value={formMapLink}
-                            onChange={e => setFormMapLink(e.target.value)}
+                            onChange={e => {
+                              setFormMapLink(e.target.value);
+                              if (editErrors.map_link) setEditErrors(prev => ({ ...prev, map_link: '' }));
+                            }}
                             placeholder="https://maps.google.com/... or https://www.openstreetmap.org/..."
-                            className="kw-input text-xs"
+                            aria-invalid={Boolean(editErrors.map_link)}
+                            aria-describedby={editErrors.map_link ? "edit-map_link-error" : undefined}
+                            className={`kw-input text-xs ${editErrors.map_link ? 'border-rose-500 focus:border-rose-500' : ''}`}
                           />
+                          {editErrors.map_link && (
+                            <p id="edit-map_link-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                              {editErrors.map_link}
+                            </p>
+                          )}
                         </div>
                       </>
                     )}
 
                     {(formFormat === 'online' || formFormat === 'hybrid') && (
                       <div>
-                        <label className="font-semibold text-[var(--fg)] block mb-1">Join link (https://)</label>
+                        <label htmlFor="edit-join_link" className="font-semibold text-[var(--fg)] block mb-1">Join link (https://)</label>
                         <input
-                          type="url"
+                          id="edit-join_link"
+                          type="text"
                           value={formJoinLink}
-                          onChange={e => setFormJoinLink(e.target.value)}
-                          className="kw-input text-xs"
+                          onChange={e => {
+                            setFormJoinLink(e.target.value);
+                            if (editErrors.join_link) setEditErrors(prev => ({ ...prev, join_link: '' }));
+                          }}
+                          aria-invalid={Boolean(editErrors.join_link)}
+                          aria-describedby={editErrors.join_link ? "edit-join_link-error" : undefined}
+                          className={`kw-input text-xs ${editErrors.join_link ? 'border-rose-500 focus:border-rose-500' : ''}`}
                         />
+                        {editErrors.join_link && (
+                          <p id="edit-join_link-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                            {editErrors.join_link}
+                          </p>
+                        )}
                       </div>
                     )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="font-semibold text-[var(--fg)] block mb-1">Capacity (optional)</label>
+                        <label htmlFor="edit-capacity" className="font-semibold text-[var(--fg)] block mb-1">Capacity (optional)</label>
                         <input
+                          id="edit-capacity"
                           type="number"
                           min={1}
                           max={5000}
                           value={formCapacity}
-                          onChange={e => setFormCapacity(e.target.value)}
+                          onChange={e => {
+                            setFormCapacity(e.target.value);
+                            if (editErrors.capacity) setEditErrors(prev => ({ ...prev, capacity: '' }));
+                          }}
                           placeholder="Unlimited (1–5000)"
-                          className="kw-input text-xs"
+                          aria-invalid={Boolean(editErrors.capacity)}
+                          aria-describedby={editErrors.capacity ? "edit-capacity-error" : undefined}
+                          className={`kw-input text-xs ${editErrors.capacity ? 'border-rose-500 focus:border-rose-500' : ''}`}
                         />
+                        {editErrors.capacity && (
+                          <p id="edit-capacity-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                            {editErrors.capacity}
+                          </p>
+                        )}
                       </div>
                       <div>
                         <label className="font-semibold text-[var(--fg)] block mb-1">Tags (optional, up to 5)</label>
@@ -2402,7 +2598,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       </div>
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <label className="font-semibold text-[var(--fg)]">WhatsApp or phone</label>
+                          <label htmlFor="edit-contact_phone" className="font-semibold text-[var(--fg)]">WhatsApp or phone</label>
                           {currentProfile?.whatsapp && (
                             <button
                               type="button"
@@ -2414,22 +2610,44 @@ export const EventsView: React.FC<EventsViewProps> = ({
                           )}
                         </div>
                         <input
+                          id="edit-contact_phone"
                           type="tel"
                           value={formContactPhone}
-                          onChange={e => setFormContactPhone(e.target.value)}
+                          onChange={e => {
+                            setFormContactPhone(e.target.value);
+                            if (editErrors.contact_phone) setEditErrors(prev => ({ ...prev, contact_phone: '' }));
+                          }}
                           placeholder="+256700000000"
-                          className="kw-input text-xs"
+                          aria-invalid={Boolean(editErrors.contact_phone)}
+                          aria-describedby={editErrors.contact_phone ? "edit-contact_phone-error" : undefined}
+                          className={`kw-input text-xs ${editErrors.contact_phone ? 'border-rose-500 focus:border-rose-500' : ''}`}
                         />
+                        {editErrors.contact_phone && (
+                          <p id="edit-contact_phone-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                            {editErrors.contact_phone}
+                          </p>
+                        )}
                       </div>
                       <div>
-                        <label className="font-semibold text-[var(--fg)] block mb-1">Email</label>
+                        <label htmlFor="edit-contact_email" className="font-semibold text-[var(--fg)] block mb-1">Email</label>
                         <input
+                          id="edit-contact_email"
                           type="email"
                           value={formContactEmail}
-                          onChange={e => setFormContactEmail(e.target.value)}
+                          onChange={e => {
+                            setFormContactEmail(e.target.value);
+                            if (editErrors.contact_email) setEditErrors(prev => ({ ...prev, contact_email: '' }));
+                          }}
                           placeholder="host@example.com"
-                          className="kw-input text-xs"
+                          aria-invalid={Boolean(editErrors.contact_email)}
+                          aria-describedby={editErrors.contact_email ? "edit-contact_email-error" : undefined}
+                          className={`kw-input text-xs ${editErrors.contact_email ? 'border-rose-500 focus:border-rose-500' : ''}`}
                         />
+                        {editErrors.contact_email && (
+                          <p id="edit-contact_email-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                            {editErrors.contact_email}
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -2445,9 +2663,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   <button
                     type="submit"
                     disabled={formSubmitting}
-                    className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold flex-1 cursor-pointer"
+                    className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold flex-1 cursor-pointer disabled:opacity-50"
                   >
-                    {formSubmitting ? 'Saving...' : 'Save Changes'}
+                    {formSubmitting ? 'Saving…' : 'Save Changes'}
                   </button>
                   <button
                     type="button"
@@ -2753,9 +2971,29 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   setSelectedItemId(item.id);
                   window.location.hash = `#/events/${item.id}`;
                 }}
-                className="kw-card p-5 space-y-4 hover:border-[var(--gold)]/60 transition-all cursor-pointer flex flex-col justify-between group"
+                className="kw-card overflow-hidden hover:border-[var(--gold)]/60 transition-all cursor-pointer flex flex-col justify-between group"
               >
-                <div className="space-y-3">
+                {/* Cover image or gradient placeholder */}
+                <div className="w-full aspect-[16/9] bg-[var(--bg)] border-b border-[var(--card-border)] overflow-hidden relative">
+                  {item.cover_image ? (
+                    <img
+                      src={item.cover_image}
+                      alt={item.title}
+                      loading="lazy"
+                      decoding="async"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gradient-to-br from-amber-500/20 via-amber-900/10 to-[var(--bg)] flex items-center justify-center">
+                      <span className="text-3xl font-black text-[var(--gold-text)]/40 uppercase">
+                        {item.title ? item.title.trim().charAt(0) : 'K'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-5 space-y-4 flex-1 flex flex-col justify-between">
+                  <div className="space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span
@@ -2946,8 +3184,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   </div>
                 </div>
               </div>
-            );
-          })}
+            </div>
+          );
+        })}
         </div>
       )}
 
@@ -2970,7 +3209,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleCreateSubmit} className="space-y-4 text-xs">
+            <form noValidate onSubmit={handleCreateSubmit} className="space-y-4 text-xs">
               <div>
                 <label className="font-semibold text-[var(--fg)] block mb-1">What are you creating? *</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -3000,27 +3239,47 @@ export const EventsView: React.FC<EventsViewProps> = ({
               </div>
 
               <div>
-                <label className="font-semibold text-[var(--fg)] block mb-1">Title *</label>
+                <label htmlFor="create-title" className="font-semibold text-[var(--fg)] block mb-1">Title *</label>
                 <input
+                  id="create-title"
                   type="text"
                   value={formTitle}
-                  onChange={e => setFormTitle(e.target.value)}
+                  onChange={e => {
+                    setFormTitle(e.target.value);
+                    if (createErrors.title) setCreateErrors(prev => ({ ...prev, title: '' }));
+                  }}
                   placeholder="e.g. Flutter Hackday"
-                  required
-                  className="kw-input text-xs"
+                  aria-invalid={Boolean(createErrors.title)}
+                  aria-describedby={createErrors.title ? "create-title-error" : undefined}
+                  className={`kw-input text-xs ${createErrors.title ? 'border-rose-500 focus:border-rose-500' : ''}`}
                 />
+                {createErrors.title && (
+                  <p id="create-title-error" className="text-rose-400 text-[11px] mt-1 font-medium" role="alert">
+                    {createErrors.title}
+                  </p>
+                )}
               </div>
 
               <div>
-                <label className="font-semibold text-[var(--fg)] block mb-1">Description *</label>
+                <label htmlFor="create-description" className="font-semibold text-[var(--fg)] block mb-1">Description *</label>
                 <textarea
+                  id="create-description"
                   value={formDescription}
-                  onChange={e => setFormDescription(e.target.value)}
+                  onChange={e => {
+                    setFormDescription(e.target.value);
+                    if (createErrors.description) setCreateErrors(prev => ({ ...prev, description: '' }));
+                  }}
                   rows={3}
                   placeholder="Share details about what builders will learn, hack on, or gain..."
-                  required
-                  className="kw-textarea text-xs"
+                  aria-invalid={Boolean(createErrors.description)}
+                  aria-describedby={createErrors.description ? "create-description-error" : undefined}
+                  className={`kw-textarea text-xs ${createErrors.description ? 'border-rose-500 focus:border-rose-500' : ''}`}
                 />
+                {createErrors.description && (
+                  <p id="create-description-error" className="text-rose-400 text-[11px] mt-1 font-medium" role="alert">
+                    {createErrors.description}
+                  </p>
+                )}
               </div>
 
               {formKind === 'event' ? (
@@ -3047,40 +3306,72 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">Start Date *</label>
+                      <label htmlFor="create-start_date" className="font-semibold text-[var(--fg)] block mb-1">Start Date *</label>
                       <input
+                        id="create-start_date"
                         type="date"
                         value={formStartDate}
-                        onChange={e => setFormStartDate(e.target.value)}
-                        required
-                        className="kw-input text-xs"
+                        onChange={e => {
+                          setFormStartDate(e.target.value);
+                          if (createErrors.start_date) setCreateErrors(prev => ({ ...prev, start_date: '' }));
+                        }}
+                        aria-invalid={Boolean(createErrors.start_date)}
+                        aria-describedby={createErrors.start_date ? "create-start_date-error" : undefined}
+                        className={`kw-input text-xs ${createErrors.start_date ? 'border-rose-500 focus:border-rose-500' : ''}`}
                       />
+                      {createErrors.start_date && (
+                        <p id="create-start_date-error" className="text-rose-400 text-[11px] mt-1 font-medium" role="alert">
+                          {createErrors.start_date}
+                        </p>
+                      )}
                     </div>
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">Start Time *</label>
+                      <label htmlFor="create-start_time" className="font-semibold text-[var(--fg)] block mb-1">Start Time *</label>
                       <input
+                        id="create-start_time"
                         type="time"
                         value={formStartTime}
-                        onChange={e => setFormStartTime(e.target.value)}
-                        required
-                        className="kw-input text-xs"
+                        onChange={e => {
+                          setFormStartTime(e.target.value);
+                          if (createErrors.start_time) setCreateErrors(prev => ({ ...prev, start_time: '' }));
+                        }}
+                        aria-invalid={Boolean(createErrors.start_time)}
+                        aria-describedby={createErrors.start_time ? "create-start_time-error" : undefined}
+                        className={`kw-input text-xs ${createErrors.start_time ? 'border-rose-500 focus:border-rose-500' : ''}`}
                       />
+                      {createErrors.start_time && (
+                        <p id="create-start_time-error" className="text-rose-400 text-[11px] mt-1 font-medium" role="alert">
+                          {createErrors.start_time}
+                        </p>
+                      )}
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">End Date (optional)</label>
+                      <label htmlFor="create-end_date" className="font-semibold text-[var(--fg)] block mb-1">End Date (optional)</label>
                       <input
+                        id="create-end_date"
                         type="date"
                         value={formEndDate}
-                        onChange={e => setFormEndDate(e.target.value)}
-                        className="kw-input text-xs"
+                        onChange={e => {
+                          setFormEndDate(e.target.value);
+                          if (createErrors.end_date) setCreateErrors(prev => ({ ...prev, end_date: '' }));
+                        }}
+                        aria-invalid={Boolean(createErrors.end_date)}
+                        aria-describedby={createErrors.end_date ? "create-end_date-error" : undefined}
+                        className={`kw-input text-xs ${createErrors.end_date ? 'border-rose-500 focus:border-rose-500' : ''}`}
                       />
+                      {createErrors.end_date && (
+                        <p id="create-end_date-error" className="text-rose-400 text-[11px] mt-1 font-medium" role="alert">
+                          {createErrors.end_date}
+                        </p>
+                      )}
                     </div>
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">End Time (optional)</label>
+                      <label htmlFor="create-end_time" className="font-semibold text-[var(--fg)] block mb-1">End Time (optional)</label>
                       <input
+                        id="create-end_time"
                         type="time"
                         value={formEndTime}
                         onChange={e => setFormEndTime(e.target.value)}
@@ -3090,13 +3381,13 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   </div>
 
                   <div>
-                    <label className="font-semibold text-[var(--fg)] block mb-1">Timezone *</label>
+                    <label htmlFor="create-timezone" className="font-semibold text-[var(--fg)] block mb-1">Timezone *</label>
                     <input
+                      id="create-timezone"
                       type="text"
                       value={formTimezone}
                       onChange={e => setFormTimezone(e.target.value)}
                       placeholder="e.g. Africa/Kampala"
-                      required
                       className="kw-input text-xs"
                     />
                     <p className="text-[13px] text-[var(--fg-subtle)] mt-0.5">
@@ -3107,60 +3398,102 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   {(formFormat === 'in_person' || formFormat === 'hybrid') && (
                     <>
                       <div>
-                        <label className="font-semibold text-[var(--fg)] block mb-1">Venue / address *</label>
+                        <label htmlFor="create-venue" className="font-semibold text-[var(--fg)] block mb-1">Venue / address *</label>
                         <input
+                          id="create-venue"
                           type="text"
                           value={formLocation}
-                          onChange={e => setFormLocation(e.target.value)}
+                          onChange={e => {
+                            setFormLocation(e.target.value);
+                            if (createErrors.venue) setCreateErrors(prev => ({ ...prev, venue: '' }));
+                          }}
                           placeholder="e.g. venue name, street address, city (min 5 chars)"
-                          minLength={5}
-                          required
-                          className="kw-input text-xs"
+                          aria-invalid={Boolean(createErrors.venue)}
+                          aria-describedby={createErrors.venue ? "create-venue-error" : undefined}
+                          className={`kw-input text-xs ${createErrors.venue ? 'border-rose-500 focus:border-rose-500' : ''}`}
                         />
+                        {createErrors.venue && (
+                          <p id="create-venue-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                            {createErrors.venue}
+                          </p>
+                        )}
                       </div>
 
                       <div>
-                        <label className="font-semibold text-[var(--fg)] block mb-1">Map link (optional)</label>
+                        <label htmlFor="create-map_link" className="font-semibold text-[var(--fg)] block mb-1">Map link (optional)</label>
                         <input
-                          type="url"
+                          id="create-map_link"
+                          type="text"
                           value={formMapLink}
-                          onChange={e => setFormMapLink(e.target.value)}
+                          onChange={e => {
+                            setFormMapLink(e.target.value);
+                            if (createErrors.map_link) setCreateErrors(prev => ({ ...prev, map_link: '' }));
+                          }}
                           placeholder="https://maps.google.com/... or https://www.openstreetmap.org/..."
-                          className="kw-input text-xs"
+                          aria-invalid={Boolean(createErrors.map_link)}
+                          aria-describedby={createErrors.map_link ? "create-map_link-error" : undefined}
+                          className={`kw-input text-xs ${createErrors.map_link ? 'border-rose-500 focus:border-rose-500' : ''}`}
                         />
+                        {createErrors.map_link && (
+                          <p id="create-map_link-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                            {createErrors.map_link}
+                          </p>
+                        )}
                       </div>
                     </>
                   )}
 
                   {(formFormat === 'online' || formFormat === 'hybrid') && (
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">Join link (https://) *</label>
+                      <label htmlFor="create-join_link" className="font-semibold text-[var(--fg)] block mb-1">Join link (https://) *</label>
                       <input
-                        type="url"
+                        id="create-join_link"
+                        type="text"
                         value={formJoinLink}
-                        onChange={e => setFormJoinLink(e.target.value)}
+                        onChange={e => {
+                          setFormJoinLink(e.target.value);
+                          if (createErrors.join_link) setCreateErrors(prev => ({ ...prev, join_link: '' }));
+                        }}
                         placeholder="https://meet.google.com/..."
-                        required
-                        className="kw-input text-xs"
+                        aria-invalid={Boolean(createErrors.join_link)}
+                        aria-describedby={createErrors.join_link ? "create-join_link-error" : undefined}
+                        className={`kw-input text-xs ${createErrors.join_link ? 'border-rose-500 focus:border-rose-500' : ''}`}
                       />
-                      <p className="text-[13px] text-[var(--fg-subtle)] mt-0.5">
-                        Shown only to signed-in members who RSVP.
-                      </p>
+                      {createErrors.join_link ? (
+                        <p id="create-join_link-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                          {createErrors.join_link}
+                        </p>
+                      ) : (
+                        <p className="text-[13px] text-[var(--fg-subtle)] mt-0.5">
+                          Shown only to signed-in members who RSVP.
+                        </p>
+                      )}
                     </div>
                   )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">Capacity (optional)</label>
+                      <label htmlFor="create-capacity" className="font-semibold text-[var(--fg)] block mb-1">Capacity (optional)</label>
                       <input
+                        id="create-capacity"
                         type="number"
                         min={1}
                         max={5000}
                         value={formCapacity}
-                        onChange={e => setFormCapacity(e.target.value)}
+                        onChange={e => {
+                          setFormCapacity(e.target.value);
+                          if (createErrors.capacity) setCreateErrors(prev => ({ ...prev, capacity: '' }));
+                        }}
                         placeholder="Unlimited (1–5000)"
-                        className="kw-input text-xs"
+                        aria-invalid={Boolean(createErrors.capacity)}
+                        aria-describedby={createErrors.capacity ? "create-capacity-error" : undefined}
+                        className={`kw-input text-xs ${createErrors.capacity ? 'border-rose-500 focus:border-rose-500' : ''}`}
                       />
+                      {createErrors.capacity && (
+                        <p id="create-capacity-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                          {createErrors.capacity}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="font-semibold text-[var(--fg)] block mb-1">Tags (optional, up to 5)</label>
@@ -3191,7 +3524,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     </div>
                     <div>
                       <div className="flex items-center justify-between mb-1">
-                        <label className="font-semibold text-[var(--fg)]">WhatsApp or phone</label>
+                        <label htmlFor="create-contact_phone" className="font-semibold text-[var(--fg)]">WhatsApp or phone</label>
                         {currentProfile?.whatsapp && (
                           <button
                             type="button"
@@ -3203,34 +3536,67 @@ export const EventsView: React.FC<EventsViewProps> = ({
                         )}
                       </div>
                       <input
+                        id="create-contact_phone"
                         type="tel"
                         value={formContactPhone}
-                        onChange={e => setFormContactPhone(e.target.value)}
+                        onChange={e => {
+                          setFormContactPhone(e.target.value);
+                          if (createErrors.contact_phone) setCreateErrors(prev => ({ ...prev, contact_phone: '' }));
+                        }}
                         placeholder="+256700000000"
-                        className="kw-input text-xs"
+                        aria-invalid={Boolean(createErrors.contact_phone)}
+                        aria-describedby={createErrors.contact_phone ? "create-contact_phone-error" : undefined}
+                        className={`kw-input text-xs ${createErrors.contact_phone ? 'border-rose-500 focus:border-rose-500' : ''}`}
                       />
+                      {createErrors.contact_phone && (
+                        <p id="create-contact_phone-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                          {createErrors.contact_phone}
+                        </p>
+                      )}
                     </div>
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">Email</label>
+                      <label htmlFor="create-contact_email" className="font-semibold text-[var(--fg)] block mb-1">Email</label>
                       <input
+                        id="create-contact_email"
                         type="email"
                         value={formContactEmail}
-                        onChange={e => setFormContactEmail(e.target.value)}
+                        onChange={e => {
+                          setFormContactEmail(e.target.value);
+                          if (createErrors.contact_email) setCreateErrors(prev => ({ ...prev, contact_email: '' }));
+                        }}
                         placeholder="host@example.com"
-                        className="kw-input text-xs"
+                        aria-invalid={Boolean(createErrors.contact_email)}
+                        aria-describedby={createErrors.contact_email ? "create-contact_email-error" : undefined}
+                        className={`kw-input text-xs ${createErrors.contact_email ? 'border-rose-500 focus:border-rose-500' : ''}`}
                       />
+                      {createErrors.contact_email && (
+                        <p id="create-contact_email-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                          {createErrors.contact_email}
+                        </p>
+                      )}
                     </div>
                   </div>
 
                   <div>
-                    <label className="font-semibold text-[var(--fg)] block mb-1">Registration link (optional)</label>
+                    <label htmlFor="create-reg_link" className="font-semibold text-[var(--fg)] block mb-1">Registration link (optional)</label>
                     <input
-                      type="url"
+                      id="create-reg_link"
+                      type="text"
                       value={formRegLink}
-                      onChange={e => setFormRegLink(e.target.value)}
+                      onChange={e => {
+                        setFormRegLink(e.target.value);
+                        if (createErrors.reg_link) setCreateErrors(prev => ({ ...prev, reg_link: '' }));
+                      }}
                       placeholder="https://lu.ma/..."
-                      className="kw-input text-xs"
+                      aria-invalid={Boolean(createErrors.reg_link)}
+                      aria-describedby={createErrors.reg_link ? "create-reg_link-error" : undefined}
+                      className={`kw-input text-xs ${createErrors.reg_link ? 'border-rose-500 focus:border-rose-500' : ''}`}
                     />
+                    {createErrors.reg_link && (
+                      <p id="create-reg_link-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                        {createErrors.reg_link}
+                      </p>
+                    )}
                   </div>
 
                   <CoverImageUploader
@@ -3257,25 +3623,47 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   </div>
 
                   <div>
-                    <label className="font-semibold text-[var(--fg)] block mb-1">Deadline (optional)</label>
+                    <label htmlFor="create-deadline" className="font-semibold text-[var(--fg)] block mb-1">Deadline (optional)</label>
                     <input
+                      id="create-deadline"
                       type="text"
                       value={formDeadline}
-                      onChange={e => setFormDeadline(e.target.value)}
+                      onChange={e => {
+                        setFormDeadline(e.target.value);
+                        if (createErrors.deadline) setCreateErrors(prev => ({ ...prev, deadline: '' }));
+                      }}
                       placeholder="e.g. Nov 30, 2026"
-                      className="kw-input text-xs"
+                      aria-invalid={Boolean(createErrors.deadline)}
+                      aria-describedby={createErrors.deadline ? "create-deadline-error" : undefined}
+                      className={`kw-input text-xs ${createErrors.deadline ? 'border-rose-500 focus:border-rose-500' : ''}`}
                     />
+                    {createErrors.deadline && (
+                      <p id="create-deadline-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                        {createErrors.deadline}
+                      </p>
+                    )}
                   </div>
 
                   <div>
-                    <label className="font-semibold text-[var(--fg)] block mb-1">Opportunity Link (https://)</label>
+                    <label htmlFor="create-link" className="font-semibold text-[var(--fg)] block mb-1">Opportunity Link (https://)</label>
                     <input
-                      type="url"
+                      id="create-link"
+                      type="text"
                       value={formLink}
-                      onChange={e => setFormLink(e.target.value)}
+                      onChange={e => {
+                        setFormLink(e.target.value);
+                        if (createErrors.link) setCreateErrors(prev => ({ ...prev, link: '' }));
+                      }}
                       placeholder="https://..."
-                      className="kw-input text-xs"
+                      aria-invalid={Boolean(createErrors.link)}
+                      aria-describedby={createErrors.link ? "create-link-error" : undefined}
+                      className={`kw-input text-xs ${createErrors.link ? 'border-rose-500 focus:border-rose-500' : ''}`}
                     />
+                    {createErrors.link && (
+                      <p id="create-link-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                        {createErrors.link}
+                      </p>
+                    )}
                   </div>
                 </>
               )}
@@ -3284,9 +3672,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 <button
                   type="submit"
                   disabled={formSubmitting}
-                  className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold flex-1 cursor-pointer"
+                  className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold flex-1 cursor-pointer disabled:opacity-50"
                 >
-                  {formSubmitting ? 'Creating...' : 'Create & Publish Event'}
+                  {formSubmitting ? 'Creating…' : 'Create & Publish Event'}
                 </button>
                 <button
                   type="button"
@@ -3315,65 +3703,119 @@ export const EventsView: React.FC<EventsViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleEditSubmit} className="space-y-4 text-xs">
+            <form noValidate onSubmit={handleEditSubmit} className="space-y-4 text-xs">
               <div>
-                <label className="font-semibold text-[var(--fg)] block mb-1">Title *</label>
+                <label htmlFor="edit-title" className="font-semibold text-[var(--fg)] block mb-1">Title *</label>
                 <input
+                  id="edit-title"
                   type="text"
                   value={formTitle}
-                  onChange={e => setFormTitle(e.target.value)}
-                  required
-                  className="kw-input text-xs"
+                  onChange={e => {
+                    setFormTitle(e.target.value);
+                    if (editErrors.title) setEditErrors(prev => ({ ...prev, title: '' }));
+                  }}
+                  aria-invalid={Boolean(editErrors.title)}
+                  aria-describedby={editErrors.title ? "edit-title-error" : undefined}
+                  className={`kw-input text-xs ${editErrors.title ? 'border-rose-500 focus:border-rose-500' : ''}`}
                 />
+                {editErrors.title && (
+                  <p id="edit-title-error" className="text-rose-400 text-[11px] mt-1 font-medium" role="alert">
+                    {editErrors.title}
+                  </p>
+                )}
               </div>
 
               <div>
-                <label className="font-semibold text-[var(--fg)] block mb-1">Description *</label>
+                <label htmlFor="edit-description" className="font-semibold text-[var(--fg)] block mb-1">Description *</label>
                 <textarea
+                  id="edit-description"
                   value={formDescription}
-                  onChange={e => setFormDescription(e.target.value)}
+                  onChange={e => {
+                    setFormDescription(e.target.value);
+                    if (editErrors.description) setEditErrors(prev => ({ ...prev, description: '' }));
+                  }}
                   rows={3}
-                  required
-                  className="kw-textarea text-xs"
+                  aria-invalid={Boolean(editErrors.description)}
+                  aria-describedby={editErrors.description ? "edit-description-error" : undefined}
+                  className={`kw-textarea text-xs ${editErrors.description ? 'border-rose-500 focus:border-rose-500' : ''}`}
                 />
+                {editErrors.description && (
+                  <p id="edit-description-error" className="text-rose-400 text-[11px] mt-1 font-medium" role="alert">
+                    {editErrors.description}
+                  </p>
+                )}
               </div>
 
               {editingItem.kind === 'event' && (
                 <>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">Start Date</label>
+                      <label htmlFor="edit-start_date" className="font-semibold text-[var(--fg)] block mb-1">Start Date</label>
                       <input
+                        id="edit-start_date"
                         type="date"
                         value={formStartDate}
-                        onChange={e => setFormStartDate(e.target.value)}
-                        className="kw-input text-xs"
+                        onChange={e => {
+                          setFormStartDate(e.target.value);
+                          if (editErrors.start_date) setEditErrors(prev => ({ ...prev, start_date: '' }));
+                        }}
+                        aria-invalid={Boolean(editErrors.start_date)}
+                        aria-describedby={editErrors.start_date ? "edit-start_date-error" : undefined}
+                        className={`kw-input text-xs ${editErrors.start_date ? 'border-rose-500 focus:border-rose-500' : ''}`}
                       />
+                      {editErrors.start_date && (
+                        <p id="edit-start_date-error" className="text-rose-400 text-[11px] mt-1 font-medium" role="alert">
+                          {editErrors.start_date}
+                        </p>
+                      )}
                     </div>
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">Start Time</label>
+                      <label htmlFor="edit-start_time" className="font-semibold text-[var(--fg)] block mb-1">Start Time</label>
                       <input
+                        id="edit-start_time"
                         type="time"
                         value={formStartTime}
-                        onChange={e => setFormStartTime(e.target.value)}
-                        className="kw-input text-xs"
+                        onChange={e => {
+                          setFormStartTime(e.target.value);
+                          if (editErrors.start_time) setEditErrors(prev => ({ ...prev, start_time: '' }));
+                        }}
+                        aria-invalid={Boolean(editErrors.start_time)}
+                        aria-describedby={editErrors.start_time ? "edit-start_time-error" : undefined}
+                        className={`kw-input text-xs ${editErrors.start_time ? 'border-rose-500 focus:border-rose-500' : ''}`}
                       />
+                      {editErrors.start_time && (
+                        <p id="edit-start_time-error" className="text-rose-400 text-[11px] mt-1 font-medium" role="alert">
+                          {editErrors.start_time}
+                        </p>
+                      )}
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">End Date</label>
+                      <label htmlFor="edit-end_date" className="font-semibold text-[var(--fg)] block mb-1">End Date</label>
                       <input
+                        id="edit-end_date"
                         type="date"
                         value={formEndDate}
-                        onChange={e => setFormEndDate(e.target.value)}
-                        className="kw-input text-xs"
+                        onChange={e => {
+                          setFormEndDate(e.target.value);
+                          if (editErrors.end_date) setEditErrors(prev => ({ ...prev, end_date: '' }));
+                        }}
+                        aria-invalid={Boolean(editErrors.end_date)}
+                        aria-describedby={editErrors.end_date ? "edit-end_date-error" : undefined}
+                        className={`kw-input text-xs ${editErrors.end_date ? 'border-rose-500 focus:border-rose-500' : ''}`}
                       />
+                      {editErrors.end_date && (
+                        <p id="edit-end_date-error" className="text-rose-400 text-[11px] mt-1 font-medium" role="alert">
+                          {editErrors.end_date}
+                        </p>
+                      )}
                     </div>
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">End Time</label>
+                      <label htmlFor="edit-end_time" className="font-semibold text-[var(--fg)] block mb-1">End Time</label>
                       <input
+                        id="edit-end_time"
                         type="time"
                         value={formEndTime}
                         onChange={e => setFormEndTime(e.target.value)}
@@ -3383,8 +3825,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   </div>
 
                   <div>
-                    <label className="font-semibold text-[var(--fg)] block mb-1">Timezone</label>
+                    <label htmlFor="edit-timezone" className="font-semibold text-[var(--fg)] block mb-1">Timezone</label>
                     <input
+                      id="edit-timezone"
                       type="text"
                       value={formTimezone}
                       onChange={e => setFormTimezone(e.target.value)}
@@ -3395,55 +3838,97 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   {(formFormat === 'in_person' || formFormat === 'hybrid') && (
                     <>
                       <div>
-                        <label className="font-semibold text-[var(--fg)] block mb-1">Venue / address *</label>
+                        <label htmlFor="edit-venue" className="font-semibold text-[var(--fg)] block mb-1">Venue / address *</label>
                         <input
+                          id="edit-venue"
                           type="text"
                           value={formLocation}
-                          onChange={e => setFormLocation(e.target.value)}
-                          minLength={5}
-                          required
+                          onChange={e => {
+                            setFormLocation(e.target.value);
+                            if (editErrors.venue) setEditErrors(prev => ({ ...prev, venue: '' }));
+                          }}
                           placeholder="Venue name and street address (min 5 chars)"
-                          className="kw-input text-xs"
+                          aria-invalid={Boolean(editErrors.venue)}
+                          aria-describedby={editErrors.venue ? "edit-venue-error" : undefined}
+                          className={`kw-input text-xs ${editErrors.venue ? 'border-rose-500 focus:border-rose-500' : ''}`}
                         />
+                        {editErrors.venue && (
+                          <p id="edit-venue-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                            {editErrors.venue}
+                          </p>
+                        )}
                       </div>
 
                       <div>
-                        <label className="font-semibold text-[var(--fg)] block mb-1">Map link (optional)</label>
+                        <label htmlFor="edit-map_link" className="font-semibold text-[var(--fg)] block mb-1">Map link (optional)</label>
                         <input
-                          type="url"
+                          id="edit-map_link"
+                          type="text"
                           value={formMapLink}
-                          onChange={e => setFormMapLink(e.target.value)}
+                          onChange={e => {
+                            setFormMapLink(e.target.value);
+                            if (editErrors.map_link) setEditErrors(prev => ({ ...prev, map_link: '' }));
+                          }}
                           placeholder="https://maps.google.com/... or https://www.openstreetmap.org/..."
-                          className="kw-input text-xs"
+                          aria-invalid={Boolean(editErrors.map_link)}
+                          aria-describedby={editErrors.map_link ? "edit-map_link-error" : undefined}
+                          className={`kw-input text-xs ${editErrors.map_link ? 'border-rose-500 focus:border-rose-500' : ''}`}
                         />
+                        {editErrors.map_link && (
+                          <p id="edit-map_link-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                            {editErrors.map_link}
+                          </p>
+                        )}
                       </div>
                     </>
                   )}
 
                   {(formFormat === 'online' || formFormat === 'hybrid') && (
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">Join link (https://)</label>
+                      <label htmlFor="edit-join_link" className="font-semibold text-[var(--fg)] block mb-1">Join link (https://)</label>
                       <input
-                        type="url"
+                        id="edit-join_link"
+                        type="text"
                         value={formJoinLink}
-                        onChange={e => setFormJoinLink(e.target.value)}
-                        className="kw-input text-xs"
+                        onChange={e => {
+                          setFormJoinLink(e.target.value);
+                          if (editErrors.join_link) setEditErrors(prev => ({ ...prev, join_link: '' }));
+                        }}
+                        aria-invalid={Boolean(editErrors.join_link)}
+                        aria-describedby={editErrors.join_link ? "edit-join_link-error" : undefined}
+                        className={`kw-input text-xs ${editErrors.join_link ? 'border-rose-500 focus:border-rose-500' : ''}`}
                       />
+                      {editErrors.join_link && (
+                        <p id="edit-join_link-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                          {editErrors.join_link}
+                        </p>
+                      )}
                     </div>
                   )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">Capacity (optional)</label>
+                      <label htmlFor="edit-capacity" className="font-semibold text-[var(--fg)] block mb-1">Capacity (optional)</label>
                       <input
+                        id="edit-capacity"
                         type="number"
                         min={1}
                         max={5000}
                         value={formCapacity}
-                        onChange={e => setFormCapacity(e.target.value)}
+                        onChange={e => {
+                          setFormCapacity(e.target.value);
+                          if (editErrors.capacity) setEditErrors(prev => ({ ...prev, capacity: '' }));
+                        }}
                         placeholder="Unlimited (1–5000)"
-                        className="kw-input text-xs"
+                        aria-invalid={Boolean(editErrors.capacity)}
+                        aria-describedby={editErrors.capacity ? "edit-capacity-error" : undefined}
+                        className={`kw-input text-xs ${editErrors.capacity ? 'border-rose-500 focus:border-rose-500' : ''}`}
                       />
+                      {editErrors.capacity && (
+                        <p id="edit-capacity-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                          {editErrors.capacity}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="font-semibold text-[var(--fg)] block mb-1">Tags (optional, up to 5)</label>
@@ -3474,7 +3959,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     </div>
                     <div>
                       <div className="flex items-center justify-between mb-1">
-                        <label className="font-semibold text-[var(--fg)]">WhatsApp or phone</label>
+                        <label htmlFor="edit-contact_phone" className="font-semibold text-[var(--fg)]">WhatsApp or phone</label>
                         {currentProfile?.whatsapp && (
                           <button
                             type="button"
@@ -3486,22 +3971,44 @@ export const EventsView: React.FC<EventsViewProps> = ({
                         )}
                       </div>
                       <input
+                        id="edit-contact_phone"
                         type="tel"
                         value={formContactPhone}
-                        onChange={e => setFormContactPhone(e.target.value)}
+                        onChange={e => {
+                          setFormContactPhone(e.target.value);
+                          if (editErrors.contact_phone) setEditErrors(prev => ({ ...prev, contact_phone: '' }));
+                        }}
                         placeholder="+256700000000"
-                        className="kw-input text-xs"
+                        aria-invalid={Boolean(editErrors.contact_phone)}
+                        aria-describedby={editErrors.contact_phone ? "edit-contact_phone-error" : undefined}
+                        className={`kw-input text-xs ${editErrors.contact_phone ? 'border-rose-500 focus:border-rose-500' : ''}`}
                       />
+                      {editErrors.contact_phone && (
+                        <p id="edit-contact_phone-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                          {editErrors.contact_phone}
+                        </p>
+                      )}
                     </div>
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">Email</label>
+                      <label htmlFor="edit-contact_email" className="font-semibold text-[var(--fg)] block mb-1">Email</label>
                       <input
+                        id="edit-contact_email"
                         type="email"
                         value={formContactEmail}
-                        onChange={e => setFormContactEmail(e.target.value)}
+                        onChange={e => {
+                          setFormContactEmail(e.target.value);
+                          if (editErrors.contact_email) setEditErrors(prev => ({ ...prev, contact_email: '' }));
+                        }}
                         placeholder="host@example.com"
-                        className="kw-input text-xs"
+                        aria-invalid={Boolean(editErrors.contact_email)}
+                        aria-describedby={editErrors.contact_email ? "edit-contact_email-error" : undefined}
+                        className={`kw-input text-xs ${editErrors.contact_email ? 'border-rose-500 focus:border-rose-500' : ''}`}
                       />
+                      {editErrors.contact_email && (
+                        <p id="edit-contact_email-error" className="text-rose-400 text-xs mt-1 font-medium" role="alert">
+                          {editErrors.contact_email}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -3517,9 +4024,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 <button
                   type="submit"
                   disabled={formSubmitting}
-                  className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold flex-1 cursor-pointer"
+                  className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold flex-1 cursor-pointer disabled:opacity-50"
                 >
-                  {formSubmitting ? 'Saving...' : 'Save Changes'}
+                  {formSubmitting ? 'Saving…' : 'Save Changes'}
                 </button>
                 <button
                   type="button"

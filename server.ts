@@ -4476,7 +4476,7 @@ app.get('/api/event-image/:id', (req: Request, res: Response) => {
       }
 
       res.setHeader('Content-Type', mimeType);
-      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
       res.setHeader('ETag', etag);
       return res.send(buffer);
     }

@@ -547,7 +547,7 @@ export default function App() {
 
       {/* Toast Notification Banner */}
       {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 max-w-sm p-4 rounded-xl bg-[var(--card)] border border-[var(--card-border)] shadow-2xl text-[13px] font-medium text-[var(--fg)] flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-3">
+        <div className="fixed bottom-5 right-5 z-[100] max-w-sm p-4 rounded-xl bg-[var(--card)] border border-[var(--card-border)] shadow-2xl text-[13px] font-medium text-[var(--fg)] flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-3">
           <span>{toastMessage}</span>
           <button
             onClick={() => setToastMessage(null)}
