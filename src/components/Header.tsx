@@ -177,7 +177,7 @@ export const Header: React.FC<HeaderProps> = ({
               placeholder="Search people, skills, needs..."
               value={searchQuery}
               onChange={e => onSearchChange(e.target.value)}
-              className="w-full bg-[var(--bg-subtle)] hover:bg-[var(--card)] focus:bg-[var(--card)] border border-[var(--card-border)] focus:border-[var(--gold)] text-[13px] text-[var(--fg)] placeholder:text-[var(--fg-subtle)] rounded-xl pl-9 pr-14 py-2 shadow-xs transition-all focus:shadow-[0_0_0_3px_var(--gold-subtle)] focus:outline-none"
+              className="w-full bg-[var(--bg-subtle)] hover:bg-[var(--card)] focus:bg-[var(--card)] border border-[var(--card-border)] focus:border-[var(--gold)] text-[13px] text-[var(--fg)] placeholder:text-[var(--fg-subtle)] rounded-xl pl-10 pr-14 py-2 shadow-xs transition-all focus:shadow-[0_0_0_3px_var(--gold-subtle)] focus:outline-none"
               aria-label="Search people, skills, and needs"
             />
             <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-0.5 text-[13px] font-mono text-[var(--fg-subtle)] bg-[var(--card)] border border-[var(--card-border)] px-1.5 py-0.5 rounded pointer-events-none">
@@ -364,7 +364,7 @@ export const Header: React.FC<HeaderProps> = ({
               placeholder="Search people, skills, needs..."
               value={searchQuery}
               onChange={e => onSearchChange(e.target.value)}
-              className="w-full bg-[var(--bg-subtle)] border border-[var(--card-border)] text-[13px] text-[var(--fg)] rounded-xl pl-9 pr-8 py-2 focus:outline-none focus:border-[var(--gold)]"
+              className="w-full bg-[var(--bg-subtle)] border border-[var(--card-border)] text-[13px] text-[var(--fg)] rounded-xl pl-10 pr-8 py-2 focus:outline-none focus:border-[var(--gold)]"
               aria-label="Search people"
             />
             {searchQuery && (

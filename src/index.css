@@ -190,20 +190,22 @@ p {
   line-height: 1.45 !important;
 }
 
-/* Shared page container: max-width 1200px, centered, side padding 16px mobile, 24px desktop */
-.kw-container {
-  max-width: 1200px;
-  margin-left: auto;
-  margin-right: auto;
-  padding-left: 16px;
-  padding-right: 16px;
-  width: 100%;
-}
-
-@media (min-width: 768px) {
+@layer components {
+  /* Shared page container: max-width 1200px, centered, side padding 16px mobile, 24px desktop */
   .kw-container {
-    padding-left: 24px;
-    padding-right: 24px;
+    max-width: 1200px;
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 16px;
+    padding-right: 16px;
+    width: 100%;
+  }
+
+  @media (min-width: 768px) {
+    .kw-container {
+      padding-left: 24px;
+      padding-right: 24px;
+    }
   }
 }
 
@@ -222,175 +224,177 @@ a {
   font-variant-numeric: tabular-nums;
 }
 
-/* =========================================================================
-   HIGH-GRADE CARDS & PANELS
-   ========================================================================= */
-.kw-card {
-  background: var(--card);
-  border: 1px solid var(--card-border);
-  border-radius: 14px;
-  box-shadow: var(--shadow-card);
-  transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.2s ease;
-}
+@layer components {
+  /* =========================================================================
+     HIGH-GRADE CARDS & PANELS
+     ========================================================================= */
+  .kw-card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    box-shadow: var(--shadow-card);
+    transition: border-color 0.2s ease, background-color 0.2s ease, transform 0.2s ease;
+  }
 
-.kw-card-interactive:hover {
-  border-color: rgba(245, 183, 0, 0.4);
-  background-color: var(--card-hover);
-  transform: translateY(-2px);
-}
+  .kw-card-interactive:hover {
+    border-color: rgba(245, 183, 0, 0.4);
+    background-color: var(--card-hover);
+    transform: translateY(-2px);
+  }
 
-/* =========================================================================
-   BUTTON SYSTEM (Tactile, High-Intent, Radiant)
-   ========================================================================= */
-.kw-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  line-height: 1.25rem;
-  padding: 0.5rem 1rem;
-  border-radius: 10px;
-  border: 1px solid var(--btn-border);
-  background-color: var(--btn);
-  color: var(--fg);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-  user-select: none;
-}
+  /* =========================================================================
+     BUTTON SYSTEM (Tactile, High-Intent, Radiant)
+     ========================================================================= */
+  .kw-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    line-height: 1.25rem;
+    padding: 0.5rem 1rem;
+    border-radius: 10px;
+    border: 1px solid var(--btn-border);
+    background-color: var(--btn);
+    color: var(--fg);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    user-select: none;
+  }
 
-.kw-btn:hover:not(:disabled) {
-  background-color: var(--btn-hover);
-  border-color: rgba(255, 255, 255, 0.2);
-}
+  .kw-btn:hover:not(:disabled) {
+    background-color: var(--btn-hover);
+    border-color: rgba(255, 255, 255, 0.2);
+  }
 
-.kw-btn:active:not(:disabled) {
-  transform: scale(0.98);
-}
+  .kw-btn:active:not(:disabled) {
+    transform: scale(0.98);
+  }
 
-.kw-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+  .kw-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 
-/* Radiant Gold CTA Button */
-.kw-btn-gold,
-.kw-btn-primary {
-  background: linear-gradient(135deg, #F5B700 0%, #E5A800 100%);
-  color: #070B12;
-  border: 1px solid #F5B700;
-  font-weight: 700;
-  box-shadow: 0 4px 16px -2px rgba(245, 183, 0, 0.35);
-}
+  /* Radiant Gold CTA Button */
+  .kw-btn-gold,
+  .kw-btn-primary {
+    background: linear-gradient(135deg, #F5B700 0%, #E5A800 100%);
+    color: #070B12;
+    border: 1px solid #F5B700;
+    font-weight: 700;
+    box-shadow: 0 4px 16px -2px rgba(245, 183, 0, 0.35);
+  }
 
-.kw-btn-gold:hover:not(:disabled),
-.kw-btn-primary:hover:not(:disabled) {
-  background: linear-gradient(135deg, #FFC41F 0%, #EDB100 100%);
-  border-color: #FFC41F;
-  box-shadow: 0 6px 22px -2px rgba(245, 183, 0, 0.5);
-  transform: translateY(-1px);
-}
+  .kw-btn-gold:hover:not(:disabled),
+  .kw-btn-primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, #FFC41F 0%, #EDB100 100%);
+    border-color: #FFC41F;
+    box-shadow: 0 6px 22px -2px rgba(245, 183, 0, 0.5);
+    transform: translateY(-1px);
+  }
 
-.kw-btn-teal {
-  background: linear-gradient(135deg, #10B981 0%, #059669 100%);
-  color: #070B12;
-  border: 1px solid #10B981;
-  font-weight: 700;
-  box-shadow: 0 4px 16px -2px rgba(16, 185, 129, 0.35);
-}
+  .kw-btn-teal {
+    background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+    color: #070B12;
+    border: 1px solid #10B981;
+    font-weight: 700;
+    box-shadow: 0 4px 16px -2px rgba(16, 185, 129, 0.35);
+  }
 
-.kw-btn-teal:hover:not(:disabled) {
-  background: linear-gradient(135deg, #34D399 0%, #10B981 100%);
-  border-color: #34D399;
-  box-shadow: 0 6px 22px -2px rgba(16, 185, 129, 0.5);
-  transform: translateY(-1px);
-}
+  .kw-btn-teal:hover:not(:disabled) {
+    background: linear-gradient(135deg, #34D399 0%, #10B981 100%);
+    border-color: #34D399;
+    box-shadow: 0 6px 22px -2px rgba(16, 185, 129, 0.5);
+    transform: translateY(-1px);
+  }
 
-.kw-btn-ghost {
-  background: transparent;
-  border-color: transparent;
-  color: var(--fg-muted);
-}
+  .kw-btn-ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--fg-muted);
+  }
 
-.kw-btn-ghost:hover:not(:disabled) {
-  background: var(--btn);
-  color: var(--fg);
-  border-color: var(--card-border);
-}
+  .kw-btn-ghost:hover:not(:disabled) {
+    background: var(--btn);
+    color: var(--fg);
+    border-color: var(--card-border);
+  }
 
-.kw-btn-danger {
-  background-color: var(--danger-subtle);
-  border-color: rgba(239, 68, 68, 0.25);
-  color: var(--danger);
-}
+  .kw-btn-danger {
+    background-color: var(--danger-subtle);
+    border-color: rgba(239, 68, 68, 0.25);
+    color: var(--danger);
+  }
 
-.kw-btn-danger:hover:not(:disabled) {
-  background-color: var(--danger);
-  color: #FFFFFF;
-}
+  .kw-btn-danger:hover:not(:disabled) {
+    background-color: var(--danger);
+    color: #FFFFFF;
+  }
 
-/* =========================================================================
-   FORM INPUTS & CONSOLE
-   ========================================================================= */
-.kw-input,
-.kw-textarea {
-  width: 100%;
-  background-color: var(--bg-subtle);
-  border: 1px solid var(--card-border);
-  color: var(--fg);
-  border-radius: 10px;
-  padding: 0.6rem 0.85rem;
-  font-size: 0.8125rem;
-  font-family: inherit;
-  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
-}
+  /* =========================================================================
+     FORM INPUTS & CONSOLE
+     ========================================================================= */
+  .kw-input,
+  .kw-textarea {
+    width: 100%;
+    background-color: var(--bg-subtle);
+    border: 1px solid var(--card-border);
+    color: var(--fg);
+    border-radius: 10px;
+    padding: 0.6rem 0.85rem;
+    font-size: 0.8125rem;
+    font-family: inherit;
+    transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+  }
 
-.kw-input:focus,
-.kw-textarea:focus {
-  outline: none;
-  border-color: var(--gold);
-  background-color: var(--card);
-  box-shadow: 0 0 0 3px var(--gold-subtle);
-}
+  .kw-input:focus,
+  .kw-textarea:focus {
+    outline: none;
+    border-color: var(--gold);
+    background-color: var(--card);
+    box-shadow: 0 0 0 3px var(--gold-subtle);
+  }
 
-.kw-input::placeholder,
-.kw-textarea::placeholder {
-  color: var(--fg-subtle);
-}
+  .kw-input::placeholder,
+  .kw-textarea::placeholder {
+    color: var(--fg-subtle);
+  }
 
-/* =========================================================================
-   BADGES & PILLS
-   ========================================================================= */
-.kw-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  padding: 0.2rem 0.6rem;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  white-space: nowrap;
-}
+  /* =========================================================================
+     BADGES & PILLS
+     ========================================================================= */
+  .kw-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    padding: 0.2rem 0.6rem;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
 
-.kw-badge-gold {
-  background-color: var(--gold-subtle);
-  border-color: rgba(245, 183, 0, 0.3);
-  color: var(--gold);
-}
+  .kw-badge-gold {
+    background-color: var(--gold-subtle);
+    border-color: rgba(245, 183, 0, 0.3);
+    color: var(--gold);
+  }
 
-.kw-badge-teal {
-  background-color: var(--teal-subtle);
-  border-color: rgba(16, 185, 129, 0.3);
-  color: var(--teal);
-}
+  .kw-badge-teal {
+    background-color: var(--teal-subtle);
+    border-color: rgba(16, 185, 129, 0.3);
+    color: var(--teal);
+  }
 
-.kw-badge-muted {
-  background-color: var(--bg-subtle);
-  border-color: var(--card-border);
-  color: var(--fg-muted);
+  .kw-badge-muted {
+    background-color: var(--bg-subtle);
+    border-color: var(--card-border);
+    color: var(--fg-muted);
+  }
 }
 
 /* Typing Dots Animation */

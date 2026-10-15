@@ -4,6 +4,11 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.1] - 2026-10-15
+
+### Fixed (Release 1.9.1)
+- **Tailwind v4 `@layer components` Precedence Fix**: Moved custom `.kw-*` component classes (`.kw-input`, `.kw-textarea`, `.kw-btn*`, `.kw-card`, `.kw-badge*`, `.kw-container`) into `@layer components { ... }` in `src/index.css` so Tailwind utility classes (such as `pl-10` on search inputs) properly override base component padding and prevent search icon overlap at 375px and across viewports.
+
 ## [1.9.0] - 2026-10-15
 
 ### Added & Fixed (Release 1.9.0)

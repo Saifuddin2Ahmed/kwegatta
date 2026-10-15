@@ -277,8 +277,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.9.0
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.9.0'");
+    // 1. Cache name includes version kwegatta-1.9.1
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.9.1'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -5250,6 +5250,73 @@ describe('Release 1.5.0 Features', () => {
         const parentDiv = searchInputs[0].parentElement;
         const iconSvg = parentDiv?.querySelector('svg');
         expect(iconSvg?.classList.contains('pointer-events-none')).toBe(true);
+      });
+    });
+
+    describe('Release 1.9.1: Tailwind @layer components for .kw-input and Search Icon Overlap Fix', () => {
+      it('a) CSS test: parse src/index.css and assert that .kw-input, .kw-textarea, .kw-btn, and .kw-card are declared inside an @layer components block', async () => {
+        const fs = await import('fs');
+        const path = await import('path');
+        const cssContent = fs.readFileSync(path.join(process.cwd(), 'src', 'index.css'), 'utf-8');
+
+        // Extract all @layer components { ... } blocks with balanced brace matching
+        const layerBlocks: string[] = [];
+        const regex = /@layer\s+components\s*\{/g;
+        let match: RegExpExecArray | null;
+        while ((match = regex.exec(cssContent)) !== null) {
+          let depth = 1;
+          let i = match.index + match[0].length;
+          const start = i;
+          while (i < cssContent.length && depth > 0) {
+            if (cssContent[i] === '{') depth++;
+            else if (cssContent[i] === '}') depth--;
+            i++;
+          }
+          layerBlocks.push(cssContent.slice(start, i - 1));
+        }
+
+        expect(layerBlocks.length).toBeGreaterThan(0);
+        const combinedComponentsLayer = layerBlocks.join('\n');
+
+        expect(combinedComponentsLayer).toContain('.kw-input');
+        expect(combinedComponentsLayer).toContain('.kw-textarea');
+        expect(combinedComponentsLayer).toContain('.kw-btn');
+        expect(combinedComponentsLayer).toContain('.kw-card');
+
+        // Also ensure .kw-input is NOT declared outside @layer components
+        let unlayeredCss = cssContent;
+        for (const block of layerBlocks) {
+          unlayeredCss = unlayeredCss.replace(block, '');
+        }
+        expect(unlayeredCss).not.toMatch(/\.kw-input\s*[,{]/);
+      });
+
+      it('b) Layout check: on /#/events at 375 px width, the search input has pl-10 (40px >= 36px) overriding .kw-input padding and icon does not overlap placeholder', async () => {
+        Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 375 });
+        window.dispatchEvent(new Event('resize'));
+
+        render(
+          React.createElement(EventsView, {
+            currentProfile: null,
+            allProfiles: [],
+            onViewProfile: vi.fn(),
+            onToast: vi.fn()
+          })
+        );
+
+        const searchInputs = screen.getAllByLabelText(/Search events/i);
+        expect(searchInputs.length).toBeGreaterThan(0);
+        const inputEl = searchInputs[0] as HTMLInputElement;
+        expect(inputEl.classList.contains('kw-input')).toBe(true);
+        expect(inputEl.classList.contains('pl-10')).toBe(true);
+
+        const parentDiv = inputEl.parentElement;
+        const iconSvg = parentDiv?.querySelector('svg');
+        expect(iconSvg).toBeTruthy();
+        expect(iconSvg?.classList.contains('left-3.5')).toBe(true);
+        expect(iconSvg?.classList.contains('w-4')).toBe(true);
+        expect(iconSvg?.classList.contains('pointer-events-none')).toBe(true);
+        // Icon occupies 14px (left-3.5) + 16px (w-4) = 30px; input padding-left is pl-10 (2.5rem = 40px >= 36px), leaving 10px gap with zero overlap
       });
     });
   });

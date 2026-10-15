@@ -2410,7 +2410,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                         onChange={e => setAttendeeSearch(e.target.value)}
                         placeholder="Search attendees by name..."
                         aria-label="Search attendees by name"
-                        className="kw-input text-xs pl-8 py-1.5 w-full"
+                        className="kw-input text-xs pl-9 py-1.5 w-full"
                       />
                     </div>
                   </div>

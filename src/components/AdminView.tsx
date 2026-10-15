@@ -2213,13 +2213,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
         <div className="kw-card overflow-hidden">
           <div className="p-4 border-b border-[var(--card-border)] flex flex-col sm:flex-row gap-3 items-center justify-between">
             <div className="relative w-full sm:w-72">
-              <Search className="w-4 h-4 absolute left-3 top-2.5 text-[var(--fg-muted)]" />
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg-muted)] pointer-events-none" />
               <input
                 type="text"
                 placeholder="Search by name, role or tag..."
                 value={memberSearch}
                 onChange={e => setMemberSearch(e.target.value)}
-                className="kw-input pl-9 text-xs"
+                className="kw-input pl-10 text-xs"
               />
             </div>
             <div className="flex items-center gap-2">

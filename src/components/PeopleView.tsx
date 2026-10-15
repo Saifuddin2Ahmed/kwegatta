@@ -250,13 +250,13 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
               className="flex gap-2"
             >
               <div className="relative flex-1">
-                <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--fg-subtle)]" />
+                <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--fg-subtle)] pointer-events-none" />
                 <input
                   type="text"
                   placeholder='e.g. "I need someone who knows solar energy in Gulu", "Who can teach me accounting?"'
                   value={askInput}
                   onChange={e => setAskInput(e.target.value)}
-                  className="w-full bg-[var(--bg-subtle)] border border-[var(--card-border)] focus:border-[var(--gold)] text-xs sm:text-sm text-[var(--fg)] rounded-xl pl-9 pr-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-[var(--gold)]"
+                  className="w-full bg-[var(--bg-subtle)] border border-[var(--card-border)] focus:border-[var(--gold)] text-xs sm:text-sm text-[var(--fg)] rounded-xl pl-10 pr-4 py-2.5 focus:outline-none focus:ring-1 focus:ring-[var(--gold)]"
                 />
               </div>
               <button
