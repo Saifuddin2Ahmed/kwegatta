@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import React from 'react';
 import { render, screen, fireEvent, act, cleanup } from '@testing-library/react';
 import { EventsView } from '../src/components/EventsView';
@@ -47,6 +48,14 @@ import {
   initStorage,
   generateSelfCheckinToken,
   setMailSenderForTest,
+  getPublicAppUrl,
+  renderEventOgJpeg,
+  ensureFontConfigInitialized,
+  fontConfigInitError,
+  OG_RENDER_VERSION,
+  canInterRender,
+  computeEventOgVersionHash,
+  injectEventOgIntoHtml,
   store
 } from '../server';
 import { validatePasswordStrength } from '../src/services/firebase';
@@ -55,6 +64,47 @@ import { ShareCardModal, avatarSrc } from '../src/components/ShareCardModal';
 
 let server: any;
 let baseUrl: string;
+
+beforeAll(async () => {
+  process.env.NODE_ENV = 'test';
+  if (!server) {
+    await new Promise<void>((resolve) => {
+      server = app.listen(0, () => {
+        const port = (server.address() as any).port;
+        baseUrl = `http://127.0.0.1:${port}`;
+        resolve();
+      });
+    });
+  }
+  const testCallerUids = [
+    'test-user-unapproved-author',
+    'test-author-pending-part2',
+    'test-member-a',
+    'test-member-b',
+    'test-member-a-author',
+    'test-user-random-viewer',
+    'test-reporter-1',
+    'test-reporter-2',
+    'test-reporter-3',
+    'test-blocked-member',
+    'test-member-150'
+  ];
+  for (const uid of testCallerUids) {
+    if (!store.profiles.some((p: any) => p.account_uid === uid || p.id === uid)) {
+      store.profiles.push({
+        id: uid,
+        account_uid: uid,
+        name: `Test Member ${uid}`,
+        headline: 'Kampala Builder and Developer',
+        role: 'Developer',
+        needs: 'Teammates for Hackathon',
+        offers: 'TypeScript and React',
+        events_blocked: uid === 'test-blocked-member',
+        created_at: new Date().toISOString()
+      } as any);
+    }
+  }
+});
 
 describe('Admin Accounts & Security', () => {
   it('parses ADMIN_EMAILS environment variable correctly', () => {
@@ -277,8 +327,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.9.2
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.9.2'");
+    // 1. Cache name includes version kwegatta-1.10.1
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.10.1'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -6126,6 +6176,111 @@ describe('Release 1.5.0 Features', () => {
           expect(screen.getAllByText(/Waitlist #1 · Leave waitlist/i).length).toBeGreaterThan(0);
         });
         unmount2();
+      });
+    });
+
+    describe('Release 1.10.1: OG Font Rendering, Canonical Share Domain, SW Cache', () => {
+      it('a) OG card renders Latin glyphs and differs meaningfully from empty title', async () => {
+        const fontOk = await ensureFontConfigInitialized();
+        expect(fontOk).toBe(true);
+
+        const cardLatin = await renderEventOgJpeg({
+          title: 'Kwegatta Kampala Builders Summit 2026',
+          starts_at: '2026-11-01T10:00:00Z',
+          timezone: 'Africa/Kampala',
+          venue: 'Innovation Village'
+        });
+
+        const cardEmpty = await renderEventOgJpeg({
+          title: '',
+          starts_at: '2026-11-01T10:00:00Z',
+          timezone: 'Africa/Kampala',
+          venue: 'Innovation Village'
+        });
+
+        expect(cardLatin).toBeInstanceOf(Buffer);
+        expect(cardEmpty).toBeInstanceOf(Buffer);
+        expect(cardLatin.length).toBeGreaterThan(1000);
+        expect(cardEmpty.length).toBeGreaterThan(1000);
+
+        // Byte difference proving Latin glyphs were rasterized into JPEG
+        const sizeDiff = Math.abs(cardLatin.length - cardEmpty.length);
+        expect(sizeDiff).toBeGreaterThan(200);
+
+        // Character support check
+        expect(canInterRender('Kwegatta 2026 — Kampala')).toBe(true);
+        expect(canInterRender('مرحبا بك في أوغندا')).toBe(false);
+
+        // Arabic title omits the text line instead of tofu boxes, but keeps Latin date/venue
+        const cardArabic = await renderEventOgJpeg({
+          title: 'مرحبا بك في أوغندا',
+          starts_at: '2026-11-01T10:00:00Z',
+          timezone: 'Africa/Kampala',
+          venue: 'Innovation Village'
+        });
+        expect(cardArabic).toBeInstanceOf(Buffer);
+        expect(cardArabic.length).toBeGreaterThan(1000);
+      });
+
+      it('b) /e/:id tags use https://kwegatta.ai.studio even when process.env.APP_URL is set to a run.app URL', async () => {
+        const origAppUrl = process.env.APP_URL;
+        const origShareUrl = process.env.PUBLIC_SHARE_URL;
+        try {
+          process.env.APP_URL = 'https://kwegatta-359429599502.us-west1.run.app';
+          delete process.env.PUBLIC_SHARE_URL;
+
+          expect(getPublicAppUrl()).toBe('https://kwegatta.ai.studio');
+
+          const testEvent = {
+            id: 'ev-canonical-test-1101',
+            title: 'Canonical Domain Test Event',
+            published: true,
+            starts_at: '2026-11-05T09:00:00Z',
+            venue: 'Makerere University'
+          };
+
+          const rawHtml = '<!DOCTYPE html><html><head><title>Default</title></head><body>App</body></html>';
+          const injectedHtml = injectEventOgIntoHtml(rawHtml, testEvent);
+
+          expect(injectedHtml).toContain('property="og:url" content="https://kwegatta.ai.studio/e/ev-canonical-test-1101"');
+          expect(injectedHtml).toContain('rel="canonical" href="https://kwegatta.ai.studio/e/ev-canonical-test-1101"');
+          expect(injectedHtml).toContain('property="og:image" content="https://kwegatta.ai.studio/og/event/ev-canonical-test-1101.jpg?v=');
+          expect(injectedHtml).toContain('name="twitter:image" content="https://kwegatta.ai.studio/og/event/ev-canonical-test-1101.jpg?v=');
+          expect(injectedHtml).not.toContain('https://kwegatta-359429599502.us-west1.run.app');
+
+          // If PUBLIC_SHARE_URL is provided, it should respect it with trailing slashes stripped
+          process.env.PUBLIC_SHARE_URL = 'https://custom.kwegatta.org///';
+          expect(getPublicAppUrl()).toBe('https://custom.kwegatta.org');
+        } finally {
+          if (origAppUrl !== undefined) process.env.APP_URL = origAppUrl;
+          else delete process.env.APP_URL;
+          if (origShareUrl !== undefined) process.env.PUBLIC_SHARE_URL = origShareUrl;
+          else delete process.env.PUBLIC_SHARE_URL;
+        }
+      });
+
+      it('c) sw.js CACHE_NAME equals "kwegatta-" + package.json version', () => {
+        const pkgPath = path.join(process.cwd(), 'package.json');
+        const swPath = path.join(process.cwd(), 'public', 'sw.js');
+
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+        const swContent = fs.readFileSync(swPath, 'utf-8');
+
+        const match = swContent.match(/CACHE_NAME\s*=\s*['"]([^'"]+)['"]/);
+        expect(match).not.toBeNull();
+        const swCacheName = match![1];
+
+        expect(swCacheName).toBe(`kwegatta-${pkg.version}`);
+        expect(pkg.version).toBe('1.10.1');
+        expect(swCacheName).toBe('kwegatta-1.10.1');
+      });
+
+      it('d) OG_RENDER_VERSION busts image cache', () => {
+        expect(OG_RENDER_VERSION).toBe('2');
+        const hash = computeEventOgVersionHash({ title: 'Test', starts_at: '2026-10-15T00:00:00Z' });
+        expect(hash).toBeDefined();
+        expect(typeof hash).toBe('string');
+        expect(hash.length).toBe(10);
       });
     });
   });

@@ -4,6 +4,31 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.1] - 2026-10-15
+
+### Fixed (Release 1.10.1)
+- **OG Image Text Rendering (Sharp / Fontconfig / Inter TTF)**:
+  - Decompresses bundled `public/fonts/inter.woff2` to `os.tmpdir()/kw-fonts/Inter.ttf` using `wawoff2` at server startup.
+  - Dynamically configures `fonts.conf` with a custom `<dir>` and `<cachedir>` and exports `process.env.FONTCONFIG_FILE` for sharp/librsvg to eliminate tofu boxes in headless Cloud Run environments.
+  - If font initialization fails, cleanly falls back to `/og-image.png` redirect.
+  - Standardized all Sharp SVGs (OG cards and avatar initials) to use `font-family="Inter, sans-serif"`.
+  - Filtered non-renderable glyphs (`/[^\u0000-\u024F\u2000-\u206F\u20AC]/`) from title lines while preserving Latin event date and venue info.
+- **Canonical Share Domain**:
+  - `getPublicAppUrl()` strictly uses `process.env.PUBLIC_SHARE_URL || 'https://kwegatta.ai.studio'` (stripping trailing slashes) and ignores Cloud Run `APP_URL` for public share links, `/e/:id` meta tags, og/twitter image URLs, `.ics` files, sitemap, and confirmation emails.
+- **OG Cache Busting**:
+  - Incremented `OG_RENDER_VERSION = '2'` in `computeEventOgVersionHash` so external crawlers (WhatsApp, Twitter, LinkedIn) re-fetch fresh non-tofu previews.
+- **Service Worker Cache**:
+  - Bumped `public/sw.js` cache name to `kwegatta-1.10.1`.
+
+## [1.10.0] - 2026-10-15
+
+### Added & Fixed (Release 1.10.0)
+- **Rich Link Previews & Social Share Cards**:
+  - Implemented `/e/:id` server-rendered HTML injection for Open Graph (`og:title`, `og:description`, `og:image`, `og:url`, `og:image:width`, `og:image:height`, `og:image:type`, `og:image:alt`), Twitter Cards (`summary_large_image`), and canonical `<link>` tags.
+  - Added dynamic 1200×630 JPEG social share generator at `/og/event/:id.jpg` with cover image backdrop, brand gradients, typography, and ETag caching.
+- **Waitlist & Capacity Engine**:
+  - Added automated waitlist promotion queue, email notifications with `.ics` calendar attachments, and host attendee CSV export (`/api/events/:id/attendees.csv`).
+
 ## [1.9.2] - 2026-10-15
 
 ### Added & Fixed (Release 1.9.2)

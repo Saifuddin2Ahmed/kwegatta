@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { initializeApp, getApps, type App } from 'firebase-admin/app';
@@ -9,9 +10,95 @@ import { getFirestore, Firestore } from 'firebase-admin/firestore';
 import { getAuth as getAdminAuth, type Auth as AdminAuth } from 'firebase-admin/auth';
 import nodemailer from 'nodemailer';
 import sharp from 'sharp';
+import wawoff2 from 'wawoff2';
 import { ISO_COUNTRIES, deriveLocation } from './src/lib/countries';
 import { ROLE_CHOICES, STAGE_CHOICES, INTENT_CHOICES, normalizeIntent } from './src/lib/profileChoices';
 import { normalizeTicketCode, isValidTicketCode, formatTicketCode } from './src/lib/ticketCode';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+export let fontConfigInitError: string | null = null;
+let fontConfigReady = false;
+let fontConfigInitPromise: Promise<boolean> | null = null;
+
+export async function ensureFontConfigInitialized(): Promise<boolean> {
+  if (fontConfigReady) return true;
+  if (!fontConfigInitPromise) {
+    fontConfigInitPromise = (async () => {
+      try {
+        const fontDir = path.join(os.tmpdir(), 'kw-fonts');
+        const cacheDir = path.join(os.tmpdir(), 'kw-fontconfig-cache');
+        fs.mkdirSync(fontDir, { recursive: true });
+        fs.mkdirSync(cacheDir, { recursive: true });
+
+        const candidatePaths = [
+          path.resolve(process.cwd(), 'public/fonts/inter.woff2'),
+          path.resolve(__dirname, 'public/fonts/inter.woff2'),
+          path.resolve(process.cwd(), 'dist/fonts/inter.woff2'),
+          path.resolve(__dirname, 'dist/fonts/inter.woff2'),
+          path.resolve(__dirname, '../public/fonts/inter.woff2')
+        ];
+
+        let woff2Path = '';
+        for (const p of candidatePaths) {
+          if (fs.existsSync(p)) {
+            woff2Path = p;
+            break;
+          }
+        }
+
+        if (!woff2Path) {
+          fontConfigInitError = `Could not locate public/fonts/inter.woff2 in candidatePaths: ${JSON.stringify(candidatePaths)}`;
+          console.warn('[FontConfig]', fontConfigInitError);
+          return false;
+        }
+
+        const decompressFn =
+          typeof (wawoff2 as any)?.decompress === 'function'
+            ? (wawoff2 as any).decompress
+            : typeof (wawoff2 as any)?.default?.decompress === 'function'
+              ? (wawoff2 as any).default.decompress
+              : null;
+
+        if (!decompressFn) {
+          fontConfigInitError = `wawoff2.decompress function not found on import: ${JSON.stringify(Object.keys(wawoff2 || {}))}`;
+          console.warn('[FontConfig]', fontConfigInitError);
+          return false;
+        }
+
+        const woff2Buf = fs.readFileSync(woff2Path);
+        const ttfBuf = await decompressFn(new Uint8Array(woff2Buf));
+        const ttfPath = path.join(fontDir, 'Inter.ttf');
+        fs.writeFileSync(ttfPath, Buffer.from(ttfBuf));
+
+        const fontsConfPath = path.join(fontDir, 'fonts.conf');
+        const confXml = `<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>${fontDir}</dir>
+  <cachedir>${cacheDir}</cachedir>
+</fontconfig>
+`;
+        fs.writeFileSync(fontsConfPath, confXml, 'utf-8');
+        process.env.FONTCONFIG_FILE = fontsConfPath;
+        fontConfigReady = true;
+        fontConfigInitError = null;
+        return true;
+      } catch (err: any) {
+        fontConfigInitError = err?.stack || err?.message || String(err);
+        console.warn('[FontConfig] Failed to initialize fonts for sharp/librsvg:', fontConfigInitError);
+        fontConfigReady = false;
+        fontConfigInitPromise = null;
+        return false;
+      }
+    })();
+  }
+  return fontConfigInitPromise;
+}
+
+// Automatically initiate font decompression once at startup
+ensureFontConfigInitialized().catch(() => {});
 
 export function filterRoles(inputRoles: any, existingRoles: string[] = []): string[] {
   if (!Array.isArray(inputRoles)) return existingRoles;
@@ -29,9 +116,6 @@ export function filterRoles(inputRoles: any, existingRoles: string[] = []): stri
 }
 
 export const PRIVACY_VERSION = '2026-10';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 export const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -4333,7 +4417,7 @@ app.get('/api/avatar/:id', (req: Request, res: Response) => {
   if (!profile || !profile.avatar) {
     const name = profile?.name || '?';
     const initial = name.charAt(0).toUpperCase();
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><rect width="128" height="128" rx="64" fill="#1e293b"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" fill="#F0F3F6" font-family="sans-serif" font-size="52" font-weight="bold">${initial}</text></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><rect width="128" height="128" rx="64" fill="#1e293b"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" fill="#F0F3F6" font-family="Inter, sans-serif" font-size="52" font-weight="bold">${initial}</text></svg>`;
     const etag = `W/"svg-${id}-${initial}"`;
     if (req.headers['if-none-match'] === etag) {
       return res.status(304).end();
@@ -4635,8 +4719,10 @@ export function isEventPubliclyVisible(item: any): boolean {
   return true;
 }
 
+export const OG_RENDER_VERSION = '2';
+
 export function computeEventOgVersionHash(item: any): string {
-  const raw = `${item?.cover_image || ''}|${item?.title || ''}|${item?.starts_at || item?.datetime || ''}`;
+  const raw = `v${OG_RENDER_VERSION}|${item?.cover_image || ''}|${item?.title || ''}|${item?.starts_at || item?.datetime || ''}`;
   return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 10);
 }
 
@@ -4681,7 +4767,8 @@ export function buildEventMetaDescription(item: any): string {
 }
 
 export function getPublicAppUrl(): string {
-  return (process.env.APP_URL || process.env.VITE_PUBLIC_APP_URL || 'https://kwegatta.ai.studio').replace(/\/$/, '');
+  const raw = process.env.PUBLIC_SHARE_URL || 'https://kwegatta.ai.studio';
+  return raw.replace(/\/+$/, '');
 }
 
 export function injectEventOgIntoHtml(baseHtml: string, item: any): string {
@@ -4796,10 +4883,21 @@ function resolveCoverImageBuffer(coverImage?: string): Buffer | null {
   return null;
 }
 
-async function renderEventOgJpeg(item: any): Promise<Buffer> {
+export const NON_INTER_CHAR_REGEX = /[^\u0000-\u024F\u2000-\u206F\u20AC]/;
+
+export function canInterRender(text: string): boolean {
+  if (!text) return true;
+  return !NON_INTER_CHAR_REGEX.test(text);
+}
+
+export async function renderEventOgJpeg(item: any): Promise<Buffer> {
+  await ensureFontConfigInitialized();
+
   const [line1, line2] = wrapTitleLines(item.title || 'Kwegatta Event', 34);
-  const safeLine1 = escapeHtml(line1);
-  const safeLine2 = line2 ? escapeHtml(line2) : '';
+  const hasLine1 = Boolean(line1 && canInterRender(line1));
+  const hasLine2 = Boolean(line2 && canInterRender(line2));
+  const safeLine1 = hasLine1 ? escapeHtml(line1) : '';
+  const safeLine2 = hasLine2 && line2 ? escapeHtml(line2) : '';
 
   const { dateTimeText, tz } = formatEventOgDatePart(item);
   const venuePart =
@@ -4807,13 +4905,16 @@ async function renderEventOgJpeg(item: any): Promise<Buffer> {
       ? 'Online'
       : stripControlChars(item?.venue || item?.location || 'Kampala') || 'Kampala';
   const rawMetaLine = `${dateTimeText} (${tz}) · ${venuePart}`;
-  const safeMetaLine = escapeHtml(rawMetaLine.length > 76 ? rawMetaLine.slice(0, 75) + '…' : rawMetaLine);
+  const hasMeta = canInterRender(rawMetaLine);
+  const safeMetaLine = hasMeta
+    ? escapeHtml(rawMetaLine.length > 76 ? rawMetaLine.slice(0, 75) + '…' : rawMetaLine)
+    : '';
 
   const coverBuf = resolveCoverImageBuffer(item.cover_image);
 
-  const titleY1 = safeLine2 ? 450 : 495;
+  const titleY1 = hasLine2 ? 450 : 495;
   const titleY2 = 510;
-  const metaY = 568;
+  const metaY = hasLine1 ? 568 : 520;
 
   if (coverBuf) {
     const overlaySvg = `<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
@@ -4826,10 +4927,10 @@ async function renderEventOgJpeg(item: any): Promise<Buffer> {
       </defs>
       <rect width="1200" height="630" fill="url(#grad)"/>
       <rect x="64" y="48" width="168" height="42" rx="10" fill="#070B12" fill-opacity="0.82" stroke="#F59E0B" stroke-width="1.5"/>
-      <text x="148" y="75" text-anchor="middle" fill="#F59E0B" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="18" font-weight="800" letter-spacing="2">KWEGATTA</text>
-      <text x="64" y="${titleY1}" fill="#FAFAFC" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="48" font-weight="800">${safeLine1}</text>
-      ${safeLine2 ? `<text x="64" y="${titleY2}" fill="#FAFAFC" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="48" font-weight="800">${safeLine2}</text>` : ''}
-      <text x="64" y="${metaY}" fill="#F59E0B" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="24" font-weight="600">${safeMetaLine}</text>
+      <text x="148" y="75" text-anchor="middle" fill="#F59E0B" font-family="Inter, sans-serif" font-size="18" font-weight="800" letter-spacing="2">KWEGATTA</text>
+      ${hasLine1 ? `<text x="64" y="${titleY1}" fill="#FAFAFC" font-family="Inter, sans-serif" font-size="48" font-weight="800">${safeLine1}</text>` : ''}
+      ${hasLine2 ? `<text x="64" y="${titleY2}" fill="#FAFAFC" font-family="Inter, sans-serif" font-size="48" font-weight="800">${safeLine2}</text>` : ''}
+      ${hasMeta ? `<text x="64" y="${metaY}" fill="#F59E0B" font-family="Inter, sans-serif" font-size="24" font-weight="600">${safeMetaLine}</text>` : ''}
     </svg>`;
 
     const baseImage = sharp(coverBuf)
@@ -4854,10 +4955,10 @@ async function renderEventOgJpeg(item: any): Promise<Buffer> {
       <circle cx="1060" cy="120" r="240" fill="#F59E0B" fill-opacity="0.08"/>
       <rect x="40" y="40" width="1120" height="550" rx="24" fill="none" stroke="#F59E0B" stroke-opacity="0.3" stroke-width="2"/>
       <rect x="72" y="72" width="168" height="42" rx="10" fill="#F59E0B" fill-opacity="0.15" stroke="#F59E0B" stroke-width="1.5"/>
-      <text x="156" y="99" text-anchor="middle" fill="#F59E0B" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="18" font-weight="800" letter-spacing="2">KWEGATTA</text>
-      <text x="72" y="${titleY1}" fill="#FAFAFC" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="48" font-weight="800">${safeLine1}</text>
-      ${safeLine2 ? `<text x="72" y="${titleY2}" fill="#FAFAFC" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="48" font-weight="800">${safeLine2}</text>` : ''}
-      <text x="72" y="${metaY - 12}" fill="#F59E0B" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="24" font-weight="600">${safeMetaLine}</text>
+      <text x="156" y="99" text-anchor="middle" fill="#F59E0B" font-family="Inter, sans-serif" font-size="18" font-weight="800" letter-spacing="2">KWEGATTA</text>
+      ${hasLine1 ? `<text x="72" y="${titleY1}" fill="#FAFAFC" font-family="Inter, sans-serif" font-size="48" font-weight="800">${safeLine1}</text>` : ''}
+      ${hasLine2 ? `<text x="72" y="${titleY2}" fill="#FAFAFC" font-family="Inter, sans-serif" font-size="48" font-weight="800">${safeLine2}</text>` : ''}
+      ${hasMeta ? `<text x="72" y="${metaY - 12}" fill="#F59E0B" font-family="Inter, sans-serif" font-size="24" font-weight="600">${safeMetaLine}</text>` : ''}
     </svg>`;
 
     let out = await sharp(Buffer.from(brandSvg))
@@ -4875,6 +4976,12 @@ app.get('/og/event/:id.jpg', async (req: Request, res: Response) => {
   const { id } = req.params;
   const item = (store.events || []).find((e: any) => e.id === id);
   if (!isEventPubliclyVisible(item)) {
+    return res.redirect(302, '/og-image.png');
+  }
+
+  const fontsOk = await ensureFontConfigInitialized();
+  if (!fontsOk) {
+    console.warn('[OG Image] Fonts not available, redirecting to /og-image.png');
     return res.redirect(302, '/og-image.png');
   }
 
