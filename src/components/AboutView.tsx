@@ -2,6 +2,7 @@ import React from 'react';
 import {
   ExternalLink,
   Github,
+  Linkedin,
   ArrowLeft,
   ArrowUpRight,
   Shield,
@@ -359,19 +360,24 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-start">
           {team.map((member) => {
             const photoUrl = member.photo_url || member.photo || member.linked_avatar || (member.linked_profile_id ? `/api/avatar/${member.linked_profile_id}` : null);
             const line2 = member.line2 || (member as any).affiliation || '';
+            const title = member.title ? String(member.title).trim() : '';
+            const line1 = member.line1 ? String(member.line1).trim() : '';
+            const since = member.since ? String(member.since).trim() : '';
+            const linkedin = member.linkedin ? String(member.linkedin).trim() : '';
+            const hasExtraFields = Boolean(title || line1 || since || linkedin);
 
             return (
               <div
                 key={member.id || member.name}
-                className="p-5 rounded-xl bg-[var(--card)] border border-[var(--card-border)] flex flex-col justify-between space-y-3 hover:border-[var(--card-border)]/80 transition-all"
+                className="relative p-5 rounded-xl bg-[var(--card)] border border-[var(--card-border)] flex flex-col justify-start space-y-3 hover:border-[var(--card-border)]/80 transition-all"
               >
                 <div className="space-y-2.5">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
+                    <div className={`flex items-center gap-3 min-w-0 ${!hasExtraFields && member.github ? 'pr-8' : ''}`}>
                       {photoUrl ? (
                         <img
                           src={photoUrl}
@@ -384,7 +390,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
                           className="w-10 h-10 flex-shrink-0"
                         />
                       )}
-                      <div>
+                      <div className="min-w-0">
                         {member.linked_profile_id ? (
                           <a
                             href={`/#/u/${member.linked_profile_id}`}
@@ -398,21 +404,12 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
                             {member.name}
                           </h4>
                         )}
+                        {title && (
+                          <p className="text-xs text-[var(--fg-muted)] mt-0.5 truncate">
+                            {title}
+                          </p>
+                        )}
                       </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      {member.github && (
-                        <a
-                          href={`https://github.com/${member.github}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[var(--fg-subtle)] hover:text-[var(--fg)] p-1 transition-colors"
-                          aria-label={`${member.name} on GitHub`}
-                        >
-                          <Github className="w-4 h-4" />
-                        </a>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -420,6 +417,51 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
                 {line2 && (
                   <div className="pt-2 border-t border-[var(--card-border)]/50 text-[13px] text-[var(--fg-subtle)] truncate">
                     {line2}
+                  </div>
+                )}
+
+                {line1 && (
+                  <p className="text-xs text-[var(--fg-muted)] leading-relaxed line-clamp-2">
+                    {line1}
+                  </p>
+                )}
+
+                {since && (
+                  <p className="text-xs text-[var(--fg-subtle)]">
+                    On the team since {since}
+                  </p>
+                )}
+
+                {(member.github || linkedin) && (
+                  <div
+                    className={
+                      hasExtraFields
+                        ? 'flex items-center gap-2 pt-0.5'
+                        : 'absolute top-5 right-5 flex items-center gap-1.5'
+                    }
+                  >
+                    {member.github && (
+                      <a
+                        href={`https://github.com/${member.github}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[var(--fg-subtle)] hover:text-[var(--fg)] p-1 transition-colors"
+                        aria-label={`${member.name} on GitHub`}
+                      >
+                        <Github className="w-4 h-4" />
+                      </a>
+                    )}
+                    {linkedin && (
+                      <a
+                        href={linkedin}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[var(--fg-subtle)] hover:text-[var(--fg)] p-1 transition-colors"
+                        aria-label={`${member.name} on LinkedIn`}
+                      >
+                        <Linkedin className="w-4 h-4" />
+                      </a>
+                    )}
                   </div>
                 )}
               </div>

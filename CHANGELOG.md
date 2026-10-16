@@ -4,6 +4,17 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.3] - 2026-10-15
+
+### Added & Fixed (Release 1.10.3)
+- **Team Page: Admin-Controlled Visibility for Title, Description, LinkedIn & "On the Team Since"**:
+  - Added per-member visibility flags (`show_title`, `show_line1`, `show_linkedin`, `show_since`) and `team_since` (`YYYY-MM`) to team records, plus a global `team_details_enabled` switch persisted in the existing `team` collection (`__team_settings__`).
+  - Updated `getPublicTeamList()`, `/api/team`, and `/api/data/team` so extra fields (`title`, `line1`, `linkedin` verified as `https://(www.)linkedin.com/`, and `since` formatted like `"Oct 2026"`) are returned only when `team_details_enabled === true` AND the member's respective `show_*` flag is `true`. Never exposes `show_*` flags or hidden members publicly.
+  - Added server-side validation on admin team create/update (`title <= 80` chars, `line1 <= 120` chars, `team_since` matching `/^\d{4}-(0[1-9]|1[0-2])$/` and not in the future, boolean coercion, admin-only access).
+  - Updated `AdminView` Team tab with the global `"Show team details on the About page"` toggle, optional `"Title (optional)"` field, per-field `"Show on team page"` checkboxes, `"On the team since"` month picker with `"Show"` checkbox, and summary badges (`Title · Bio · LinkedIn · Since`) in the member list.
+  - Updated `AboutView` team cards to render in order: photo → name → title → university (`line2`) → description (`line1`, 2-line clamp) → `"On the team since Oct 2026"` → GitHub & LinkedIn icons row, while keeping cards with no extra fields identical to today.
+  - Bumped service worker cache to `kwegatta-1.10.3`.
+
 ## [1.10.2] - 2026-10-15
 
 ### Added & Fixed (Release 1.10.2)

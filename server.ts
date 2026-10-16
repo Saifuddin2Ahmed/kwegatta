@@ -645,6 +645,11 @@ export interface TeamMember {
   photo?: string | null;
   order: number;
   hidden: boolean;
+  show_title?: boolean;
+  show_line1?: boolean;
+  show_linkedin?: boolean;
+  team_since?: string | null;
+  show_since?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -758,6 +763,7 @@ interface StoreData {
   pinned_announcement: any;
   admin_emails: string[];
   team: TeamMember[];
+  team_details_enabled?: boolean;
   audit_log: Array<{
     id: string;
     timestamp: string;
@@ -1156,6 +1162,7 @@ function createInitialStore(demo: boolean = isDemoMode): StoreData {
     pinned_announcement: null,
     admin_emails: [],
     team: [...INITIAL_TEAM_MEMBERS],
+    team_details_enabled: false,
     audit_log: [
       {
         id: 'audit-init',
@@ -1205,6 +1212,9 @@ function loadStore(): StoreData {
         }
         if (!parsed.team || !Array.isArray(parsed.team) || parsed.team.length === 0) {
           parsed.team = [...INITIAL_TEAM_MEMBERS];
+        }
+        if (typeof parsed.team_details_enabled !== 'boolean') {
+          parsed.team_details_enabled = false;
         }
         if (!parsed.audit_log || !Array.isArray(parsed.audit_log)) {
           parsed.audit_log = [];
@@ -1585,7 +1595,12 @@ export async function setupFirestoreListeners(customDbForTest?: any): Promise<vo
       const list: any[] = [];
       snap.forEach(doc => {
         const d = doc.data();
-        list.push({ ...d, id: d.id || doc.id });
+        const docId = d.id || doc.id;
+        if (docId === '__team_settings__' || d.is_settings) {
+          store.team_details_enabled = Boolean(d.team_details_enabled);
+        } else {
+          list.push({ ...d, id: docId });
+        }
       });
       if (list.length > 0) {
         store.team = list.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
@@ -8908,10 +8923,47 @@ export function canChangeTeam(isAdmin: boolean): boolean {
   return Boolean(isAdmin);
 }
 
+const TEAM_SINCE_SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+export function isValidLinkedinUrl(val: unknown): boolean {
+  if (!val || typeof val !== 'string') return false;
+  const trimmed = val.trim();
+  return /^https:\/\/(www\.)?linkedin\.com\/.+/i.test(trimmed);
+}
+
+export function formatTeamSince(ym: unknown): string | null {
+  if (!ym || typeof ym !== 'string') return null;
+  const m = ym.trim().match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+  if (!m) return null;
+  const year = m[1];
+  const monthIdx = parseInt(m[2], 10) - 1;
+  return `${TEAM_SINCE_SHORT_MONTHS[monthIdx]} ${year}`;
+}
+
+export function validateTeamSince(val: unknown): { valid: boolean; value: string | null; error?: string } {
+  if (val === undefined || val === null || String(val).trim() === '') {
+    return { valid: true, value: null };
+  }
+  const str = String(val).trim();
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(str)) {
+    return { valid: false, value: null, error: 'team_since must match YYYY-MM format' };
+  }
+  const now = new Date();
+  const utcYm = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+  const localYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const maxYm = utcYm > localYm ? utcYm : localYm;
+  if (str > maxYm) {
+    return { valid: false, value: null, error: 'team_since cannot be in the future' };
+  }
+  return { valid: true, value: str };
+}
+
 export function getPublicTeamList(): any[] {
   let list = Array.isArray(store.team) ? [...store.team] : [];
-  list = list.filter((m: any) => !m.hidden);
+  list = list.filter((m: any) => m && !m.hidden && m.id !== '__team_settings__' && !m.is_settings);
   list.sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
+
+  const detailsEnabled = Boolean(store.team_details_enabled);
 
   return list.map((m: any) => {
     let linkedAvatar = null;
@@ -8923,7 +8975,7 @@ export function getPublicTeamList(): any[] {
         linkedAvatar = lp.avatar ? `/api/avatar/${lp.id}` : null;
       }
     }
-    return {
+    const pub: Record<string, any> = {
       id: m.id,
       name: m.name,
       line2: m.line2,
@@ -8934,39 +8986,74 @@ export function getPublicTeamList(): any[] {
       linked_avatar: linkedAvatar,
       linked_profile: linkedProfile
     };
+
+    if (detailsEnabled) {
+      if (m.show_title === true && m.title && String(m.title).trim()) {
+        pub.title = String(m.title).trim();
+      }
+      if (m.show_line1 === true && m.line1 && String(m.line1).trim()) {
+        pub.line1 = String(m.line1).trim();
+      }
+      if (m.show_linkedin === true && isValidLinkedinUrl(m.linkedin)) {
+        pub.linkedin = String(m.linkedin).trim();
+      }
+      if (m.show_since === true && m.team_since) {
+        const formattedSince = formatTeamSince(m.team_since);
+        if (formattedSince) {
+          pub.since = formattedSince;
+        }
+      }
+    }
+
+    return pub;
   });
 }
 
 // Public: Get team members
-app.get('/api/team', (req: Request, res: Response) => {
-  const isAdmin = checkAdmin(req);
-  if (!isAdmin) {
-    return res.json(getPublicTeamList());
-  }
+app.get('/api/team', (_req: Request, res: Response) => {
+  return res.json(getPublicTeamList());
+});
 
-  let list = Array.isArray(store.team) ? [...store.team] : [];
-  list.sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
+// Admin: Get & update global team details setting
+app.get('/api/admin/team/settings', (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+  return res.json({ team_details_enabled: Boolean(store.team_details_enabled) });
+});
 
-  const enriched = list.map((m: any) => {
-    let linkedAvatar = null;
-    let linkedProfile = null;
-    if (m.linked_profile_id) {
-      const lp = store.profiles.find((p: any) => p.id === m.linked_profile_id);
-      if (lp) {
-        linkedProfile = { id: lp.id, name: lp.name, role: lp.role, headline: lp.headline };
-        linkedAvatar = lp.avatar || null;
-      }
-    }
-    return {
-      ...m,
-      photo_url: m.photo ? `/api/team-photo/${m.id}` : null,
-      linked_avatar: linkedAvatar,
-      linked_profile: linkedProfile
-    };
+const handleUpdateTeamSettings = async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+
+  const raw = req.body || {};
+  const enabled = Boolean(raw.team_details_enabled);
+  store.team_details_enabled = enabled;
+
+  await persistDoc('team', '__team_settings__', {
+    id: '__team_settings__',
+    is_settings: true,
+    team_details_enabled: enabled,
+    updated_at: new Date().toISOString()
   });
 
-  return res.json(enriched);
-});
+  const auditEntry = {
+    id: 'audit-' + Date.now(),
+    timestamp: new Date().toISOString(),
+    action: 'TEAM_SETTINGS_UPDATED',
+    details: `Admin set team_details_enabled to ${enabled}`,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+
+  if (storageMode === 'disk') saveStore(store);
+  return res.json({ success: true, team_details_enabled: enabled });
+};
+
+app.patch('/api/admin/team/settings', handleUpdateTeamSettings);
+app.post('/api/admin/team/settings', handleUpdateTeamSettings);
+app.patch('/api/admin/settings', handleUpdateTeamSettings);
+app.post('/api/admin/settings', handleUpdateTeamSettings);
 
 // Admin: Get all team members (full data including hidden)
 app.get('/api/admin/team', (req: Request, res: Response) => {
@@ -8974,6 +9061,7 @@ app.get('/api/admin/team', (req: Request, res: Response) => {
   if (!admin) return;
 
   let list = Array.isArray(store.team) ? [...store.team] : [];
+  list = list.filter((m: any) => m && m.id !== '__team_settings__' && !m.is_settings);
   list.sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
 
   const enriched = list.map((m: any) => {
@@ -8988,6 +9076,11 @@ app.get('/api/admin/team', (req: Request, res: Response) => {
     }
     return {
       ...m,
+      show_title: Boolean(m.show_title),
+      show_line1: Boolean(m.show_line1),
+      show_linkedin: Boolean(m.show_linkedin),
+      team_since: m.team_since || null,
+      show_since: Boolean(m.show_since),
       photo_url: m.photo ? `/api/team-photo/${m.id}` : null,
       linked_avatar: linkedAvatar,
       linked_profile: linkedProfile
@@ -9008,14 +9101,29 @@ app.post('/api/admin/team', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'Name is required' });
   }
 
+  const rawTitle = raw.title !== undefined ? String(raw.title).trim() : (raw.role !== undefined ? String(raw.role).trim() : '');
+  if (rawTitle.length > 80) {
+    return res.status(400).json({ error: 'Title must be 80 characters or fewer' });
+  }
+
+  const rawLine1 = raw.line1 !== undefined ? String(raw.line1).trim() : (raw.background !== undefined ? String(raw.background).trim() : '');
+  if (rawLine1.length > 120) {
+    return res.status(400).json({ error: 'Line 1 (description) must be 120 characters or fewer' });
+  }
+
+  const sinceCheck = validateTeamSince(raw.team_since);
+  if (!sinceCheck.valid) {
+    return res.status(400).json({ error: sinceCheck.error || 'Invalid team_since' });
+  }
+
   if (!Array.isArray(store.team)) store.team = [];
   const maxOrder = store.team.reduce((max: number, m: any) => Math.max(max, Number(m.order) || 0), -1);
 
   const member: TeamMember = {
     id: 'team-' + Date.now() + '-' + crypto.randomBytes(2).toString('hex'),
     name,
-    title: sanitizeText(raw.title || raw.role, 100) || 'Team Member',
-    line1: sanitizeText(raw.line1 || raw.background, 200),
+    title: sanitizeText(rawTitle, 80),
+    line1: sanitizeText(rawLine1, 120),
     line2: sanitizeText(raw.line2 || raw.affiliation, 200),
     github: sanitizeText(raw.github, 60).replace(/^@/, '') || null,
     linkedin: sanitizeText(raw.linkedin, 150) || null,
@@ -9023,6 +9131,11 @@ app.post('/api/admin/team', async (req: Request, res: Response) => {
     photo: sanitizeAvatar(raw.photo) || null,
     order: maxOrder + 1,
     hidden: Boolean(raw.hidden),
+    show_title: Boolean(raw.show_title),
+    show_line1: Boolean(raw.show_line1),
+    show_linkedin: Boolean(raw.show_linkedin),
+    team_since: sinceCheck.value,
+    show_since: Boolean(raw.show_since),
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };
@@ -9034,7 +9147,7 @@ app.post('/api/admin/team', async (req: Request, res: Response) => {
     id: 'audit-' + Date.now(),
     timestamp: new Date().toISOString(),
     action: 'TEAM_MEMBER_CREATED',
-    details: `Admin added team member "${member.name}" (${member.title})`,
+    details: `Admin added team member "${member.name}"${member.title ? ` (${member.title})` : ''}`,
     admin: admin.adminName
   };
   store.audit_log.unshift(auditEntry);
@@ -9056,15 +9169,39 @@ app.patch('/api/admin/team/:id', async (req: Request, res: Response) => {
   }
 
   const raw = req.body || {};
+  if (raw.title !== undefined) {
+    const tStr = String(raw.title ?? '').trim();
+    if (tStr.length > 80) {
+      return res.status(400).json({ error: 'Title must be 80 characters or fewer' });
+    }
+    member.title = sanitizeText(tStr, 80);
+  }
+  if (raw.line1 !== undefined) {
+    const l1Str = String(raw.line1 ?? '').trim();
+    if (l1Str.length > 120) {
+      return res.status(400).json({ error: 'Line 1 (description) must be 120 characters or fewer' });
+    }
+    member.line1 = sanitizeText(l1Str, 120);
+  }
+  if (raw.team_since !== undefined) {
+    const sinceCheck = validateTeamSince(raw.team_since);
+    if (!sinceCheck.valid) {
+      return res.status(400).json({ error: sinceCheck.error || 'Invalid team_since' });
+    }
+    member.team_since = sinceCheck.value;
+  }
+
   if (raw.name !== undefined) member.name = sanitizeText(raw.name, 100);
-  if (raw.title !== undefined) member.title = sanitizeText(raw.title, 100);
-  if (raw.line1 !== undefined) member.line1 = sanitizeText(raw.line1, 200);
   if (raw.line2 !== undefined) member.line2 = sanitizeText(raw.line2, 200);
   if (raw.github !== undefined) member.github = sanitizeText(raw.github, 60).replace(/^@/, '') || null;
   if (raw.linkedin !== undefined) member.linkedin = sanitizeText(raw.linkedin, 150) || null;
   if (raw.linked_profile_id !== undefined) member.linked_profile_id = sanitizeText(raw.linked_profile_id, 80) || null;
   if (raw.photo !== undefined) member.photo = raw.photo ? (sanitizeAvatar(raw.photo) || null) : null;
   if (raw.hidden !== undefined) member.hidden = Boolean(raw.hidden);
+  if (raw.show_title !== undefined) member.show_title = Boolean(raw.show_title);
+  if (raw.show_line1 !== undefined) member.show_line1 = Boolean(raw.show_line1);
+  if (raw.show_linkedin !== undefined) member.show_linkedin = Boolean(raw.show_linkedin);
+  if (raw.show_since !== undefined) member.show_since = Boolean(raw.show_since);
   if (raw.order !== undefined) member.order = Number(raw.order) || 0;
   member.updated_at = new Date().toISOString();
 

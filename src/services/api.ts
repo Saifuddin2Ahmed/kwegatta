@@ -1675,6 +1675,30 @@ export async function fetchTeam(): Promise<any[]> {
   }
 }
 
+export async function fetchTeamSettings(customHeaders?: Record<string, string>): Promise<{ team_details_enabled: boolean }> {
+  try {
+    const headers = getAuthHeaders(customHeaders || {});
+    const res = await fetch('/api/admin/team/settings', { headers });
+    if (!res.ok) return { team_details_enabled: false };
+    const data = await res.json();
+    return { team_details_enabled: Boolean(data?.team_details_enabled) };
+  } catch {
+    return { team_details_enabled: false };
+  }
+}
+
+export async function updateTeamSettings(team_details_enabled: boolean, customHeaders?: Record<string, string>): Promise<{ team_details_enabled: boolean }> {
+  await getFreshAuthToken();
+  const res = await fetch('/api/admin/team/settings', {
+    method: 'PATCH',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json', ...(customHeaders || {}) }),
+    body: JSON.stringify({ team_details_enabled })
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error || 'Failed to update team settings');
+  return { team_details_enabled: Boolean(json.team_details_enabled) };
+}
+
 export async function createTeamMember(data: any): Promise<any> {
   await getFreshAuthToken();
   const res = await fetch('/api/admin/team', {

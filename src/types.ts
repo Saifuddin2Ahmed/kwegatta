@@ -317,8 +317,8 @@ export interface EventAttendeeMatch {
 export interface TeamMember {
   id: string;
   name: string;
-  title: string;
-  line1: string;
+  title?: string;
+  line1?: string;
   line2: string;
   github?: string | null;
   linkedin?: string | null;
@@ -328,6 +328,12 @@ export interface TeamMember {
   order: number;
   hidden: boolean;
   linked_avatar?: string | null;
+  show_title?: boolean;
+  show_line1?: boolean;
+  show_linkedin?: boolean;
+  team_since?: string | null;
+  show_since?: boolean;
+  since?: string | null;
   created_at?: string;
   updated_at?: string;
 }

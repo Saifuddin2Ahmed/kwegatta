@@ -328,8 +328,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.10.2
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.10.2'");
+    // 1. Cache name includes version kwegatta-1.10.3
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.10.3'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -6272,8 +6272,8 @@ describe('Release 1.5.0 Features', () => {
         const swCacheName = match![1];
 
         expect(swCacheName).toBe(`kwegatta-${pkg.version}`);
-        expect(pkg.version).toBe('1.10.2');
-        expect(swCacheName).toBe('kwegatta-1.10.2');
+        expect(pkg.version).toBe('1.10.3');
+        expect(swCacheName).toBe('kwegatta-1.10.3');
       });
 
       it('d) OG_RENDER_VERSION busts image cache', () => {
@@ -6315,6 +6315,229 @@ describe('Release 1.5.0 Features', () => {
 
         expect(injectedHtml).toContain('EAT');
         expect(injectedHtml).not.toContain('Africa/Nairobi');
+      });
+    });
+
+    describe('Release 1.10.3: Team Page Admin-Controlled Visibility', () => {
+      const testMemberId = 'team-1103-member';
+      const hiddenMemberId = 'team-1103-hidden';
+
+      beforeEach(() => {
+        store.team_details_enabled = false;
+        store.team = store.team.filter((m: any) => m.id !== testMemberId && m.id !== hiddenMemberId);
+        store.team.push(
+          {
+            id: testMemberId,
+            name: 'Visibility Test Builder',
+            title: 'Principal Systems Architect',
+            line1: 'Building resilient distributed systems in Kampala',
+            line2: 'Makerere University',
+            github: 'visbuilder',
+            linkedin: 'https://www.linkedin.com/in/visbuilder',
+            team_since: '2026-10',
+            show_title: false,
+            show_line1: false,
+            show_linkedin: false,
+            show_since: false,
+            hidden: false,
+            order: 50
+          },
+          {
+            id: hiddenMemberId,
+            name: 'Hidden Team Member 1103',
+            title: 'Stealth Role',
+            line1: 'Should never appear publicly',
+            line2: 'MUBS',
+            github: 'hiddenbuilder',
+            linkedin: 'https://linkedin.com/in/hiddenbuilder',
+            team_since: '2026-09',
+            show_title: true,
+            show_line1: true,
+            show_linkedin: true,
+            show_since: true,
+            hidden: true,
+            order: 51
+          }
+        );
+      });
+
+      it('12) Default (global off, flags off): /api/team returns no title, line1, linkedin or since', async () => {
+        const res = await fetch(`${baseUrl}/api/team`);
+        expect(res.status).toBe(200);
+        const list = await res.json();
+        const m = list.find((item: any) => item.id === testMemberId);
+        expect(m).toBeDefined();
+        expect(m.name).toBe('Visibility Test Builder');
+        expect(m.line2).toBe('Makerere University');
+        expect(m.github).toBe('visbuilder');
+        expect(m.title).toBeUndefined();
+        expect(m.line1).toBeUndefined();
+        expect(m.linkedin).toBeUndefined();
+        expect(m.since).toBeUndefined();
+      });
+
+      it('13) Global on + show_title only: title appears, line1/linkedin/since do not', async () => {
+        store.team_details_enabled = true;
+        const target = store.team.find((m: any) => m.id === testMemberId)!;
+        target.show_title = true;
+        target.show_line1 = false;
+        target.show_linkedin = false;
+        target.show_since = false;
+
+        const res = await fetch(`${baseUrl}/api/team`);
+        expect(res.status).toBe(200);
+        const list = await res.json();
+        const m = list.find((item: any) => item.id === testMemberId);
+        expect(m).toBeDefined();
+        expect(m.title).toBe('Principal Systems Architect');
+        expect(m.line1).toBeUndefined();
+        expect(m.linkedin).toBeUndefined();
+        expect(m.since).toBeUndefined();
+
+        // Now enable all 4 flags with global on to verify formatted since ('Oct 2026'), line1, and linkedin
+        target.show_line1 = true;
+        target.show_linkedin = true;
+        target.show_since = true;
+        const resAll = await fetch(`${baseUrl}/api/data/team`);
+        const listAll = await resAll.json();
+        const mAll = listAll.find((item: any) => item.id === testMemberId);
+        expect(mAll.title).toBe('Principal Systems Architect');
+        expect(mAll.line1).toBe('Building resilient distributed systems in Kampala');
+        expect(mAll.linkedin).toBe('https://www.linkedin.com/in/visbuilder');
+        expect(mAll.since).toBe('Oct 2026');
+      });
+
+      it('14) Global off + all flags on: none of the extra fields appear', async () => {
+        store.team_details_enabled = false;
+        const target = store.team.find((m: any) => m.id === testMemberId)!;
+        target.show_title = true;
+        target.show_line1 = true;
+        target.show_linkedin = true;
+        target.show_since = true;
+
+        const res = await fetch(`${baseUrl}/api/team`);
+        expect(res.status).toBe(200);
+        const list = await res.json();
+        const m = list.find((item: any) => item.id === testMemberId);
+        expect(m).toBeDefined();
+        expect(m.title).toBeUndefined();
+        expect(m.line1).toBeUndefined();
+        expect(m.linkedin).toBeUndefined();
+        expect(m.since).toBeUndefined();
+      });
+
+      it('15) Non-linkedin URL in linkedin is never returned; hidden members never returned; show_* flags never returned', async () => {
+        store.team_details_enabled = true;
+        const target = store.team.find((m: any) => m.id === testMemberId)!;
+        target.linkedin = 'https://evil.example.com/in/visbuilder';
+        target.show_title = true;
+        target.show_line1 = true;
+        target.show_linkedin = true;
+        target.show_since = true;
+
+        const res = await fetch(`${baseUrl}/api/team`);
+        expect(res.status).toBe(200);
+        const list = await res.json();
+
+        // Hidden member never returned
+        expect(list.some((item: any) => item.id === hiddenMemberId)).toBe(false);
+
+        const m = list.find((item: any) => item.id === testMemberId);
+        expect(m).toBeDefined();
+        // Non-linkedin URL is omitted
+        expect(m.linkedin).toBeUndefined();
+        // show_* flags and raw team_since never returned publicly
+        expect(m.show_title).toBeUndefined();
+        expect(m.show_line1).toBeUndefined();
+        expect(m.show_linkedin).toBeUndefined();
+        expect(m.show_since).toBeUndefined();
+        expect(m.team_since).toBeUndefined();
+      });
+
+      it('16) Validation: line1 > 120 chars -> 400; title > 80 chars -> 400; team_since in the future or bad format -> 400; non-admin update -> 401/403', async () => {
+        if (!Array.isArray(store.admin_emails)) store.admin_emails = [];
+        if (!store.admin_emails.includes('test-admin@kwegatta.test')) {
+          store.admin_emails.push('test-admin@kwegatta.test');
+        }
+
+        // line1 > 120 chars -> 400
+        const resLine1 = await fetch(`${baseUrl}/api/admin/team/${testMemberId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer test-admin'
+          },
+          body: JSON.stringify({ line1: 'A'.repeat(121) })
+        });
+        expect(resLine1.status).toBe(400);
+
+        // title > 80 chars -> 400
+        const resTitle = await fetch(`${baseUrl}/api/admin/team/${testMemberId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer test-admin'
+          },
+          body: JSON.stringify({ title: 'T'.repeat(81) })
+        });
+        expect(resTitle.status).toBe(400);
+
+        // team_since bad format -> 400
+        const resBadFormat = await fetch(`${baseUrl}/api/admin/team/${testMemberId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer test-admin'
+          },
+          body: JSON.stringify({ team_since: '2026/10' })
+        });
+        expect(resBadFormat.status).toBe(400);
+
+        // team_since in the future -> 400
+        const resFuture = await fetch(`${baseUrl}/api/admin/team/${testMemberId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer test-admin'
+          },
+          body: JSON.stringify({ team_since: '2099-12' })
+        });
+        expect(resFuture.status).toBe(400);
+
+        // non-admin member update -> 401/403
+        const resNonAdminMember = await fetch(`${baseUrl}/api/admin/team/${testMemberId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer test-member-150'
+          },
+          body: JSON.stringify({ show_title: true })
+        });
+        expect([401, 403]).toContain(resNonAdminMember.status);
+
+        // non-admin global setting update -> 401/403
+        const resNonAdminSetting = await fetch(`${baseUrl}/api/admin/team/settings`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer test-member-150'
+          },
+          body: JSON.stringify({ team_details_enabled: true })
+        });
+        expect([401, 403]).toContain(resNonAdminSetting.status);
+
+        // admin global setting update -> 200
+        const resAdminSetting = await fetch(`${baseUrl}/api/admin/team/settings`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer test-admin'
+          },
+          body: JSON.stringify({ team_details_enabled: true })
+        });
+        expect(resAdminSetting.status).toBe(200);
+        const settingJson = await resAdminSetting.json();
+        expect(settingJson.team_details_enabled).toBe(true);
       });
     });
   });

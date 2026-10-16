@@ -67,6 +67,8 @@ import {
   fetchPinnedAnnouncement,
   getAuthHeaders,
   fetchTeam,
+  fetchTeamSettings,
+  updateTeamSettings,
   createTeamMember,
   updateTeamMember,
   uploadTeamMemberPhoto,
@@ -157,6 +159,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
   // Team Management State
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
   const [isAddingMember, setIsAddingMember] = useState(false);
+  const [teamDetailsEnabled, setTeamDetailsEnabled] = useState(false);
+  const [isUpdatingTeamSettings, setIsUpdatingTeamSettings] = useState(false);
   const [teamForm, setTeamForm] = useState({
     name: '',
     title: '',
@@ -165,7 +169,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
     github: '',
     linkedin: '',
     linked_profile_id: '',
-    hidden: false
+    hidden: false,
+    show_title: false,
+    show_line1: false,
+    show_linkedin: false,
+    team_since: '',
+    show_since: false
   });
   const [isSavingTeam, setIsSavingTeam] = useState(false);
   const [teamPhotoUploadingId, setTeamPhotoUploadingId] = useState<string | null>(null);
@@ -287,7 +296,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
     try {
       const headers = getAuthHeaders(adminToken ? { 'x-admin-token': adminToken } : {});
-      const [ovRes, memRes, postRes, logRes, repRes, evRes, admRes, pinRes, teamData] = await Promise.all([
+      const [ovRes, memRes, postRes, logRes, repRes, evRes, admRes, pinRes, teamData, teamSettings] = await Promise.all([
         fetch('/api/admin/overview', { headers }),
         fetch('/api/admin/members', { headers }),
         fetch('/api/admin/posts', { headers }),
@@ -296,7 +305,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
         fetch('/api/admin/events', { headers }),
         fetch('/api/admin/admins', { headers }).catch(() => null),
         fetchPinnedAnnouncement(),
-        fetch('/api/admin/team', { headers }).then(r => r.ok ? r.json() : fetchTeam()).catch(() => fetchTeam().catch(() => []))
+        fetch('/api/admin/team', { headers }).then(r => r.ok ? r.json() : fetchTeam()).catch(() => fetchTeam().catch(() => [])),
+        fetchTeamSettings(adminToken ? { 'x-admin-token': adminToken } : {})
       ]);
 
       if (ovRes.status === 401 || memRes.status === 401) {
@@ -313,6 +323,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
       if (admRes && admRes.ok) setAdminAccounts(await admRes.json());
       if (pinRes) setPinnedAnnouncement(pinRes);
       if (Array.isArray(teamData)) setTeamList(teamData);
+      if (teamSettings && typeof teamSettings.team_details_enabled === 'boolean') {
+        setTeamDetailsEnabled(teamSettings.team_details_enabled);
+      }
     } catch (err: any) {
       setErrorMsg(err.message);
     } finally {
@@ -611,6 +624,23 @@ export const AdminView: React.FC<AdminViewProps> = ({
   };
 
   // Team Management Handlers
+  const handleToggleTeamDetailsEnabled = async (nextEnabled: boolean) => {
+    const prev = teamDetailsEnabled;
+    setTeamDetailsEnabled(nextEnabled);
+    setIsUpdatingTeamSettings(true);
+    try {
+      const res = await updateTeamSettings(nextEnabled, adminToken ? { 'x-admin-token': adminToken } : {});
+      setTeamDetailsEnabled(res.team_details_enabled);
+      onToast(res.team_details_enabled ? 'Team details enabled on About page' : 'Team details hidden on About page');
+      onRefreshGlobalData();
+    } catch (err: any) {
+      setTeamDetailsEnabled(prev);
+      onToast('Failed to update team setting: ' + (err.message || err));
+    } finally {
+      setIsUpdatingTeamSettings(false);
+    }
+  };
+
   const openAddMemberModal = () => {
     setEditingMember(null);
     setTeamForm({
@@ -621,7 +651,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
       github: '',
       linkedin: '',
       linked_profile_id: '',
-      hidden: false
+      hidden: false,
+      show_title: false,
+      show_line1: false,
+      show_linkedin: false,
+      team_since: '',
+      show_since: false
     });
     setIsAddingMember(true);
   };
@@ -636,7 +671,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
       github: member.github || '',
       linkedin: member.linkedin || '',
       linked_profile_id: member.linked_profile_id || '',
-      hidden: Boolean(member.hidden)
+      hidden: Boolean(member.hidden),
+      show_title: Boolean(member.show_title),
+      show_line1: Boolean(member.show_line1),
+      show_linkedin: Boolean(member.show_linkedin),
+      team_since: member.team_since || '',
+      show_since: Boolean(member.show_since)
     });
     setIsAddingMember(true);
   };
@@ -1784,6 +1824,31 @@ export const AdminView: React.FC<AdminViewProps> = ({
               </button>
             </div>
 
+            {/* Global switch: Show team details on the About page */}
+            <div className="p-3.5 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] flex items-center justify-between gap-4">
+              <div>
+                <label
+                  htmlFor="team-details-enabled-switch"
+                  className="text-xs sm:text-sm font-semibold text-[var(--fg)] cursor-pointer block"
+                >
+                  Show team details on the About page
+                </label>
+                <p className="text-xs text-[var(--fg-muted)] mt-0.5">
+                  Off: cards show name, university and GitHub only.
+                </p>
+              </div>
+              <input
+                id="team-details-enabled-switch"
+                type="checkbox"
+                role="switch"
+                aria-checked={teamDetailsEnabled}
+                checked={teamDetailsEnabled}
+                disabled={isUpdatingTeamSettings}
+                onChange={(e) => handleToggleTeamDetailsEnabled(e.target.checked)}
+                className="w-4 h-4 rounded border-[var(--card-border)] text-[var(--gold-text)] focus:ring-0 cursor-pointer shrink-0"
+              />
+            </div>
+
             {teamList.length === 0 ? (
               <div className="text-center py-12 text-xs text-[var(--fg-muted)]">
                 No team members found. Click "Add Member" to seed or add team members.
@@ -1792,6 +1857,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
               <div className="space-y-3">
                 {teamList.map((member, index) => {
                   const photoUrl = member.photo_url || member.photo || member.linked_avatar || (member.linked_profile_id ? `/api/avatar/${member.linked_profile_id}` : null);
+                  const visibleBadges: string[] = [];
+                  if (member.show_title) visibleBadges.push('Title');
+                  if (member.show_line1) visibleBadges.push('Bio');
+                  if (member.show_linkedin) visibleBadges.push('LinkedIn');
+                  if (member.show_since) visibleBadges.push('Since');
+
                   return (
                     <div
                       key={member.id}
@@ -1867,10 +1938,20 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                   Linked Account
                                 </span>
                               )}
+                              {visibleBadges.length > 0 && (
+                                <span
+                                  className="text-xs px-1.5 py-0.5 rounded bg-[var(--bg-subtle)] border border-[var(--card-border)] text-[var(--fg-muted)] font-medium"
+                                  title="Visible details selected for this member"
+                                >
+                                  {visibleBadges.join(' · ')}
+                                </span>
+                              )}
                             </div>
-                            <p className="text-xs font-medium text-[var(--teal-text)] truncate">
-                              {member.title}
-                            </p>
+                            {member.title && (
+                              <p className="text-xs font-medium text-[var(--teal-text)] truncate">
+                                {member.title}
+                              </p>
+                            )}
                             {member.line1 && (
                               <p className="text-xs text-[var(--fg-muted)] line-clamp-1">
                                 {member.line1}
@@ -1892,6 +1973,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
                                 <span className="flex items-center gap-1 text-[13px]">
                                   <Linkedin className="w-3 h-3 text-[var(--fg-subtle)]" />
                                   <span>LinkedIn</span>
+                                </span>
+                              )}
+                              {member.team_since && (
+                                <span className="text-[13px] text-[var(--fg-subtle)]">
+                                  Since {member.team_since}
                                 </span>
                               )}
                             </div>
@@ -1994,12 +2080,24 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-[var(--fg)] mb-1">
-                      Title / Role in Project *
-                    </label>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <label htmlFor="team-title-input" className="block text-xs font-semibold text-[var(--fg)]">
+                        Title (optional)
+                      </label>
+                      <label className="inline-flex items-center gap-1.5 text-xs text-[var(--fg-muted)] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={teamForm.show_title}
+                          onChange={(e) => setTeamForm({ ...teamForm, show_title: e.target.checked })}
+                          className="rounded border-[var(--card-border)] text-[var(--gold-text)] focus:ring-0 cursor-pointer"
+                        />
+                        <span>Show on team page</span>
+                      </label>
+                    </div>
                     <input
+                      id="team-title-input"
                       type="text"
-                      required
+                      maxLength={80}
                       value={teamForm.title}
                       onChange={(e) => setTeamForm({ ...teamForm, title: e.target.value })}
                       placeholder="e.g. Team lead and engineering"
@@ -2008,11 +2106,24 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-[var(--fg)] mb-1">
-                      Line 1 (Background / Skills)
-                    </label>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <label htmlFor="team-line1-input" className="block text-xs font-semibold text-[var(--fg)]">
+                        Line 1 (Background / Skills)
+                      </label>
+                      <label className="inline-flex items-center gap-1.5 text-xs text-[var(--fg-muted)] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={teamForm.show_line1}
+                          onChange={(e) => setTeamForm({ ...teamForm, show_line1: e.target.checked })}
+                          className="rounded border-[var(--card-border)] text-[var(--gold-text)] focus:ring-0 cursor-pointer"
+                        />
+                        <span>Show on team page</span>
+                      </label>
+                    </div>
                     <input
+                      id="team-line1-input"
                       type="text"
+                      maxLength={120}
                       value={teamForm.line1}
                       onChange={(e) => setTeamForm({ ...teamForm, line1: e.target.value })}
                       placeholder="e.g. Software and AI Engineer • Systems Architect"
@@ -2047,10 +2158,22 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-[var(--fg)] mb-1">
-                        LinkedIn URL
-                      </label>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <label htmlFor="team-linkedin-input" className="block text-xs font-semibold text-[var(--fg)]">
+                          LinkedIn URL
+                        </label>
+                        <label className="inline-flex items-center gap-1.5 text-xs text-[var(--fg-muted)] cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={teamForm.show_linkedin}
+                            onChange={(e) => setTeamForm({ ...teamForm, show_linkedin: e.target.checked })}
+                            className="rounded border-[var(--card-border)] text-[var(--gold-text)] focus:ring-0 cursor-pointer"
+                          />
+                          <span>Show on team page</span>
+                        </label>
+                      </div>
                       <input
+                        id="team-linkedin-input"
                         type="url"
                         value={teamForm.linkedin}
                         onChange={(e) => setTeamForm({ ...teamForm, linkedin: e.target.value })}
@@ -2058,6 +2181,30 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         className="kw-input w-full py-2 px-3 rounded-lg text-xs"
                       />
                     </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <label htmlFor="team-since-input" className="block text-xs font-semibold text-[var(--fg)]">
+                        On the team since
+                      </label>
+                      <label className="inline-flex items-center gap-1.5 text-xs text-[var(--fg-muted)] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={teamForm.show_since}
+                          onChange={(e) => setTeamForm({ ...teamForm, show_since: e.target.checked })}
+                          className="rounded border-[var(--card-border)] text-[var(--gold-text)] focus:ring-0 cursor-pointer"
+                        />
+                        <span>Show</span>
+                      </label>
+                    </div>
+                    <input
+                      id="team-since-input"
+                      type="month"
+                      value={teamForm.team_since}
+                      onChange={(e) => setTeamForm({ ...teamForm, team_since: e.target.value })}
+                      className="kw-input w-full py-2 px-3 rounded-lg text-xs"
+                    />
                   </div>
 
                   <div>
