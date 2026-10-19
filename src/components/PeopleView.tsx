@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import { Profile, AskKwegattaMatch } from '../types';
 import { Avatar } from './Avatar';
+import { PageHeader } from './PageHeader';
+import { HEADER_IMAGES } from '../lib/headerImages';
 import { askKwegatta } from '../services/api';
 
 interface PeopleViewProps {
@@ -207,6 +209,8 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
 
   return (
     <div className="kw-container space-y-6 md:space-y-10">
+      <PageHeader title="People" subtitle="Find builders, mentors and study partners." image={HEADER_IMAGES.people} />
+
       {/* Ask Kwegatta AI Search Panel */}
       <div className="kw-card bg-[var(--card)] border border-[var(--gold)]/30 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
         <div className="flex items-center justify-between gap-3">

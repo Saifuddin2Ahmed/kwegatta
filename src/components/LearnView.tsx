@@ -4,6 +4,8 @@ import { Profile, LearnMatchResult } from '../types';
 import { matchLearningPartners, db, APP_NAME, requestMemberConnect } from '../services/api';
 import { formatWhatsAppUrl } from '../utils';
 import { Avatar } from './Avatar';
+import { PageHeader } from './PageHeader';
+import { HEADER_IMAGES } from '../lib/headerImages';
 
 interface LearnViewProps {
   currentProfile: Profile | null;
@@ -82,7 +84,8 @@ export const LearnView: React.FC<LearnViewProps> = ({
 
   return (
     <div className="kw-container space-y-6 md:space-y-10">
-      {/* Header */}
+      <PageHeader title="Learn" subtitle="Guides and resources to help you grow." image={HEADER_IMAGES.learn} />
+
       <div className="flex items-baseline justify-between gap-4 border-b border-[var(--card-border)] pb-4">
         <div>
           <h2 className="text-xl font-display font-bold text-[var(--fg)] tracking-tight">

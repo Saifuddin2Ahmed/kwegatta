@@ -423,3 +423,36 @@ a {
     scroll-behavior: auto !important;
   }
 }
+
+/* =========================================================================
+   PAGE HEADERS AND ABOUT HERO
+   White text always sits on a dark overlay, so it meets WCAG AA in both themes.
+   ========================================================================= */
+.kw-page-header-overlay {
+  background:
+    linear-gradient(0deg, rgba(7, 11, 18, 0.78) 0%, rgba(7, 11, 18, 0.35) 65%, rgba(7, 11, 18, 0.2) 100%),
+    linear-gradient(90deg, rgba(7, 11, 18, 0.7) 0%, rgba(7, 11, 18, 0.25) 75%);
+}
+/* No photo: a brand gradient instead */
+.kw-page-header--plain .kw-page-header-overlay {
+  background:
+    radial-gradient(circle at 85% 15%, rgba(245, 183, 0, 0.22), transparent 45%),
+    linear-gradient(135deg, #0B6F66 0%, #0B132B 100%);
+}
+[data-theme="dark"] .kw-page-header--plain .kw-page-header-overlay {
+  background:
+    radial-gradient(circle at 85% 15%, rgba(245, 183, 0, 0.18), transparent 45%),
+    linear-gradient(135deg, #0F182E 0%, #070B12 100%);
+}
+.kw-page-header {
+  background-color: #0B132B;
+  border: 1px solid var(--card-border);
+}
+.kw-hero-overlay {
+  background:
+    linear-gradient(0deg, rgba(7, 11, 18, 0.9) 0%, rgba(7, 11, 18, 0.55) 55%, rgba(7, 11, 18, 0.3) 100%),
+    linear-gradient(90deg, rgba(7, 11, 18, 0.65) 0%, rgba(7, 11, 18, 0.1) 80%);
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}

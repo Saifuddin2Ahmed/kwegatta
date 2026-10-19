@@ -32,6 +32,8 @@ import {
   ThumbsDown,
   Copy
 } from 'lucide-react';
+import { PageHeader } from './PageHeader';
+import { HEADER_IMAGES } from '../lib/headerImages';
 import { EventOpportunityItem, OpportunityType, Profile, EventQuestion, EventGuest } from '../types';
 import { formatTicketCode } from '../lib/ticketCode';
 
@@ -3507,18 +3509,11 @@ export const EventsView: React.FC<EventsViewProps> = ({
           <span>Opening event…</span>
         </div>
       )}
-      {/* Top Banner / Heading */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-[var(--fg)] tracking-tight">
-            Events & Opportunities
-          </h1>
-          <p className="text-xs text-[var(--fg-muted)] mt-1">
-            Discover tech meetups, hackathons, grants and partner calls.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
+      <PageHeader
+        title="Events & opportunities"
+        subtitle="Meetups, hackathons and calls happening around you."
+        image={HEADER_IMAGES.events}
+        actions={
           <button
             onClick={openCreateModal}
             className="kw-btn kw-btn-gold text-xs py-2 px-3.5 flex items-center gap-1.5 font-bold cursor-pointer"
@@ -3526,29 +3521,31 @@ export const EventsView: React.FC<EventsViewProps> = ({
             <Plus className="w-3.5 h-3.5" />
             <span>Create event</span>
           </button>
+        }
+      />
 
-          <div className="inline-flex rounded-lg border border-[var(--card-border)] bg-[var(--card)] p-0.5">
-            <button
-              onClick={() => setActiveTab('upcoming')}
-              className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
-                activeTab === 'upcoming'
-                  ? 'bg-[var(--gold)] text-[#090D16] font-bold'
-                  : 'text-[var(--fg-muted)] hover:text-[var(--fg)]'
-              }`}
-            >
-              Upcoming ({upcomingItems.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('past')}
-              className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
-                activeTab === 'past'
-                  ? 'bg-[var(--gold)] text-[#090D16] font-bold'
-                  : 'text-[var(--fg-muted)] hover:text-[var(--fg)]'
-              }`}
-            >
-              Past ({pastItems.length})
-            </button>
-          </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="inline-flex rounded-lg border border-[var(--card-border)] bg-[var(--card)] p-0.5">
+          <button
+            onClick={() => setActiveTab('upcoming')}
+            className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
+              activeTab === 'upcoming'
+                ? 'bg-[var(--gold)] text-[#090D16] font-bold'
+                : 'text-[var(--fg-muted)] hover:text-[var(--fg)]'
+            }`}
+          >
+            Upcoming ({upcomingItems.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('past')}
+            className={`px-3.5 py-1.5 text-xs font-medium rounded-md transition-all cursor-pointer ${
+              activeTab === 'past'
+                ? 'bg-[var(--gold)] text-[#090D16] font-bold'
+                : 'text-[var(--fg-muted)] hover:text-[var(--fg)]'
+            }`}
+          >
+            Past ({pastItems.length})
+          </button>
         </div>
       </div>
 

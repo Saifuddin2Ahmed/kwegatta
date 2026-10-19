@@ -4,6 +4,8 @@ import { Profile, Post } from '../types';
 import { classifyPostWithGemma, db, extractKeywords, intersection, reactToPost, addPostComment, deletePostComment } from '../services/api';
 import { formatTimeAgo, formatWhatsAppUrl } from '../utils';
 import { Avatar } from './Avatar';
+import { PageHeader } from './PageHeader';
+import { HEADER_IMAGES } from '../lib/headerImages';
 
 interface FeedViewProps {
   currentProfile: Profile | null;
@@ -151,7 +153,8 @@ export const FeedView: React.FC<FeedViewProps> = ({
 
   return (
     <div className="kw-container space-y-6 md:space-y-10">
-      
+      <PageHeader title="Community feed" subtitle="Updates and ideas from the community." image={HEADER_IMAGES.feed} />
+
       {/* Create post box */}
       {currentProfile && (
         <div className="p-5 rounded-xl border border-[var(--card-border)] bg-[var(--card)] space-y-3">
