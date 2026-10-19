@@ -6953,6 +6953,8 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
 export const NEW_EVENT_NOTIFY_CHOICES = ['all', 'following', 'off'] as const;
 export type NewEventNotifyChoice = typeof NEW_EVENT_NOTIFY_CHOICES[number];
 export const NEW_EVENT_TAG_MATCH_CAP = 50;
+/** One cap for the whole fan-out: followers fill it first, tag matches take what is left. */
+export const NEW_EVENT_RECIPIENT_CAP = NEW_EVENT_TAG_MATCH_CAP;
 export const NEW_EVENT_DAILY_CAP_PER_MEMBER = 3;
 
 export function getNewEventNotifyChoice(p: any): NewEventNotifyChoice {
@@ -6963,8 +6965,8 @@ export function getNewEventNotifyChoice(p: any): NewEventNotifyChoice {
 const tagKey = (v: any) => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 /**
- * Who hears about a new event: members following the organiser, plus up to
- * NEW_EVENT_TAG_MATCH_CAP members whose interests or skills match the event tags.
+ * Who hears about a new event: members following the organiser first, then members
+ * whose interests or skills match the event tags, NEW_EVENT_RECIPIENT_CAP in total.
  * Each member gets at most NEW_EVENT_DAILY_CAP_PER_MEMBER new-event notifications
  * per UTC day, and their notify_new_events setting is respected.
  */
@@ -6993,7 +6995,7 @@ export function selectNewEventRecipients(item: any, organiserIds: Array<string |
 
     if (followerIds.has(p.id) || (p.account_uid && followerIds.has(p.account_uid))) {
       followers.push(p);
-    } else if (choice === 'all' && eventTags.size > 0 && matched.length < NEW_EVENT_TAG_MATCH_CAP) {
+    } else if (choice === 'all' && eventTags.size > 0 && matched.length < NEW_EVENT_RECIPIENT_CAP) {
       const interests = [
         ...(Array.isArray(p.tags) ? p.tags : []),
         ...(Array.isArray(p.skills) ? p.skills : [])
@@ -7001,7 +7003,7 @@ export function selectNewEventRecipients(item: any, organiserIds: Array<string |
       if (interests.some(t => t && eventTags.has(t))) matched.push(p);
     }
   }
-  return [...followers, ...matched];
+  return [...followers, ...matched].slice(0, NEW_EVENT_RECIPIENT_CAP);
 }
 
 const EVENT_DOUBLE_SUBMIT_MS = 2 * 60 * 1000;
