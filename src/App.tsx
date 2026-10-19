@@ -11,6 +11,7 @@ import { HeroSection, KampalaStorySection } from './components/LivingNetworkHero
 import { Footer } from './components/Footer';
 import { EventsView } from './components/EventsView';
 import { PinnedAnnouncementBar } from './components/PinnedAnnouncementBar';
+import { PageNotFound } from './components/PageNotFound';
 import { Profile, Post, NotificationItem, Follow } from './types';
 import {
   db,
@@ -700,17 +701,14 @@ export default function App() {
               />
             </React.Suspense>
           ) : (
-            <div className="kw-card p-12 text-center space-y-4 max-w-md mx-auto">
-              <h3 className="font-bold text-base text-[var(--fg)]">Page not found</h3>
-              <p className="text-xs text-[var(--fg-muted)]">The requested page does not exist or requires admin authorization.</p>
-              <button onClick={() => navigateTo('home')} className="kw-btn kw-btn-gold text-xs py-2 px-5 font-semibold">
-                Go to Matches
-              </button>
-            </div>
+            <PageNotFound
+              message="The requested page does not exist or requires admin authorization."
+              onGoHome={() => navigateTo(currentProfile ? 'home' : 'people')}
+            />
           )
         ) : activeTab === 'about' ? (
           <React.Suspense fallback={<div className="p-12 text-center"><div className="w-8 h-8 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin mx-auto"></div></div>}>
-            <AboutView onNavigateHome={() => navigateTo('home')} />
+            <AboutView onNavigateHome={() => navigateTo('home')} isSignedIn={Boolean(currentProfile)} />
           </React.Suspense>
         ) : activeTab === 'privacy' ? (
           <React.Suspense fallback={<div className="p-12 text-center"><div className="w-8 h-8 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin mx-auto"></div></div>}>
@@ -750,13 +748,10 @@ export default function App() {
             onToast={showToast}
           />
         ) : (
-          <div className="kw-card p-12 text-center space-y-4 max-w-md mx-auto">
-            <h3 className="font-bold text-base text-[var(--fg)]">Page not found</h3>
-            <p className="text-xs text-[var(--fg-muted)]">The requested member or page does not exist.</p>
-            <button onClick={() => navigateTo('home')} className="kw-btn kw-btn-gold text-xs py-2 px-5 font-semibold">
-              Go to Matches
-            </button>
-          </div>
+          <PageNotFound
+            message="The requested member or page does not exist."
+            onGoHome={() => navigateTo(currentProfile ? 'home' : 'people')}
+          />
         )}
       </main>
 

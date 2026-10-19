@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sun, Moon, Laptop, Bell, Search, X, ChevronDown, User, LogOut, Download } from 'lucide-react';
+import { Sun, Moon, Laptop, Bell, Search, X, ChevronDown, User, LogOut, Download, BookOpen } from 'lucide-react';
 import { Profile } from '../types';
 import { Avatar } from './Avatar';
 import { BrandLogo } from './BrandLogo';
@@ -19,6 +19,14 @@ export const SIGNED_IN_NAV_ITEMS = [
   { id: 'feed', label: 'Feed' },
   { id: 'inbox', label: 'Inbox' }
 ] as const;
+
+// Every control in the top row keeps one line and its width; below 380px the theme
+// toggle leaves the row and lives in the menu instead (avatar menu, or the visitor bar).
+export const HEADER_CONTROL_CLASS = 'h-9 shrink-0 whitespace-nowrap';
+export const THEME_TOGGLE_ROW_CLASS = 'max-[379px]:hidden';
+export const THEME_TOGGLE_MENU_CLASS = 'min-[380px]:hidden';
+
+const THEME_LABELS: Record<ThemePreference, string> = { system: 'System', light: 'Light', dark: 'Dark' };
 
 interface HeaderProps {
   currentProfile: Profile | null;
@@ -133,13 +141,13 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="sticky top-0 z-40 w-full bg-[var(--header-bg)] backdrop-blur-xl border-b border-[var(--card-border)] transition-colors">
-      <div className="max-w-[1200px] mx-auto px-4 md:px-6 h-16 sm:h-[68px] flex items-center justify-between gap-3 sm:gap-4">
+      <div className="max-w-[1200px] mx-auto px-3 min-[380px]:px-4 md:px-6 h-16 sm:h-[68px] flex flex-nowrap items-center justify-between gap-2 min-[380px]:gap-3 sm:gap-4">
         
         {/* LEFT: Logo & Desktop Links (Single Navigation Row) */}
         <div className="flex-shrink-0 flex items-center gap-4 lg:gap-6">
           <button
             onClick={() => onNavigate(currentProfile ? 'home' : 'people')}
-            className="flex items-center gap-2.5 hover:opacity-90 active:scale-[0.98] transition-all focus-visible:ring-2 focus-visible:ring-[var(--gold)] rounded-lg p-0.5 cursor-pointer"
+            className="flex shrink-0 whitespace-nowrap items-center gap-2.5 hover:opacity-90 active:scale-[0.98] transition-all focus-visible:ring-2 focus-visible:ring-[var(--gold)] rounded-lg p-0.5 cursor-pointer"
             aria-label="Kwegatta Home"
           >
             <BrandLogo size="md" showText={true} />
@@ -187,7 +195,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* RIGHT: Search Toggle (Mobile), Theme Switcher, Notifications, Actions */}
-        <div className="flex items-center gap-1.5 sm:gap-2">
+        <div className="flex shrink-0 flex-nowrap items-center gap-1 min-[380px]:gap-1.5 sm:gap-2" data-testid="header-actions">
           {/* Mobile Search Icon */}
           <button
             onClick={() => {
@@ -196,7 +204,7 @@ export const Header: React.FC<HeaderProps> = ({
                 setTimeout(() => mobileSearchInputRef.current?.focus(), 100);
               }
             }}
-            className="md:hidden w-9 h-9 rounded-xl border border-[var(--card-border)] grid place-items-center bg-[var(--btn)] text-[var(--fg-muted)] hover:text-[var(--fg)] hover:bg-[var(--btn-hover)] active:scale-95 transition-all cursor-pointer"
+            className={`md:hidden w-9 ${HEADER_CONTROL_CLASS} rounded-xl border border-[var(--card-border)] grid place-items-center bg-[var(--btn)] text-[var(--fg-muted)] hover:text-[var(--fg)] hover:bg-[var(--btn-hover)] active:scale-95 transition-all cursor-pointer`}
             aria-label="Toggle search"
           >
             <Search className="w-4 h-4" />
@@ -208,7 +216,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={isIosSafari ? () => setShowIosHint(!showIosHint) : handleInstallApp}
-                className="text-[13px] font-semibold py-1.5 px-3 rounded-xl border border-[var(--gold)]/40 bg-[var(--gold-subtle)] text-[var(--fg)] hover:bg-[var(--gold)] hover:text-[#0B1220] active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+                className={`${HEADER_CONTROL_CLASS} text-[13px] font-semibold px-2.5 min-[380px]:px-3 rounded-xl border border-[var(--gold)]/40 bg-[var(--gold-subtle)] text-[var(--fg)] hover:bg-[var(--gold)] hover:text-[#0B1220] active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 shadow-xs`}
                 title="Install app"
               >
                 <Download className="w-3.5 h-3.5" />
@@ -228,7 +236,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Theme Switcher: Cycles System → Light → Dark */}
           <button
             onClick={onCycleTheme}
-            className="w-9 h-9 rounded-xl border border-[var(--card-border)] grid place-items-center bg-[var(--btn)] text-[var(--fg-muted)] hover:text-[var(--fg)] hover:bg-[var(--btn-hover)] active:scale-95 transition-all focus-visible:ring-2 focus-visible:ring-[var(--gold)] cursor-pointer"
+            className={`w-9 ${HEADER_CONTROL_CLASS} ${THEME_TOGGLE_ROW_CLASS} rounded-xl border border-[var(--card-border)] grid place-items-center bg-[var(--btn)] text-[var(--fg-muted)] hover:text-[var(--fg)] hover:bg-[var(--btn-hover)] active:scale-95 transition-all focus-visible:ring-2 focus-visible:ring-[var(--gold)] cursor-pointer`}
             aria-label={`Current theme: ${themePreference}. Click to cycle System, Light, Dark.`}
             title={`Theme: ${themePreference === 'system' ? 'System (follows device)' : themePreference === 'light' ? 'Light' : 'Dark'}`}
           >
@@ -245,7 +253,7 @@ export const Header: React.FC<HeaderProps> = ({
           {currentProfile && (
             <button
               onClick={() => onNavigate('inbox')}
-              className="relative w-9 h-9 rounded-xl border border-[var(--card-border)] grid place-items-center bg-[var(--btn)] text-[var(--fg-muted)] hover:text-[var(--fg)] hover:bg-[var(--btn-hover)] active:scale-95 transition-all focus-visible:ring-2 focus-visible:ring-[var(--gold)] cursor-pointer"
+              className={`relative w-9 ${HEADER_CONTROL_CLASS} rounded-xl border border-[var(--card-border)] grid place-items-center bg-[var(--btn)] text-[var(--fg-muted)] hover:text-[var(--fg)] hover:bg-[var(--btn-hover)] active:scale-95 transition-all focus-visible:ring-2 focus-visible:ring-[var(--gold)] cursor-pointer`}
               aria-label="Notifications"
               title="Inbox & notifications"
             >
@@ -260,11 +268,11 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Signed-out buttons: Sign in + primary Join */}
           {!currentProfile && (
-            <div className="flex items-center gap-1.5 sm:gap-2">
+            <div className="flex shrink-0 flex-nowrap items-center gap-1 min-[380px]:gap-1.5 sm:gap-2">
               <button
                 type="button"
                 onClick={onOpenSignIn}
-                className="text-[13px] font-semibold py-1.5 px-3 rounded-xl border border-[var(--card-border)] bg-[var(--btn)] hover:bg-[var(--btn-hover)] text-[var(--fg)] hover:border-[var(--gold)] active:scale-95 transition-all cursor-pointer shadow-xs"
+                className={`${HEADER_CONTROL_CLASS} inline-flex items-center text-[13px] font-semibold px-2.5 min-[380px]:px-3 rounded-xl border border-[var(--card-border)] bg-[var(--btn)] hover:bg-[var(--btn-hover)] text-[var(--fg)] hover:border-[var(--gold)] active:scale-95 transition-all cursor-pointer shadow-xs`}
               >
                 Sign in
               </button>
@@ -273,7 +281,7 @@ export const Header: React.FC<HeaderProps> = ({
                   if (onJoin) onJoin();
                   else onNavigate('onboard');
                 }}
-                className="kw-btn kw-btn-primary text-[13px] py-1.5 px-3.5 rounded-xl font-bold active:scale-95 shadow-xs cursor-pointer"
+                className={`kw-btn kw-btn-primary ${HEADER_CONTROL_CLASS} inline-flex items-center text-[13px] py-0 px-3 min-[380px]:px-3.5 rounded-xl font-bold active:scale-95 shadow-xs cursor-pointer`}
               >
                 Join
               </button>
@@ -286,7 +294,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={() => setShowProfileMenu(!showProfileMenu)}
-                className="flex items-center gap-1.5 pl-1 pr-2.5 py-1 rounded-full border border-[var(--card-border)] hover:border-[var(--gold)] bg-[var(--btn)] active:scale-95 transition-all cursor-pointer shadow-xs"
+                className={`${HEADER_CONTROL_CLASS} flex items-center gap-1.5 pl-1 pr-2.5 py-0 rounded-full border border-[var(--card-border)] hover:border-[var(--gold)] bg-[var(--btn)] active:scale-95 transition-all cursor-pointer shadow-xs`}
                 title="Profile menu"
                 aria-expanded={showProfileMenu}
               >
@@ -316,6 +324,32 @@ export const Header: React.FC<HeaderProps> = ({
                   <button
                     onClick={() => {
                       setShowProfileMenu(false);
+                      onNavigate('learn');
+                    }}
+                    className="md:hidden w-full text-left px-3.5 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-[var(--fg)] cursor-pointer"
+                    data-testid="menu-learn"
+                  >
+                    <BookOpen className="w-4 h-4 text-[var(--fg-muted)]" />
+                    <span>Learn</span>
+                  </button>
+                  <button
+                    onClick={onCycleTheme}
+                    className={`${THEME_TOGGLE_MENU_CLASS} w-full text-left px-3.5 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-[var(--fg)] cursor-pointer`}
+                    aria-label={`Current theme: ${themePreference}. Click to cycle System, Light, Dark.`}
+                    data-testid="menu-theme"
+                  >
+                    {themePreference === 'system' ? (
+                      <Laptop className="w-4 h-4 text-[var(--fg-muted)]" />
+                    ) : themePreference === 'light' ? (
+                      <Sun className="w-4 h-4 text-amber-500" />
+                    ) : (
+                      <Moon className="w-4 h-4 text-slate-300" />
+                    )}
+                    <span>Theme: {THEME_LABELS[themePreference]}</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowProfileMenu(false);
                       if (onSignOut) onSignOut();
                     }}
                     className="w-full text-left px-3.5 py-2 hover:bg-[var(--bg-subtle)] flex items-center gap-2 text-rose-500 cursor-pointer"
@@ -340,7 +374,7 @@ export const Header: React.FC<HeaderProps> = ({
                 key={link.id}
                 onClick={() => onNavigate(link.id)}
                 aria-current={isActive ? 'page' : undefined}
-                className={`px-3 py-1 rounded-md font-medium transition-all cursor-pointer ${
+                className={`px-3 py-1 rounded-md font-medium whitespace-nowrap transition-all cursor-pointer ${
                   isActive
                     ? 'text-[var(--gold-text)] bg-[var(--gold-subtle)] font-bold underline underline-offset-4'
                     : 'text-[var(--fg-muted)] hover:text-[var(--fg)]'
@@ -350,6 +384,22 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             );
           })}
+          <button
+            type="button"
+            onClick={onCycleTheme}
+            className={`${THEME_TOGGLE_MENU_CLASS} shrink-0 p-1.5 rounded-md text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer`}
+            aria-label={`Current theme: ${themePreference}. Click to cycle System, Light, Dark.`}
+            title={`Theme: ${THEME_LABELS[themePreference]}`}
+            data-testid="visitor-theme"
+          >
+            {themePreference === 'system' ? (
+              <Laptop className="w-4 h-4" />
+            ) : themePreference === 'light' ? (
+              <Sun className="w-4 h-4 text-amber-500" />
+            ) : (
+              <Moon className="w-4 h-4 text-slate-300" />
+            )}
+          </button>
         </div>
       )}
 

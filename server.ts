@@ -15,6 +15,7 @@ import { ISO_COUNTRIES, deriveLocation } from './src/lib/countries';
 import { ROLE_CHOICES, STAGE_CHOICES, INTENT_CHOICES, normalizeIntent } from './src/lib/profileChoices';
 import { normalizeTicketCode, isValidTicketCode, formatTicketCode } from './src/lib/ticketCode';
 import { formatTzLabel } from './src/lib/timezoneLabel';
+import { getEffectiveStartMs, getEffectiveEndMs, getOpportunityDeadlineMs, sortForTab } from './src/lib/eventTiming';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -5396,19 +5397,18 @@ export function computeEventPhase(item: any, nowMs: number = Date.now()): EventP
   if (item?.is_cancelled) {
     return 'past';
   }
-  if (!item?.starts_at || !item?.ends_at) {
-    // Existing events that only have the old text field treat as upcoming until someone sets real times
-    return 'upcoming';
+  if (item?.kind === 'opportunity') {
+    // Opportunities close after a readable deadline; without one they stay open
+    const deadlineMs = getOpportunityDeadlineMs(item);
+    return deadlineMs !== null && nowMs > deadlineMs ? 'past' : 'upcoming';
   }
-  const startMs = new Date(item.starts_at).getTime();
-  const endMs = new Date(item.ends_at).getTime();
-  if (isNaN(startMs) || isNaN(endMs)) {
-    return 'upcoming';
-  }
+  // Effective start: starts_at -> parsed legacy datetime text -> created_at
+  const startMs = getEffectiveStartMs(item);
+  const endMs = getEffectiveEndMs(item);
   if (nowMs < startMs) {
     return 'upcoming';
   }
-  if (nowMs >= startMs && nowMs <= endMs) {
+  if (nowMs <= endMs) {
     return 'live';
   }
   return 'past';
@@ -6212,37 +6212,12 @@ app.get('/api/events', (req: Request, res: Response) => {
     });
   }
 
-  // Sort:
-  // Live items on top, then upcoming soonest first (starts_at or datetime asc),
-  // past items at the end (most recent first)
+  // Sort: upcoming and live by effective start ascending (opportunities by deadline),
+  // past items after them, most recent first
   const now = Date.now();
-  list.sort((a: any, b: any) => {
-    const phaseA = computeEventPhase(a, now);
-    const phaseB = computeEventPhase(b, now);
-
-    // Live events on top
-    if (phaseA === 'live' && phaseB !== 'live') return -1;
-    if (phaseA !== 'live' && phaseB === 'live') return 1;
-
-    // Upcoming before past
-    const isPastA = phaseA === 'past';
-    const isPastB = phaseB === 'past';
-    if (!isPastA && isPastB) return -1;
-    if (isPastA && !isPastB) return 1;
-
-    const timeA = new Date(a.starts_at || a.datetime || a.deadline || a.created_at).getTime();
-    const timeB = new Date(b.starts_at || b.datetime || b.deadline || b.created_at).getTime();
-
-    if (!isPastA) {
-      // Upcoming: soonest first
-      return timeA - timeB;
-    } else {
-      // Past: most recent first
-      const endTimeA = new Date(a.ends_at || a.starts_at || a.datetime || a.created_at).getTime();
-      const endTimeB = new Date(b.ends_at || b.starts_at || b.datetime || b.created_at).getTime();
-      return endTimeB - endTimeA;
-    }
-  });
+  const upcomingList = sortForTab(list.filter((ev: any) => computeEventPhase(ev, now) !== 'past'), 'upcoming');
+  const pastList = sortForTab(list.filter((ev: any) => computeEventPhase(ev, now) === 'past'), 'past');
+  list = [...upcomingList, ...pastList];
 
   const sanitizedList = list.map((ev: any) => {
     const isAllowed = canViewHostContact(ev, callerId, isAdmin);
@@ -7141,21 +7116,63 @@ app.delete('/api/events/:id', async (req: Request, res: Response) => {
     return res.status(403).json({ error: 'Forbidden: You can only delete your own submissions.' });
   }
 
+  // Registered members (not the author) are told the event was removed
+  const authorIds = new Set([item.author_id, callerProfileId, callerId].filter(Boolean));
+  const registeredMemberIds: string[] = Array.from(new Set(
+    (Array.isArray(item.attendee_ids) ? item.attendee_ids : []).filter((attId: any) => attId && !authorIds.has(attId))
+  ));
+
   store.events = (store.events || []).filter((e: any) => e.id !== id);
   await removeDoc('events', id);
+
+  // Cascade: guests, questions and check-ins belonging to this event
+  const deletedGuestIds = (store.event_guests || []).filter((g: any) => g.event_id === id).map((g: any) => g.id);
+  const deletedQuestionIds = (store.event_questions || []).filter((q: any) => q.event_id === id).map((q: any) => q.id);
+  const deletedCheckinIds = (store.event_checkins || []).filter((c: any) => c.event_id === id).map((c: any) => c.id);
+  store.event_guests = (store.event_guests || []).filter((g: any) => g.event_id !== id);
+  store.event_questions = (store.event_questions || []).filter((q: any) => q.event_id !== id);
+  store.event_checkins = (store.event_checkins || []).filter((c: any) => c.event_id !== id);
+  if (deletedGuestIds.length > 0) await batchRemoveDocs('event_guests', deletedGuestIds);
+  if (deletedQuestionIds.length > 0) await batchRemoveDocs('event_questions', deletedQuestionIds);
+  if (deletedCheckinIds.length > 0) await batchRemoveDocs('event_checkins', deletedCheckinIds);
+
+  // No event_id on these notifications: the event no longer exists
+  const kindLabel = item.kind === 'opportunity' ? 'opportunity' : 'event';
+  const notifs: Array<{ id: string; data: any }> = [];
+  for (const memberId of registeredMemberIds) {
+    const notif = {
+      id: 'notif-evdel-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      to_id: memberId,
+      from_id: 'organiser',
+      type: 'digest',
+      body: `The ${kindLabel} "${item.title}" you registered for was removed by the host.`,
+      read: false,
+      created_at: new Date().toISOString()
+    };
+    store.notifications.unshift(notif);
+    notifs.push({ id: notif.id, data: notif });
+  }
+  if (notifs.length > 0) {
+    await batchPersistDocs('notifications', notifs);
+  }
 
   const auditEntry = {
     id: 'audit-' + Date.now(),
     timestamp: new Date().toISOString(),
     action: 'DELETE_EVENT',
-    details: `Deleted ${item.kind}: "${item.title}"`,
+    details: `Deleted ${item.kind}: "${item.title}" (${id}). Notified ${registeredMemberIds.length} member(s); removed ${deletedGuestIds.length} guest(s), ${deletedQuestionIds.length} question(s), ${deletedCheckinIds.length} check-in(s).`,
     admin: isAdmin ? adminInfo.adminName : (item.author_name || 'Author')
   };
   store.audit_log.unshift(auditEntry);
   await persistDoc('audit_log', auditEntry.id, auditEntry);
 
   if (storageMode === 'disk') saveStore(store);
-  return res.json({ success: true, message: 'Event or Opportunity deleted' });
+  return res.json({
+    success: true,
+    message: 'Event or Opportunity deleted',
+    notified: registeredMemberIds.length,
+    removed: { guests: deletedGuestIds.length, questions: deletedQuestionIds.length, checkins: deletedCheckinIds.length }
+  });
 });
 
 // Part 5: Report an event for moderation

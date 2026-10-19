@@ -4,6 +4,7 @@ import { NotificationItem, Profile } from '../types';
 import { formatTimeAgo } from '../utils';
 import { Avatar } from './Avatar';
 import { NotificationModal } from './NotificationModal';
+import { resolveNotificationTarget } from '../lib/notificationTarget';
 
 interface InboxViewProps {
   notifications: NotificationItem[];
@@ -187,11 +188,12 @@ export const InboxView: React.FC<InboxViewProps> = ({
           onViewProfile={onViewProfile}
           onFollowBack={onToggleFollow}
           onOpenRelated={n => {
-            if (n.event_id) {
-              window.location.hash = `#/events/${n.event_id}`;
+            const target = resolveNotificationTarget(n, allProfiles);
+            if (target?.kind === 'event') {
+              window.location.hash = `#/events/${target.id}`;
               window.dispatchEvent(new HashChangeEvent('hashchange'));
-            } else if (n.from_id) {
-              onViewProfile(n.from_id);
+            } else if (target?.kind === 'profile') {
+              onViewProfile(target.id);
             }
           }}
           triggerElement={triggerElementRef.current}

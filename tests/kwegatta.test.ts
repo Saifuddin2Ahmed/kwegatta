@@ -56,12 +56,28 @@ import {
   canInterRender,
   computeEventOgVersionHash,
   injectEventOgIntoHtml,
+  computeEventPhase,
   store
 } from '../server';
 import { validatePasswordStrength } from '../src/services/firebase';
 import { normalizeIntent, parseIntents, toggleChoice, makeFirst } from '../src/lib/profileChoices';
 import { ShareCardModal, avatarSrc } from '../src/components/ShareCardModal';
 import { formatTzLabel } from '../src/lib/timezoneLabel';
+import { Header, HEADER_CONTROL_CLASS } from '../src/components/Header';
+import { MOBILE_SIGNED_IN_TABS } from '../src/components/NavTabs';
+import { NotificationModal } from '../src/components/NotificationModal';
+import { PageNotFound } from '../src/components/PageNotFound';
+import { AboutView } from '../src/components/AboutView';
+import { deleteConfirmMessage, EVENT_KIND_HELP } from '../src/components/EventsView';
+import { resolveNotificationTarget, SYSTEM_SENDER_IDS } from '../src/lib/notificationTarget';
+import {
+  parseLegacyDateMs,
+  getEffectiveStartMs,
+  getSortTimeMs,
+  sortForTab,
+  findRecentDuplicate,
+  normalizeTitle
+} from '../src/lib/eventTiming';
 
 let server: any;
 let baseUrl: string;
@@ -328,8 +344,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.10.3
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.10.3'");
+    // 1. Cache name includes version kwegatta-1.10.4
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.10.4'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -6272,8 +6288,8 @@ describe('Release 1.5.0 Features', () => {
         const swCacheName = match![1];
 
         expect(swCacheName).toBe(`kwegatta-${pkg.version}`);
-        expect(pkg.version).toBe('1.10.3');
-        expect(swCacheName).toBe('kwegatta-1.10.3');
+        expect(pkg.version).toBe('1.10.4');
+        expect(swCacheName).toBe('kwegatta-1.10.4');
       });
 
       it('d) OG_RENDER_VERSION busts image cache', () => {
@@ -6543,9 +6559,296 @@ describe('Release 1.5.0 Features', () => {
   });
 });
 
+describe('Release 1.10.4', () => {
+  const HOUR = 60 * 60 * 1000;
+
+  describe('Author delete with cascade and notification', () => {
+    const eventId = 'ev-1104-delete';
+    const otherEventId = 'ev-1104-keep';
+    const authorId = 'test-member-a-author';
+
+    beforeEach(() => {
+      store.events = (store.events || []).filter((e: any) => e.id !== eventId && e.id !== otherEventId);
+      store.events.push(
+        {
+          id: eventId, kind: 'event', title: 'Delete Me Meetup', description: 'x',
+          author_id: authorId, author_name: 'Author', published: true,
+          starts_at: new Date(Date.now() + 48 * HOUR).toISOString(),
+          ends_at: new Date(Date.now() + 50 * HOUR).toISOString(),
+          attendee_ids: ['test-member-a', 'test-member-b', authorId],
+          created_at: new Date().toISOString()
+        },
+        {
+          id: otherEventId, kind: 'event', title: 'Keep Me Meetup', description: 'x',
+          author_id: authorId, published: true,
+          starts_at: new Date(Date.now() + 72 * HOUR).toISOString(),
+          ends_at: new Date(Date.now() + 74 * HOUR).toISOString(),
+          attendee_ids: [], created_at: new Date().toISOString()
+        }
+      );
+      store.event_guests = [
+        ...(store.event_guests || []).filter((g: any) => !String(g.id).startsWith('g-1104')),
+        { id: 'g-1104-a', event_id: eventId, name: 'Guest A', email: 'a@example.com', status: 'going' },
+        { id: 'g-1104-keep', event_id: otherEventId, name: 'Guest K', email: 'k@example.com', status: 'going' }
+      ];
+      store.event_questions = [
+        ...(store.event_questions || []).filter((q: any) => !String(q.id).startsWith('q-1104')),
+        { id: 'q-1104-a', event_id: eventId, author_id: 'test-member-a', body: 'Parking?' }
+      ];
+      store.event_checkins = [
+        ...(store.event_checkins || []).filter((c: any) => !String(c.id).startsWith('c-1104')),
+        { id: 'c-1104-a', event_id: eventId, member_id: 'test-member-a' }
+      ];
+    });
+
+    it('rejects a member who is not the author', async () => {
+      const res = await fetch(`${baseUrl}/api/events/${eventId}`, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer test-member-b' }
+      });
+      expect(res.status).toBe(403);
+      expect(store.events.some((e: any) => e.id === eventId)).toBe(true);
+    });
+
+    it('deletes, cascades guests/questions/check-ins, notifies registered members without an event link and keeps the audit log', async () => {
+      const notifCountBefore = store.notifications.length;
+      const res = await fetch(`${baseUrl}/api/events/${eventId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${authorId}` }
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.notified).toBe(2);
+      expect(body.removed).toEqual({ guests: 1, questions: 1, checkins: 1 });
+
+      expect(store.events.some((e: any) => e.id === eventId)).toBe(false);
+      expect(store.event_guests.some((g: any) => g.event_id === eventId)).toBe(false);
+      expect(store.event_questions.some((q: any) => q.event_id === eventId)).toBe(false);
+      expect(store.event_checkins.some((c: any) => c.event_id === eventId)).toBe(false);
+      // Other events are untouched
+      expect(store.events.some((e: any) => e.id === otherEventId)).toBe(true);
+      expect(store.event_guests.some((g: any) => g.id === 'g-1104-keep')).toBe(true);
+
+      const newNotifs = store.notifications.slice(0, store.notifications.length - notifCountBefore);
+      const recipients = newNotifs.map((n: any) => n.to_id).sort();
+      expect(recipients).toEqual(['test-member-a', 'test-member-b']);
+      for (const n of newNotifs) {
+        expect(n.event_id).toBeUndefined();
+        expect(n.body).toContain('Delete Me Meetup');
+        expect(resolveNotificationTarget(n, store.profiles)).toBeNull();
+      }
+
+      const audit = store.audit_log.find((a: any) => a.action === 'DELETE_EVENT' && a.details.includes(eventId));
+      expect(audit).toBeDefined();
+    });
+
+    it('confirm dialog text states how many people registered', () => {
+      expect(deleteConfirmMessage(3)).toBe('3 people registered. They will be notified that the event was removed.');
+      expect(deleteConfirmMessage(0)).toBe('0 people registered. They will be notified that the event was removed.');
+      expect(deleteConfirmMessage(1)).toBe('1 person registered. They will be notified that the event was removed.');
+    });
+  });
+
+  describe('Effective start sorting', () => {
+    const created = '2026-10-01T08:00:00.000Z';
+
+    it('parses legacy text dates, inferring the year from created_at', () => {
+      expect(new Date(parseLegacyDateMs('Sat, Nov 14 • 2:00 PM EAT', Date.parse(created))!).toISOString()).toBe('2026-11-14T11:00:00.000Z');
+      expect(parseLegacyDateMs('TBD', Date.parse(created))).toBeNull();
+    });
+
+    it('uses starts_at, then legacy datetime, then created_at', () => {
+      expect(getEffectiveStartMs({ starts_at: '2026-12-01T10:00:00.000Z', datetime: 'Nov 14 2026', created_at: created })).toBe(Date.parse('2026-12-01T10:00:00.000Z'));
+      expect(getEffectiveStartMs({ datetime: 'Sat, Nov 14 • 2:00 PM EAT', created_at: created })).toBe(Date.parse('2026-11-14T11:00:00.000Z'));
+      expect(getEffectiveStartMs({ datetime: 'some time soon', created_at: created })).toBe(Date.parse(created));
+    });
+
+    it('opportunities sort by a readable deadline, else created_at', () => {
+      expect(getSortTimeMs({ kind: 'opportunity', deadline: 'November 1st', created_at: created })).toBe(Date.parse('2026-11-01T20:59:59.999Z'));
+      expect(getSortTimeMs({ kind: 'opportunity', deadline: 'rolling', created_at: created })).toBe(Date.parse(created));
+    });
+
+    it('Upcoming is ascending and Past is descending', () => {
+      const items = [
+        { id: 'late', starts_at: '2026-12-20T10:00:00.000Z', created_at: created },
+        { id: 'legacy', datetime: 'Sat, Nov 14 • 2:00 PM EAT', created_at: created },
+        { id: 'opp', kind: 'opportunity', deadline: '2026-11-01', created_at: created }
+      ];
+      expect(sortForTab(items, 'upcoming').map(i => i.id)).toEqual(['opp', 'legacy', 'late']);
+      expect(sortForTab(items, 'past').map(i => i.id)).toEqual(['late', 'legacy', 'opp']);
+    });
+
+    it('phase: future events are upcoming, cancelled and finished ones are past', () => {
+      const now = Date.parse('2026-10-19T12:00:00.000Z');
+      expect(computeEventPhase({ kind: 'event', datetime: 'Sat, Nov 14 • 2:00 PM EAT', created_at: created }, now)).toBe('upcoming');
+      expect(computeEventPhase({ kind: 'event', datetime: 'Sat, Nov 14 • 2:00 PM EAT', created_at: created, is_cancelled: true }, now)).toBe('past');
+      expect(computeEventPhase({ kind: 'event', starts_at: '2026-10-01T10:00:00.000Z', created_at: created }, now)).toBe('past');
+      expect(computeEventPhase({ kind: 'opportunity', deadline: '2026-10-10', created_at: created }, now)).toBe('past');
+      expect(computeEventPhase({ kind: 'opportunity', deadline: 'November 1st', created_at: created }, now)).toBe('upcoming');
+    });
+
+    it('GET /api/events lists upcoming soonest first and keeps cancelled events after them', async () => {
+      const ids = ['ev-1104-s1', 'ev-1104-s2', 'ev-1104-s3'];
+      store.events = (store.events || []).filter((e: any) => !ids.includes(e.id));
+      const base = { kind: 'event', description: 'x', author_id: 'test-member-a', published: true, created_at: new Date().toISOString() };
+      store.events.push(
+        { ...base, id: 'ev-1104-s1', title: 'S1', starts_at: new Date(Date.now() + 96 * HOUR).toISOString(), ends_at: new Date(Date.now() + 98 * HOUR).toISOString() },
+        { ...base, id: 'ev-1104-s2', title: 'S2', starts_at: new Date(Date.now() + 24 * HOUR).toISOString(), ends_at: new Date(Date.now() + 26 * HOUR).toISOString() },
+        { ...base, id: 'ev-1104-s3', title: 'S3', is_cancelled: true, starts_at: new Date(Date.now() + 12 * HOUR).toISOString(), ends_at: new Date(Date.now() + 14 * HOUR).toISOString() }
+      );
+      const res = await fetch(`${baseUrl}/api/events`);
+      const list = await res.json();
+      const order = list.map((e: any) => e.id).filter((id: string) => ids.includes(id));
+      expect(order).toEqual(['ev-1104-s2', 'ev-1104-s1', 'ev-1104-s3']);
+      expect(list.find((e: any) => e.id === 'ev-1104-s3').phase).toBe('past');
+      store.events = store.events.filter((e: any) => !ids.includes(e.id));
+    });
+  });
+
+  describe('Notification target resolution', () => {
+    const profiles = [{ id: 'real-member' }];
+
+    it('event notifications point at the event', () => {
+      expect(resolveNotificationTarget({ event_id: 'ev-1', from_id: 'moderator' }, profiles)).toEqual({ kind: 'event', id: 'ev-1' });
+    });
+
+    it('a real member sender is a profile target', () => {
+      expect(resolveNotificationTarget({ from_id: 'real-member' }, profiles)).toEqual({ kind: 'profile', id: 'real-member' });
+    });
+
+    it('system senders and unknown ids have no target', () => {
+      for (const id of SYSTEM_SENDER_IDS) {
+        expect(resolveNotificationTarget({ from_id: id }, [...profiles, { id }])).toBeNull();
+      }
+      expect(resolveNotificationTarget({ from_id: 'deleted-member' }, profiles)).toBeNull();
+      expect(resolveNotificationTarget({}, profiles)).toBeNull();
+    });
+
+    it('the modal only shows Open when there is a target', () => {
+      const base = { id: 'n1', to_id: 'me', type: 'digest' as const, body: 'Hello', read: false, created_at: new Date().toISOString() };
+      const { unmount } = render(
+        React.createElement(NotificationModal, {
+          notification: { ...base, from_id: 'moderator' },
+          sender: null, isFollowingSender: false, onClose: () => {}, onViewProfile: () => {}
+        })
+      );
+      expect(screen.queryByText('Open')).toBeNull();
+      unmount();
+      render(
+        React.createElement(NotificationModal, {
+          notification: { ...base, from_id: 'moderator', event_id: 'ev-1' },
+          sender: null, isFollowingSender: false, onClose: () => {}, onViewProfile: () => {}
+        })
+      );
+      expect(screen.getByText('Open')).toBeTruthy();
+      cleanup();
+    });
+
+    it('Page not found offers Back and Go home', () => {
+      const onGoHome = vi.fn();
+      render(React.createElement(PageNotFound, { onGoHome }));
+      expect(screen.getByText('Back')).toBeTruthy();
+      fireEvent.click(screen.getByText('Go home'));
+      expect(onGoHome).toHaveBeenCalled();
+      cleanup();
+    });
+  });
+
+  describe('Duplicate title warning', () => {
+    const now = Date.parse('2026-10-19T12:00:00.000Z');
+    const items = [
+      { id: 'dup-1', author_id: 'author-1', title: 'Flutter Hackday!', created_at: new Date(now - 3 * HOUR).toISOString() },
+      { id: 'old-1', author_id: 'author-1', title: 'Old Meetup', created_at: new Date(now - 30 * HOUR).toISOString() }
+    ];
+
+    it('matches the same author and normalized title within 24 hours', () => {
+      expect(normalizeTitle('  FLUTTER   hackday ')).toBe('flutter hackday');
+      expect(findRecentDuplicate(items, ['author-1'], 'flutter  HACKDAY', now)?.id).toBe('dup-1');
+    });
+
+    it('ignores other authors, other titles and older posts', () => {
+      expect(findRecentDuplicate(items, ['author-2'], 'Flutter Hackday', now)).toBeNull();
+      expect(findRecentDuplicate(items, ['author-1'], 'Flutter Workshop', now)).toBeNull();
+      expect(findRecentDuplicate(items, ['author-1'], 'Old Meetup', now)).toBeNull();
+    });
+
+    it('the create form explains Event and Opportunity in one line each', () => {
+      expect(EVENT_KIND_HELP.event.length).toBeGreaterThan(0);
+      expect(EVENT_KIND_HELP.opportunity.length).toBeGreaterThan(0);
+      expect(EVENT_KIND_HELP.event).not.toContain('\n');
+      expect(EVENT_KIND_HELP.opportunity).not.toContain('\n');
+    });
+  });
+
+  describe('Header and mobile navigation', () => {
+    const headerProps = {
+      unreadCount: 0,
+      themePreference: 'system' as const,
+      onCycleTheme: () => {},
+      searchQuery: '',
+      onSearchChange: () => {},
+      onNavigate: () => {}
+    };
+    const member: any = { id: 'hdr-member', name: 'Hdr Member', headline: 'x', role: 'Developer', created_at: new Date().toISOString() };
+
+    beforeAll(() => {
+      // jsdom has no matchMedia; Header uses it to detect an installed app
+      if (typeof window.matchMedia !== 'function') {
+        (window as any).matchMedia = (query: string) => ({
+          matches: false, media: query, onchange: null,
+          addListener: () => {}, removeListener: () => {},
+          addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false
+        });
+      }
+    });
+
+    it('every top-row header control is no-wrap, shrink-0 and the same height', () => {
+      for (const currentProfile of [null, member]) {
+        const { container, unmount } = render(React.createElement(Header, { ...headerProps, currentProfile }));
+        const actions = container.querySelector('[data-testid="header-actions"]')!;
+        expect(actions.className).toContain('shrink-0');
+        expect(actions.className).toContain('flex-nowrap');
+        const buttons = Array.from(actions.querySelectorAll(':scope > button, :scope > div > button'));
+        expect(buttons.length).toBeGreaterThanOrEqual(3);
+        for (const b of buttons) {
+          for (const cls of HEADER_CONTROL_CLASS.split(' ')) {
+            expect(b.className).toContain(cls);
+          }
+        }
+        unmount();
+      }
+    });
+
+    it('below 380px the theme toggle leaves the row and appears in the menu', () => {
+      const { container } = render(React.createElement(Header, { ...headerProps, currentProfile: member }));
+      const rowToggle = container.querySelector('[data-testid="header-actions"] > button[aria-label^="Current theme"]')!;
+      expect(rowToggle.className).toContain('max-[379px]:hidden');
+      fireEvent.click(screen.getByTitle('Profile menu'));
+      const menuToggle = screen.getByTestId('menu-theme');
+      expect(menuToggle.className).toContain('min-[380px]:hidden');
+      expect(screen.getByTestId('menu-learn')).toBeTruthy();
+      cleanup();
+    });
+
+    it('mobile bottom tabs include Feed as the fifth tab', () => {
+      const ids = MOBILE_SIGNED_IN_TABS.map(t => t.id);
+      expect(ids).toContain('feed');
+      expect(ids.length).toBe(5);
+      expect(ids[4]).toBe('feed');
+      expect(ids).not.toContain('learn');
+    });
+
+    it('About page hides "Back to Matches" for signed-out visitors', () => {
+      const { unmount } = render(React.createElement(AboutView, { onNavigateHome: () => {}, isSignedIn: false }));
+      expect(screen.queryByText('Back to Matches')).toBeNull();
+      unmount();
+      render(React.createElement(AboutView, { onNavigateHome: () => {}, isSignedIn: true }));
+      expect(screen.getAllByText('Back to Matches').length).toBeGreaterThan(0);
+      cleanup();
+    });
+  });
+});
+
 afterAll(() => {
   if (server) server.close();
 });
-
-
-

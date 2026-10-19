@@ -81,6 +81,17 @@ import {
   requestMemberConnect,
   PUBLIC_APP_URL
 } from '../services/api';
+import { findRecentDuplicate, sortForTab } from '../lib/eventTiming';
+
+export const EVENT_KIND_HELP = {
+  event: 'Something people attend at a set date and time, in person or online.',
+  opportunity: 'Something people apply for before a deadline, like a grant, job or hackathon.'
+} as const;
+
+export function deleteConfirmMessage(registeredCount: number): string {
+  const n = Math.max(0, Number(registeredCount) || 0);
+  return `${n} ${n === 1 ? 'person' : 'people'} registered. They will be notified that the event was removed.`;
+}
 
 function isWithinMeetingWindow(item: any): boolean {
   if (!item) return false;
@@ -240,6 +251,12 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+  const [duplicateOf, setDuplicateOf] = useState<EventOpportunityItem | null>(null);
+
+  // Author delete: first tap opens the dialog, second tap inside it deletes
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [deleteArmed, setDeleteArmed] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Events list search
   const [searchQuery, setSearchQuery] = useState('');
@@ -487,8 +504,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
             loadPeopleToMeet(selectedItemId);
           }
         } else {
-          onToast('Event or Opportunity not found');
+          onToast('This event is no longer available');
           setSelectedItemId(null);
+          if (window.location.hash.startsWith('#/events/')) window.location.hash = '#/events';
         }
       })
       .catch(() => {
@@ -583,6 +601,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
   };
 
   const resetForm = () => {
+    setDuplicateOf(null);
     setFormKind('event');
     setFormTitle('');
     setFormDescription('');
@@ -676,7 +695,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
     setIsEditModalOpen(true);
   };
 
-  const handleCreateSubmit = async (e: React.FormEvent) => {
+  const handleCreateSubmit = async (e: React.FormEvent, postAnyway = false) => {
     e.preventDefault();
     if (!currentProfile) {
       onToast('Please join or sign in to create an event');
@@ -780,6 +799,16 @@ export const EventsView: React.FC<EventsViewProps> = ({
     }
 
     setCreateErrors({});
+
+    // Same author + same title within 24 hours: ask before posting a second copy
+    if (!postAnyway) {
+      const duplicate = findRecentDuplicate(items, [currentProfile.id, currentProfile.account_uid], formTitle);
+      if (duplicate) {
+        setDuplicateOf(duplicate);
+        return;
+      }
+    }
+    setDuplicateOf(null);
 
     const payload: any = {
       kind: formKind,
@@ -1006,6 +1035,44 @@ export const EventsView: React.FC<EventsViewProps> = ({
       }
     } catch (err: any) {
       onToast(err.message || 'Failed to cancel event');
+    }
+  };
+
+  const openDeleteDialog = (item: any, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setDeleteTarget(item);
+    setDeleteArmed(false);
+  };
+
+  const closeDeleteDialog = () => {
+    setDeleteTarget(null);
+    setDeleteArmed(false);
+  };
+
+  const handleAuthorDelete = async () => {
+    if (!deleteTarget) return;
+    if (!deleteArmed) {
+      setDeleteArmed(true);
+      return;
+    }
+    setDeleting(true);
+    try {
+      const ok = await deleteEvent(deleteTarget.id);
+      if (!ok) {
+        onToast('Could not delete the event. Please try again.');
+        return;
+      }
+      onToast('Event deleted.');
+      const deletedId = deleteTarget.id;
+      closeDeleteDialog();
+      setItems(prev => prev.filter(it => it.id !== deletedId));
+      if (selectedItemId === deletedId) {
+        setSelectedItemId(null);
+        window.location.hash = '#/events';
+      }
+      loadEventsList();
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -1419,8 +1486,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
     : items;
 
   // Group items into Upcoming and Past
-  const upcomingItems = filteredItems.filter(it => it.phase !== 'past');
-  const pastItems = filteredItems.filter(it => it.phase === 'past');
+  // Upcoming: soonest effective start first. Past (including cancelled): most recent first.
+  const upcomingItems = sortForTab(filteredItems.filter(it => it.phase !== 'past' && !it.is_cancelled), 'upcoming');
+  const pastItems = sortForTab(filteredItems.filter(it => it.phase === 'past' || it.is_cancelled), 'past');
 
   // Render Detailed Item View
   if (selectedItemId && detailedItem) {
@@ -2147,6 +2215,55 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       Cancel event
                     </button>
                   </>
+                )}
+                {isAuthor && (
+                  <button
+                    onClick={e => openDeleteDialog(detailedItem, e)}
+                    className="kw-btn text-xs py-2 px-3 rounded-lg border border-[var(--card-border)] hover:border-rose-500/40 text-rose-400 flex items-center gap-1"
+                    data-testid="author-delete-event"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Delete event
+                  </button>
+                )}
+                {deleteTarget && (
+                  <div
+                    className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="delete-event-title"
+                    onClick={e => {
+                      if (e.target === e.currentTarget) closeDeleteDialog();
+                    }}
+                  >
+                    <div className="kw-card max-w-sm w-full p-6 space-y-4 border-rose-500/40 animate-in fade-in zoom-in-95 duration-150">
+                      <h3 id="delete-event-title" className="font-bold text-sm text-[var(--fg)]">
+                        Delete "{deleteTarget.title}"?
+                      </h3>
+                      <p className="text-xs text-[var(--fg-muted)]" data-testid="delete-event-message">
+                        {deleteConfirmMessage(deleteTarget.attendee_count)}
+                      </p>
+                      <p className="text-xs text-[var(--fg-subtle)]">This cannot be undone.</p>
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={closeDeleteDialog}
+                          className="kw-btn kw-btn-ghost text-xs py-2 px-3.5 border border-[var(--card-border)]"
+                        >
+                          Keep event
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleAuthorDelete}
+                          disabled={deleting}
+                          className="kw-btn text-xs py-2 px-3.5 rounded-lg font-bold bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-60"
+                          data-testid="confirm-delete-event"
+                        >
+                          {deleting ? 'Deleting…' : deleteArmed ? 'Tap again to delete' : 'Delete event'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 )}
 
                 {/* Report Event Link */}
@@ -3709,33 +3826,32 @@ export const EventsView: React.FC<EventsViewProps> = ({
             </div>
 
             <form noValidate onSubmit={handleCreateSubmit} className="space-y-4 text-xs">
-              <div>
-                <label className="font-semibold text-[var(--fg)] block mb-1">What are you creating? *</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setFormKind('event')}
-                    className={`py-2 px-3 rounded-lg border text-xs font-bold transition-colors cursor-pointer ${
-                      formKind === 'event'
-                        ? 'border-[var(--gold)] bg-[var(--gold)] text-[#090D16]'
-                        : 'border-[var(--card-border)] bg-[var(--bg)] text-[var(--fg-muted)]'
-                    }`}
-                  >
-                    Event / Meetup
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormKind('opportunity')}
-                    className={`py-2 px-3 rounded-lg border text-xs font-bold transition-colors cursor-pointer ${
-                      formKind === 'opportunity'
-                        ? 'border-[var(--gold)] bg-[var(--gold)] text-[#090D16]'
-                        : 'border-[var(--card-border)] bg-[var(--bg)] text-[var(--fg-muted)]'
-                    }`}
-                  >
-                    Opportunity / Grant
-                  </button>
+              <fieldset>
+                <legend className="font-semibold text-[var(--fg)] block mb-1">What are you creating? *</legend>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="radiogroup" aria-label="Event or Opportunity">
+                  {([
+                    { kind: 'event', label: 'Event' },
+                    { kind: 'opportunity', label: 'Opportunity' }
+                  ] as const).map(opt => (
+                    <button
+                      key={opt.kind}
+                      type="button"
+                      role="radio"
+                      aria-checked={formKind === opt.kind}
+                      onClick={() => setFormKind(opt.kind)}
+                      data-testid={`kind-${opt.kind}`}
+                      className={`py-2 px-3 rounded-lg border text-left transition-colors cursor-pointer ${
+                        formKind === opt.kind
+                          ? 'border-[var(--gold)] bg-[var(--gold)] text-[#090D16]'
+                          : 'border-[var(--card-border)] bg-[var(--bg)] text-[var(--fg-muted)]'
+                      }`}
+                    >
+                      <span className="block text-xs font-bold">{opt.label}</span>
+                      <span className="block text-[12px] font-normal leading-snug mt-0.5">{EVENT_KIND_HELP[opt.kind]}</span>
+                    </button>
+                  ))}
                 </div>
-              </div>
+              </fieldset>
 
               <div>
                 <label htmlFor="create-title" className="font-semibold text-[var(--fg)] block mb-1">Title *</label>
@@ -3745,6 +3861,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   value={formTitle}
                   onChange={e => {
                     setFormTitle(e.target.value);
+                    if (duplicateOf) setDuplicateOf(null);
                     if (createErrors.title) setCreateErrors(prev => ({ ...prev, title: '' }));
                   }}
                   placeholder="e.g. Flutter Hackday"
@@ -3756,6 +3873,40 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   <p id="create-title-error" className="text-rose-400 text-[11px] mt-1 font-medium" role="alert">
                     {createErrors.title}
                   </p>
+                )}
+                {duplicateOf && (
+                  <div
+                    className="mt-2 p-3 rounded-lg border border-amber-500/40 bg-amber-500/10 space-y-2"
+                    role="alert"
+                    data-testid="duplicate-warning"
+                  >
+                    <p className="text-xs text-[var(--fg)]">
+                      You posted "{duplicateOf.title}" in the last 24 hours. Is this the same one?
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const existingId = duplicateOf.id;
+                          setIsCreateModalOpen(false);
+                          resetForm();
+                          setSelectedItemId(existingId);
+                          window.location.hash = `#/events/${existingId}`;
+                        }}
+                        className="kw-btn kw-btn-gold text-xs py-1.5 px-3 font-semibold"
+                      >
+                        Open it
+                      </button>
+                      <button
+                        type="button"
+                        onClick={e => handleCreateSubmit(e, true)}
+                        disabled={formSubmitting}
+                        className="kw-btn kw-btn-ghost text-xs py-1.5 px-3 border border-[var(--card-border)]"
+                      >
+                        Post anyway
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
 

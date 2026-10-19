@@ -4,6 +4,27 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.4] - 2026-10-19
+
+### Added
+- Hosts can now delete their own event. "Delete event" sits next to Edit and Cancel on the event page. It asks first, shows how many people registered, and needs a second tap to confirm.
+- When an event is deleted, everyone who registered gets a notice that it was removed. Its guest list, questions and check-ins are removed with it. The admin audit log keeps a record.
+- The create form now asks whether you are posting an Event or an Opportunity, with a one-line explanation of each.
+- If you post something with the same title as one of your posts from the last 24 hours, the form asks whether you meant the existing one ("Open it") or want to post again ("Post anyway").
+- Feed is now a tab in the mobile bottom bar, and Learn is in the profile menu on mobile.
+
+### Changed
+- Events are ordered by their real start time. Older events that only have a written date (like "Sat, Nov 14 • 2:00 PM EAT") are now understood too. Upcoming shows the soonest first; Past shows the most recent first. Opportunities are ordered by deadline.
+- Cancelled events, and opportunities whose deadline has passed, now appear only under Past.
+- Notifications only show "Open" when there is something to open, such as an event or a member's profile. Messages from the moderator or the system no longer have a dead "Open" button.
+- Opening a link to an event that was deleted now says "This event is no longer available".
+- The "Page not found" screen now offers "Back" and "Go home".
+- Visitors who are not signed in no longer see "Back to Matches" on the About page.
+
+### Fixed
+- The top bar no longer wraps or scrolls sideways on small phones (320–390px wide). All buttons are the same height. Below 380px the theme switch moves into the menu.
+- Bumped service worker cache to `kwegatta-1.10.4`.
+
 ## [1.10.3] - 2026-10-15
 
 ### Added & Fixed (Release 1.10.3)

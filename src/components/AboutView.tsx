@@ -26,6 +26,8 @@ import { useTeam } from '../hooks/useTeam';
 
 interface AboutViewProps {
   onNavigateHome: () => void;
+  /** Signed-out visitors have no Matches page, so the back links are hidden for them */
+  isSignedIn?: boolean;
 }
 
 const TEAM_MEMBERS = [
@@ -101,7 +103,7 @@ const TEAM_MEMBERS = [
   }
 ];
 
-export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
+export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome, isSignedIn = false }) => {
   const photos = useEventPhotos();
   const { team } = useTeam();
   return (
@@ -110,13 +112,17 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
       {/* 01. Hero Story Header */}
       <section id="about-top" className="space-y-6">
         <div className="flex items-center justify-between gap-4">
-          <button
-            onClick={onNavigateHome}
-            className="inline-flex items-center gap-2 text-xs font-medium text-[var(--fg-muted)] hover:text-[var(--fg)] transition-colors group"
-          >
-            <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-1 transition-transform" />
-            <span>Back to Matches</span>
-          </button>
+          {isSignedIn ? (
+            <button
+              onClick={onNavigateHome}
+              className="inline-flex items-center gap-2 text-xs font-medium text-[var(--fg-muted)] hover:text-[var(--fg)] transition-colors group"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-1 transition-transform" />
+              <span>Back to Matches</span>
+            </button>
+          ) : (
+            <span />
+          )}
           <span className="text-xs font-medium text-[var(--gold-text)] tracking-wide uppercase">
             Open-Source AI Matchmaking
           </span>
@@ -496,12 +502,14 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome }) => {
               <span>Contribute on GitHub</span>
               <ArrowUpRight className="w-3.5 h-3.5 opacity-80" />
             </a>
-            <button
-              onClick={onNavigateHome}
-              className="kw-btn kw-btn-ghost text-xs py-2 px-4"
-            >
-              Back to Matches
-            </button>
+            {isSignedIn && (
+              <button
+                onClick={onNavigateHome}
+                className="kw-btn kw-btn-ghost text-xs py-2 px-4"
+              >
+                Back to Matches
+              </button>
+            )}
           </div>
         </div>
       </section>

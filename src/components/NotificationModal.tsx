@@ -3,6 +3,7 @@ import { X, MessageCircle, UserPlus, Check, User, ExternalLink } from 'lucide-re
 import { NotificationItem, Profile } from '../types';
 import { formatTimeAgo, formatWhatsAppUrl } from '../utils';
 import { Avatar } from './Avatar';
+import { resolveNotificationTarget } from '../lib/notificationTarget';
 
 interface NotificationModalProps {
   notification: NotificationItem | null;
@@ -26,6 +27,8 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
   triggerElement
 }) => {
   const modalRef = useRef<HTMLDivElement>(null);
+  // "Open" only appears when there is somewhere real to go
+  const target = resolveNotificationTarget(notification, sender ? [sender] : []);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -239,7 +242,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
 
           {notification.type !== 'connect' && notification.type !== 'follow' && (
             <>
-              {sender && (
+              {sender && target?.kind !== 'profile' && (
                 <button
                   type="button"
                   onClick={() => {
@@ -253,21 +256,23 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({
                 </button>
               )}
 
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  if (onOpenRelated) {
-                    onOpenRelated(notification);
-                  } else if (sender) {
-                    onViewProfile(sender.id);
-                  }
-                }}
-                className="kw-btn kw-btn-primary text-xs py-2 px-3.5 font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                <span>Open</span>
-              </button>
+              {target && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    if (onOpenRelated) {
+                      onOpenRelated(notification);
+                    } else if (target.kind === 'profile') {
+                      onViewProfile(target.id);
+                    }
+                  }}
+                  className="kw-btn kw-btn-primary text-xs py-2 px-3.5 font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open</span>
+                </button>
+              )}
             </>
           )}
         </div>
