@@ -53,6 +53,7 @@ import {
   fetchEvents,
   fetchEventById,
   rsvpEvent,
+  cancelRsvp,
   createEvent,
   updateEvent,
   cancelEvent,
@@ -518,7 +519,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
       .finally(() => setLoadingDetail(false));
   }, [selectedItemId, currentProfile]);
 
-  const handleRsvp = async (itemId: string) => {
+  const handleRsvp = async (itemId: string, mode: 'toggle' | 'cancel' = 'toggle') => {
     if (!currentProfile) {
       onToast('Please join or sign in to RSVP');
       if (onJoinClick) onJoinClick();
@@ -527,10 +528,11 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
     setRsvpLoading(true);
     try {
-      const res = await rsvpEvent(itemId);
+      const res = mode === 'cancel' ? await cancelRsvp(itemId) : await rsvpEvent(itemId);
       if (res.success) {
         const isWaitlisted = res.status === 'waitlisted' || res.status === 'waitlist';
         const isLeftWaitlist = res.status === 'left_waitlist';
+        const isCancelledRsvp = res.status === 'cancelled' || (mode === 'cancel' && res.status === 'none');
         if (detailedItem && detailedItem.id === itemId) {
           setDetailedItem((prev: any) => {
             if (!prev) return prev;
@@ -568,7 +570,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
         if (isWaitlisted) {
           onToast(`You're #${res.position || 1} on the waitlist — we'll notify you if a spot opens.`);
         } else if (isLeftWaitlist) {
-          onToast('Removed from waitlist.');
+          onToast('You left the waitlist');
+        } else if (isCancelledRsvp) {
+          onToast('Registration cancelled');
         } else {
           onToast(res.is_attending ? "You're attending! Matches updated." : 'RSVP updated.');
         }
@@ -585,6 +589,14 @@ export const EventsView: React.FC<EventsViewProps> = ({
     } finally {
       setRsvpLoading(false);
     }
+  };
+
+  // Confirm step before cancelling a registration or leaving a waitlist
+  const [rsvpCancelTarget, setRsvpCancelTarget] = useState<{ id: string; title: string; waitlist: boolean } | null>(null);
+  const confirmRsvpCancel = async () => {
+    const target = rsvpCancelTarget;
+    setRsvpCancelTarget(null);
+    if (target) await handleRsvp(target.id, 'cancel');
   };
 
   const handleShare = (item: EventOpportunityItem, e?: React.MouseEvent) => {
@@ -1431,6 +1443,39 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const ticketDialogRef = useDialogA11y<HTMLDivElement>(isTicketModalOpen, () => setIsTicketModalOpen(false));
   const venueDialogRef = useDialogA11y<HTMLDivElement>(isVenueQrOpen, () => setIsVenueQrOpen(false));
   const deleteDialogRef = useDialogA11y<HTMLDivElement>(Boolean(deleteTarget), () => closeDeleteDialog());
+  const rsvpCancelDialogRef = useDialogA11y<HTMLDivElement>(Boolean(rsvpCancelTarget), () => setRsvpCancelTarget(null));
+
+  const rsvpCancelDialog = rsvpCancelTarget && (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4" role="dialog" aria-modal="true" aria-labelledby="rsvp-cancel-dialog-title">
+      <div ref={rsvpCancelDialogRef} tabIndex={-1} className="kw-card max-w-sm w-full p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150 outline-none">
+        <h3 id="rsvp-cancel-dialog-title" className="font-bold text-sm text-[var(--fg)]">
+          {rsvpCancelTarget.waitlist
+            ? `Leave the waitlist for ${rsvpCancelTarget.title}?`
+            : `Cancel your registration for ${rsvpCancelTarget.title}?`}
+        </h3>
+        {!rsvpCancelTarget.waitlist && (
+          <p className="text-xs text-[var(--fg-muted)]">Your ticket will stop working and your spot may go to someone on the waitlist.</p>
+        )}
+        <div className="flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            autoFocus
+            onClick={() => setRsvpCancelTarget(null)}
+            className="primer-btn text-xs py-2 px-4 cursor-pointer"
+          >
+            {rsvpCancelTarget.waitlist ? 'Keep my place' : 'Keep my spot'}
+          </button>
+          <button
+            type="button"
+            onClick={confirmRsvpCancel}
+            className="kw-btn text-xs py-2 px-4 rounded-lg font-bold bg-rose-600 text-white hover:bg-rose-500 cursor-pointer"
+          >
+            {rsvpCancelTarget.waitlist ? 'Leave waitlist' : 'Cancel registration'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   // Render Detailed Item View
   if (selectedItemId && detailedItem) {
@@ -1815,7 +1860,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 <button
                   type="button"
                   disabled={rsvpLoading}
-                  onClick={() => handleRsvp(detailedItem.id)}
+                  onClick={() => setRsvpCancelTarget({ id: detailedItem.id, title: detailedItem.title, waitlist: true })}
                   className="kw-btn text-xs py-1 px-3 rounded-lg border border-amber-500/40 text-amber-300 hover:bg-amber-500/20 font-bold cursor-pointer"
                 >
                   Leave waitlist
@@ -1849,7 +1894,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       </button>
                     ) : myWaitlistPos && !isAttending ? (
                       <button
-                        onClick={() => handleRsvp(detailedItem.id)}
+                        onClick={() => setRsvpCancelTarget({ id: detailedItem.id, title: detailedItem.title, waitlist: true })}
                         disabled={rsvpLoading}
                         className="kw-btn px-5 py-2.5 text-xs font-bold rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/40 hover:bg-amber-500/25 transition-all flex items-center gap-2 cursor-pointer"
                       >
@@ -1874,18 +1919,31 @@ export const EventsView: React.FC<EventsViewProps> = ({
                           Full
                         </button>
                       )
+                    ) : isAttending ? (
+                      <>
+                        <span
+                          data-testid="rsvp-going-status"
+                          className="px-5 py-2.5 text-xs font-bold rounded-lg bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 inline-flex items-center gap-2"
+                        >
+                          <Check className="w-4 h-4" />
+                          <span>You're going</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setRsvpCancelTarget({ id: detailedItem.id, title: detailedItem.title, waitlist: false })}
+                          disabled={rsvpLoading}
+                          className="kw-btn px-4 py-2.5 text-xs font-bold rounded-lg border border-rose-500/50 text-rose-400 hover:bg-rose-500/15 transition-all cursor-pointer"
+                        >
+                          Cancel registration
+                        </button>
+                      </>
                     ) : (
                       <button
                         onClick={() => handleRsvp(detailedItem.id)}
                         disabled={rsvpLoading}
-                        className={`kw-btn px-6 py-2.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2 ${
-                          isAttending
-                            ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/30'
-                            : 'kw-btn-gold'
-                        }`}
+                        className="kw-btn kw-btn-gold px-6 py-2.5 text-xs font-bold rounded-lg transition-all flex items-center gap-2"
                       >
-                        {isAttending ? <Check className="w-4 h-4" /> : null}
-                        {isAttending ? "I'm going (RSVP'd)" : "I'm going"}
+                        I'm going
                       </button>
                     )
                   ) : (
@@ -3216,6 +3274,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
           </div>
         )}
 
+        {rsvpCancelDialog}
+
         {/* REPORT MODAL */}
         {isReportModalOpen && reportingItem && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4" role="dialog" aria-modal="true" aria-labelledby="report-event-dialog-title">
@@ -3691,12 +3751,12 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     </span>
                   </div>
 
-                  <div className="flex items-center justify-between pt-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                     <span className="text-[11px] text-[var(--fg-subtle)] truncate">
                       By {item.author_name || 'Community Member'}
                     </span>
 
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
                       {canSeeCardAttendees && (
                         <button
                           type="button"
@@ -3760,15 +3820,22 @@ export const EventsView: React.FC<EventsViewProps> = ({
                             Event ended
                           </button>
                         ) : item.my_waitlist_position && !isAttending ? (
-                          <button
-                            onClick={e => {
-                              e.stopPropagation();
-                              handleRsvp(item.id);
-                            }}
-                            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500/15 text-amber-300 border border-amber-500/40 cursor-pointer"
-                          >
-                            {`Waitlist #${item.my_waitlist_position}`}
-                          </button>
+                          <>
+                            <span className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-500/15 text-amber-300 border border-amber-500/40">
+                              {`Waitlist #${item.my_waitlist_position}`}
+                            </span>
+                            <button
+                              type="button"
+                              disabled={rsvpLoading}
+                              onClick={e => {
+                                e.stopPropagation();
+                                setRsvpCancelTarget({ id: item.id, title: item.title, waitlist: true });
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg text-xs font-bold border border-rose-500/50 text-rose-400 hover:bg-rose-500/15 cursor-pointer"
+                            >
+                              Leave waitlist
+                            </button>
+                          </>
                         ) : isFull && !isAttending ? (
                           item.waitlist_enabled !== false ? (
                             <button
@@ -3788,19 +3855,32 @@ export const EventsView: React.FC<EventsViewProps> = ({
                               Full
                             </button>
                           )
+                        ) : isAttending ? (
+                          <>
+                            <span className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600/20 text-emerald-300 border border-emerald-500/40">
+                              ✓ You're going
+                            </span>
+                            <button
+                              type="button"
+                              disabled={rsvpLoading}
+                              onClick={e => {
+                                e.stopPropagation();
+                                setRsvpCancelTarget({ id: item.id, title: item.title, waitlist: false });
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg text-xs font-bold border border-rose-500/50 text-rose-400 hover:bg-rose-500/15 cursor-pointer"
+                            >
+                              Cancel registration
+                            </button>
+                          </>
                         ) : (
                           <button
                             onClick={e => {
                               e.stopPropagation();
                               handleRsvp(item.id);
                             }}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                              isAttending
-                                ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40'
-                                : 'kw-btn-gold'
-                            }`}
+                            className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer kw-btn-gold"
                           >
-                            {isAttending ? "I'm going ✓" : "I'm going"}
+                            I'm going
                           </button>
                         )
                       ) : (
@@ -4747,6 +4827,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
         onToast={onToast}
         onJoinClick={onJoinClick}
       />
+
+      {rsvpCancelDialog}
 
       {/* REPORT MODAL */}
       {isReportModalOpen && reportingItem && (

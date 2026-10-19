@@ -4,6 +4,24 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.1] - 2026-10-19
+
+### Added
+- After registering for an event, the event page and event card show "✓ You're going" with a clear "Cancel registration" button. A short confirmation ("Keep my spot" or "Cancel registration") comes first, then "Registration cancelled" is shown. If people are waiting, the first person on the waitlist gets the spot as before.
+- People on a waitlist get a "Leave waitlist" button with the same confirmation step.
+- A short "Registration cancelled" email is sent when someone cancels.
+- New setting on the profile edit page: "Notify me about new events" with All matching, Only people I follow, or Off. The default is All matching. Only the member can see their own choice.
+
+### Changed
+- New events no longer notify every member. They notify people who follow the organiser, plus up to 50 members whose interests or skills match the event tags. Each member gets at most 3 new-event notifications a day.
+- Event emails now come from "Kwegatta Events" and have a designed version alongside the plain text: event title, date and time in the event's own timezone (for example "Sat, 14 Nov 2026 · 2:00 PM EAT"), venue or online link, organiser, a large "View your ticket" button and the event page link. The calendar file is still attached. There are no tracking images.
+- Email logs only say whether a message was sent or why it failed, never the address or password.
+- The live server no longer carries build and test tools, which makes each upload much smaller.
+
+### Fixed
+- Tapping the green "I'm going" check a second time could cancel a registration by accident. Cancelling now always asks first, and a repeated cancel can never register someone again.
+- Names, titles and venues with special characters are shown safely in emails.
+
 ## [1.11.0] - 2026-10-19
 
 ### Added

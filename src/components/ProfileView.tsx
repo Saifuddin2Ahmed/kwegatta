@@ -122,6 +122,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [editStatus, setEditStatus] = useState(profile.status || 'Open to projects');
   const [editWhatsApp, setEditWhatsApp] = useState(profile.whatsapp || '');
   const [editHideWhatsApp, setEditHideWhatsApp] = useState(profile.hide_whatsapp || false);
+  const [editNotifyNewEvents, setEditNotifyNewEvents] = useState<'all' | 'following' | 'off'>(profile.notify_new_events || 'all');
   const [editCountry, setEditCountry] = useState(profile.country || '');
   const [editCity, setEditCity] = useState(() => {
     if (profile.city) return profile.city;
@@ -161,6 +162,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     setEditStatus(profile.status || 'Open to projects');
     setEditWhatsApp(profile.whatsapp || '');
     setEditHideWhatsApp(profile.hide_whatsapp || false);
+    setEditNotifyNewEvents(profile.notify_new_events || 'all');
     setEditCountry(profile.country || '');
     setEditCity(
       profile.city
@@ -292,6 +294,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         status: editStatus,
         whatsapp: editWhatsApp.replace(/[^\d+]/g, ''),
         hide_whatsapp: editHideWhatsApp,
+        notify_new_events: editNotifyNewEvents,
         linkedin: editLinkedin.trim(),
         github: editGithub.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\/$/, ''),
         website: editWebsite.trim(),
@@ -1845,6 +1848,19 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       />
                       <span>Visible to other signed-in members</span>
                     </label>
+                  </div>
+                  <div>
+                    <label htmlFor="profile-notify-new-events" className="block text-xs font-semibold text-[var(--fg)] mb-1">Notify me about new events</label>
+                    <select
+                      id="profile-notify-new-events"
+                      value={editNotifyNewEvents}
+                      onChange={e => setEditNotifyNewEvents(e.target.value as 'all' | 'following' | 'off')}
+                      className="primer-input text-xs w-full"
+                    >
+                      <option value="all">All matching</option>
+                      <option value="following">Only people I follow</option>
+                      <option value="off">Off</option>
+                    </select>
                   </div>
                 </div>
               </div>

@@ -1001,11 +1001,12 @@ export function sanitizePublicProfile(p: any, callerAuthUid: string | null, isAd
   const isWhatsAppHidden = Boolean(p.hide_whatsapp && !isSelf);
   const canSeeWhatsApp = Boolean(callerAuthUid && !isWhatsAppHidden);
 
-  const { account_uid, email, blocked_ids, privacy_accepted_at, privacy_version, ...rest } = p;
+  const { account_uid, email, blocked_ids, privacy_accepted_at, privacy_version, notify_new_events, ...rest } = p;
 
   return {
     ...rest,
     ...(canSeeEmail && email ? { email } : {}),
+    ...(isSelf ? { notify_new_events: getNewEventNotifyChoice(p) } : {}),
     ...(canSeeEmail && account_uid ? { account_uid } : {}),
     ...(isSelf && blocked_ids ? { blocked_ids } : {}),
     avatar: p.avatar && p.avatar.startsWith('data:') ? `/api/avatar/${p.id}` : (p.avatar || ''),
@@ -6057,15 +6058,143 @@ export function setMailSenderForTest(fn: ((mailOptions: any) => Promise<any>) | 
 
 let dailyEmailDateKey = '';
 let dailyEmailCount = 0;
+const DAILY_EMAIL_LIMIT = 400;
 
-export async function sendEventConfirmationEmail(
+export const EMAIL_FROM_NAME = 'Kwegatta Events';
+
+/** "Kwegatta Events <user@host>", or '' when SMTP is not configured. */
+export function buildEmailFrom(smtpUser: string): string {
+  const user = String(smtpUser || '').trim();
+  return user ? `"${EMAIL_FROM_NAME}" <${user}>` : '';
+}
+
+/** Short reason for logs: error code or message with any address or secret removed. */
+export function emailFailureReason(err: any): string {
+  const raw = String(err?.code || err?.message || err || 'unknown error');
+  let reason = raw.replace(/[^\s<>"']+@[^\s<>"']+/g, '[address]');
+  const pass = process.env.SMTP_PASS?.trim();
+  if (pass) reason = reason.split(pass).join('[secret]');
+  return reason.slice(0, 200);
+}
+
+/** "Sat, 14 Nov 2026 · 2:00 PM EAT" in the event's own timezone. */
+export function formatEmailEventDate(item: any): string {
+  const raw = item?.starts_at || item?.datetime || '';
+  const d = raw ? new Date(raw) : null;
+  if (!d || isNaN(d.getTime())) return 'See event page';
+  const tz = String(item?.timezone || '').trim() || 'Africa/Kampala';
+  const fmt = (timeZone: string) => {
+    const parts = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone }).formatToParts(d);
+    const get = (t: string) => parts.find(p => p.type === t)?.value || '';
+    const time = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone })
+      .format(d)
+      .replace(/ | /g, ' ');
+    return `${get('weekday')}, ${get('day')} ${get('month')} ${get('year')} · ${time}`;
+  };
+  try {
+    return `${fmt(tz)} ${formatTzLabel(tz, d)}`;
+  } catch (_) {
+    return `${fmt('UTC')} UTC`;
+  }
+}
+
+function safeEmailHref(url: any): string {
+  const s = String(url || '').trim();
+  return /^https?:\/\/[^\s"'<>]+$/i.test(s) ? s : '';
+}
+
+export type EventEmailKind = 'confirmation' | 'promotion' | 'cancelled';
+
+/** Builds subject, plain-text and HTML bodies. All user text is escaped in the HTML part. */
+export function buildEventEmail(
+  kind: EventEmailKind,
   item: any,
-  recipientEmail: string | undefined,
   recipientName: string,
-  ticketUrl: string,
-  isPromotion: boolean = false
-): Promise<boolean> {
-  if (!recipientEmail || !recipientEmail.includes('@')) return false;
+  ticketUrl: string
+): { subject: string; text: string; html: string } {
+  const title = String(item?.title || 'Event');
+  const name = String(recipientName || '').trim() || 'there';
+  const when = formatEmailEventDate(item);
+  const isOnline = item?.format === 'online';
+  const joinLink = isOnline ? safeEmailHref(item?.join_link) : '';
+  const venue = isOnline ? '' : String(item?.venue || item?.location || 'See event page');
+  const organiser = String(item?.author_name || item?.created_by || '').trim();
+  const eventUrl = `${getPublicAppUrl()}/e/${encodeURIComponent(String(item?.id || ''))}`;
+  const ticketHref = safeEmailHref(ticketUrl) || eventUrl;
+
+  const subject = kind === 'promotion'
+    ? `A spot opened up: ${title}`
+    : kind === 'cancelled'
+    ? `Registration cancelled: ${title}`
+    : `Confirmation: ${title}`;
+  const lead = kind === 'promotion'
+    ? `A spot opened up. You're now registered for "${title}" on Kwegatta.`
+    : kind === 'cancelled'
+    ? `Your registration for "${title}" on Kwegatta has been cancelled. Your ticket is no longer valid.`
+    : `You are registered for "${title}" on Kwegatta.`;
+  const placeText = isOnline
+    ? `Online link: ${joinLink || 'Provided on event page'}`
+    : `Venue: ${venue}`;
+  const footer = 'You received this because you registered on Kwegatta. Reply to contact the organiser.';
+
+  const text = [
+    `Hi ${name},`,
+    '',
+    lead,
+    `Date & Time: ${when}`,
+    placeText,
+    ...(organiser ? [`Organiser: ${organiser}`] : []),
+    '',
+    `Event page: ${eventUrl}`,
+    ...(kind === 'cancelled'
+      ? ['Changed your mind? You can register again from the event page while spots are open.']
+      : [`View your ticket: ${ticketHref}`, '', 'An .ics calendar invite is attached to this email.']),
+    '',
+    footer
+  ].join('\n');
+
+  const e = escapeHtml;
+  const row = (label: string, valueHtml: string) =>
+    `<tr><td style="padding:4px 0;color:#6b7280;font-size:13px;width:90px;vertical-align:top;">${label}</td><td style="padding:4px 0;color:#111827;font-size:14px;">${valueHtml}</td></tr>`;
+  const placeHtml = isOnline
+    ? (joinLink ? `<a href="${e(joinLink)}" style="color:#0f766e;word-break:break-all;">${e(joinLink)}</a>` : 'Provided on event page')
+    : e(venue);
+  const button = (href: string, label: string) =>
+    `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 8px;"><tr><td style="border-radius:8px;background:#0f766e;"><a href="${e(href)}" style="display:inline-block;padding:14px 28px;font-size:16px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:8px;">${label}</a></td></tr></table>`;
+
+  const html = [
+    '<!doctype html>',
+    '<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + e(subject) + '</title></head>',
+    '<body style="margin:0;padding:0;background:#f3f4f6;">',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f3f4f6;"><tr><td align="center" style="padding:16px 8px;">',
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background:#ffffff;border-radius:12px;font-family:Arial,Helvetica,sans-serif;">',
+    '<tr><td style="padding:20px 24px;border-bottom:1px solid #e5e7eb;"><span style="font-size:22px;font-weight:bold;color:#0f766e;letter-spacing:0.5px;">Kwegatta</span></td></tr>',
+    '<tr><td style="padding:24px;">',
+    `<p style="margin:0 0 12px;font-size:15px;color:#111827;">Hi ${e(name)},</p>`,
+    `<p style="margin:0 0 16px;font-size:15px;color:#374151;line-height:1.5;">${e(lead)}</p>`,
+    `<h1 style="margin:0 0 12px;font-size:20px;line-height:1.3;color:#111827;">${e(title)}</h1>`,
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">',
+    row('When', e(when)),
+    row(isOnline ? 'Online' : 'Venue', placeHtml),
+    ...(organiser ? [row('Organiser', e(organiser))] : []),
+    '</table>',
+    kind === 'cancelled'
+      ? button(eventUrl, 'View event')
+      : button(ticketHref, 'View your ticket'),
+    kind === 'cancelled'
+      ? '<p style="margin:8px 0 0;font-size:13px;color:#6b7280;">Changed your mind? You can register again from the event page while spots are open.</p>'
+      : '<p style="margin:8px 0 0;font-size:13px;color:#6b7280;">Add to calendar: open the attached event.ics file.</p>',
+    `<p style="margin:12px 0 0;font-size:13px;color:#6b7280;">Event page: <a href="${e(eventUrl)}" style="color:#0f766e;word-break:break-all;">${e(eventUrl)}</a></p>`,
+    '</td></tr>',
+    `<tr><td style="padding:16px 24px;border-top:1px solid #e5e7eb;font-size:12px;color:#9ca3af;line-height:1.5;">${e(footer)}</td></tr>`,
+    '</table></td></tr></table></body></html>'
+  ].join('');
+
+  return { subject, text, html };
+}
+
+/** Sends one message with the shared daily cap. Logs only "[Email] sent" or "[Email] failed: <reason>". */
+async function deliverEventEmail(mailOptions: any): Promise<boolean> {
   const smtpUser = process.env.SMTP_USER ? process.env.SMTP_USER.trim() : '';
   const smtpPass = process.env.SMTP_PASS ? process.env.SMTP_PASS.trim() : '';
   if (!smtpUser || !smtpPass) {
@@ -6078,80 +6207,76 @@ export async function sendEventConfirmationEmail(
     dailyEmailDateKey = todayKey;
     dailyEmailCount = 0;
   }
-  if (dailyEmailCount >= 400) {
+  if (dailyEmailCount >= DAILY_EMAIL_LIMIT) {
     return false;
   }
 
-  const tz = item.timezone || 'UTC';
-  let formattedDate = item.starts_at || item.datetime || '';
+  const fullOptions = { ...mailOptions, from: buildEmailFrom(smtpUser) };
   try {
-    if (formattedDate) {
-      formattedDate = new Intl.DateTimeFormat('en-GB', {
-        dateStyle: 'full',
-        timeStyle: 'short',
-        timeZone: tz
-      }).format(new Date(formattedDate)) + ` (${tz})`;
+    if (isTestEnv() && testMailSender) {
+      await testMailSender(fullOptions);
+    } else {
+      const smtpHost = process.env.SMTP_HOST?.trim() || 'smtp.gmail.com';
+      const smtpPort = Number(process.env.SMTP_PORT) || 465;
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass
+        }
+      });
+      await transporter.sendMail(fullOptions);
     }
-  } catch (_) {}
+    dailyEmailCount++;
+    console.log('[Email] sent');
+    return true;
+  } catch (err: any) {
+    console.warn(`[Email] failed: ${emailFailureReason(err)}`);
+    return false;
+  }
+}
 
-  const placeLine = item.format === 'online'
-    ? `Online link: ${item.join_link || 'Provided on event page'}`
-    : `Venue: ${item.venue || item.location || 'See event page'}`;
-
-  const publicEventUrl = `${getPublicAppUrl()}/e/${item.id}`;
-  const icsContent = generateEventIcsContent(item);
-  const mailOptions: any = {
-    from: smtpUser,
+export async function sendEventConfirmationEmail(
+  item: any,
+  recipientEmail: string | undefined,
+  recipientName: string,
+  ticketUrl: string,
+  isPromotion: boolean = false
+): Promise<boolean> {
+  if (!recipientEmail || !recipientEmail.includes('@')) return false;
+  const { subject, text, html } = buildEventEmail(isPromotion ? 'promotion' : 'confirmation', item, recipientName, ticketUrl);
+  return deliverEventEmail({
     to: recipientEmail,
     ...(item.contact_email ? { replyTo: item.contact_email } : {}),
-    subject: isPromotion ? `A spot opened up: ${item.title}` : `Confirmation: ${item.title}`,
-    text: [
-      `Hi ${recipientName || 'there'},`,
-      '',
-      isPromotion
-        ? `A spot opened up — you're now registered for "${item.title}" on Kwegatta.`
-        : `You are registered for "${item.title}" on Kwegatta.`,
-      `Date & Time: ${formattedDate}`,
-      placeLine,
-      '',
-      `Event page: ${publicEventUrl}`,
-      `View your ticket: ${ticketUrl}`,
-      '',
-      'An .ics calendar invite is attached to this email.'
-    ].join('\n'),
+    subject,
+    text,
+    html,
     attachments: [
       {
         filename: 'event.ics',
-        content: icsContent,
+        content: generateEventIcsContent(item),
         contentType: 'text/calendar; charset=utf-8'
       }
     ]
-  };
+  });
+}
 
-  try {
-    if (isTestEnv() && testMailSender) {
-      await testMailSender(mailOptions);
-      dailyEmailCount++;
-      return true;
-    }
-    const smtpHost = process.env.SMTP_HOST?.trim() || 'smtp.gmail.com';
-    const smtpPort = Number(process.env.SMTP_PORT) || 465;
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpPort === 465,
-      auth: {
-        user: smtpUser,
-        pass: smtpPass
-      }
-    });
-    await transporter.sendMail(mailOptions);
-    dailyEmailCount++;
-    return true;
-  } catch (err: any) {
-    console.warn('[Email] Could not send event confirmation email:', err?.message || err);
-    return false;
-  }
+export async function sendRegistrationCancelledEmail(
+  item: any,
+  recipientEmail: string | undefined,
+  recipientName: string
+): Promise<boolean> {
+  if (!recipientEmail || !recipientEmail.includes('@')) return false;
+  const { subject, text, html } = buildEventEmail('cancelled', item, recipientName, '');
+  return deliverEventEmail({
+    to: recipientEmail,
+    ...(item.contact_email ? { replyTo: item.contact_email } : {}),
+    subject,
+    text,
+    html
+  });
 }
 
 export async function promoteFromWaitlist(eventOrId: string | any): Promise<number> {
@@ -6621,7 +6746,22 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
   const attIndex = item.attendee_ids.findIndex((aId: string) => aId === memberId || aId === callerId);
   const waitIndex = item.waitlist_ids.findIndex((wId: string) => wId === memberId || wId === callerId);
 
-  let rsvpStatus: 'going' | 'waitlisted' | 'left_waitlist' | 'none' = 'none';
+  // Without an action the route toggles. action 'cancel' only ever removes, so a repeated
+  // tap on the cancel button can never register the member again.
+  const action = req.body?.action === 'cancel' ? 'cancel' : 'toggle';
+  if (action === 'cancel' && attIndex < 0 && waitIndex < 0) {
+    const regGuests = (store.event_guests || []).filter((g: any) => g.event_id === id && g.status !== 'waitlist').length;
+    return res.json({
+      success: true,
+      status: 'none',
+      is_attending: false,
+      attendee_count: item.attendee_ids.length + regGuests,
+      waitlist_count: getCombinedWaitlistQueue(item).length,
+      my_waitlist_position: null
+    });
+  }
+
+  let rsvpStatus: 'going' | 'waitlisted' | 'left_waitlist' | 'cancelled' | 'none' = 'none';
   let waitlistPosition: number | null = null;
   let freedConfirmedSeat = false;
 
@@ -6650,7 +6790,7 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
     if (Array.isArray(item.match_optout_ids)) {
       item.match_optout_ids = item.match_optout_ids.filter((optId: string) => optId !== memberId && optId !== callerId);
     }
-    rsvpStatus = 'none';
+    rsvpStatus = 'cancelled';
     freedConfirmedSeat = true;
   } else if (waitIndex >= 0) {
     item.waitlist_ids.splice(waitIndex, 1);
@@ -6713,7 +6853,7 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
   }
   if (storageMode === 'disk') saveStore(store);
 
-  if (rsvpStatus === 'going') {
+  if (rsvpStatus === 'going' || freedConfirmedSeat) {
     let memberEmail = callerProfile?.email || (req as any).authUser?.email || '';
     if (!memberEmail && adminAuth && callerId) {
       try {
@@ -6721,9 +6861,13 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
         if (u?.email) memberEmail = u.email;
       } catch (_) {}
     }
-    const appBase = getPublicAppUrl();
-    const ticketUrl = `${appBase}/#/events/${item.id}/ticket`;
-    await sendEventConfirmationEmail(item, memberEmail, callerProfile?.name || 'Member', ticketUrl);
+    if (rsvpStatus === 'going') {
+      const appBase = getPublicAppUrl();
+      const ticketUrl = `${appBase}/#/events/${item.id}/ticket`;
+      await sendEventConfirmationEmail(item, memberEmail, callerProfile?.name || 'Member', ticketUrl);
+    } else if (item.kind !== 'opportunity') {
+      await sendRegistrationCancelledEmail(item, memberEmail, callerProfile?.name || 'Member');
+    }
   }
 
   const regGuestCountAfter = (store.event_guests || []).filter(
@@ -6741,6 +6885,60 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
     my_waitlist_position: rsvpStatus === 'waitlisted' ? waitlistPosition : null
   });
 });
+
+export const NEW_EVENT_NOTIFY_CHOICES = ['all', 'following', 'off'] as const;
+export type NewEventNotifyChoice = typeof NEW_EVENT_NOTIFY_CHOICES[number];
+export const NEW_EVENT_TAG_MATCH_CAP = 50;
+export const NEW_EVENT_DAILY_CAP_PER_MEMBER = 3;
+
+export function getNewEventNotifyChoice(p: any): NewEventNotifyChoice {
+  const v = p?.notify_new_events;
+  return (NEW_EVENT_NOTIFY_CHOICES as readonly string[]).includes(v) ? v : 'all';
+}
+
+const tagKey = (v: any) => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/**
+ * Who hears about a new event: members following the organiser, plus up to
+ * NEW_EVENT_TAG_MATCH_CAP members whose interests or skills match the event tags.
+ * Each member gets at most NEW_EVENT_DAILY_CAP_PER_MEMBER new-event notifications
+ * per UTC day, and their notify_new_events setting is respected.
+ */
+export function selectNewEventRecipients(item: any, organiserIds: Array<string | null | undefined>, nowMs: number = Date.now()): any[] {
+  const organisers = new Set(organiserIds.filter((x): x is string => Boolean(x)));
+  const followerIds = new Set(
+    (store.follows || []).filter((f: any) => organisers.has(f.following_id)).map((f: any) => f.follower_id)
+  );
+  const eventTags = new Set((Array.isArray(item?.tags) ? item.tags : []).map(tagKey).filter(Boolean));
+
+  const todayKey = new Date(nowMs).toISOString().slice(0, 10);
+  const sentToday = new Map<string, number>();
+  for (const n of store.notifications || []) {
+    if (n?.source !== 'new_event' || String(n.created_at || '').slice(0, 10) !== todayKey) continue;
+    sentToday.set(n.to_id, (sentToday.get(n.to_id) || 0) + 1);
+  }
+
+  const followers: any[] = [];
+  const matched: any[] = [];
+  for (const p of store.profiles || []) {
+    if (!p?.id || p.hidden || p.suspended) continue;
+    if (organisers.has(p.id) || (p.account_uid && organisers.has(p.account_uid))) continue;
+    const choice = getNewEventNotifyChoice(p);
+    if (choice === 'off') continue;
+    if ((sentToday.get(p.id) || 0) >= NEW_EVENT_DAILY_CAP_PER_MEMBER) continue;
+
+    if (followerIds.has(p.id) || (p.account_uid && followerIds.has(p.account_uid))) {
+      followers.push(p);
+    } else if (choice === 'all' && eventTags.size > 0 && matched.length < NEW_EVENT_TAG_MATCH_CAP) {
+      const interests = [
+        ...(Array.isArray(p.tags) ? p.tags : []),
+        ...(Array.isArray(p.skills) ? p.skills : [])
+      ].map(tagKey);
+      if (interests.some(t => t && eventTags.has(t))) matched.push(p);
+    }
+  }
+  return [...followers, ...matched];
+}
 
 const EVENT_DOUBLE_SUBMIT_MS = 2 * 60 * 1000;
 
@@ -6930,20 +7128,20 @@ app.post('/api/events', async (req: Request, res: Response) => {
   if (!store.events) store.events = [];
   store.events.unshift(item);
 
-  // Broadcast notification to community members
+  // Notify followers of the organiser and members whose interests match the tags
   const notifBody = kind === 'event'
     ? `📅 New Event: ${item.title}`
     : `💡 New Opportunity (${item.opportunity_type || 'General'}): ${item.title}`;
 
   const newNotifs: Array<{ id: string; data: any }> = [];
   const notifItems: any[] = [];
-  for (const p of store.profiles) {
-    if (p.hidden || p.suspended || p.id === authorId) continue;
+  for (const p of selectNewEventRecipients(item, [authorId, callerId, callerProfile?.id])) {
     const notif = {
       id: 'notif-ev-' + Date.now() + '-' + crypto.randomBytes(5).toString('hex'),
       to_id: p.id,
       from_id: 'organiser',
       type: 'digest',
+      source: 'new_event',
       body: notifBody,
       event_id: item.id,
       link: `${getPublicAppUrl()}/e/${item.id}`,
@@ -9960,6 +10158,7 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
       custom_links: sanitizeCustomLinks(raw.custom_links),
       whatsapp: sanitizeText(raw.whatsapp, 30).replace(/[^0-9+]/g, ''),
       hide_whatsapp: Boolean(raw.hide_whatsapp),
+      ...((NEW_EVENT_NOTIFY_CHOICES as readonly string[]).includes(raw.notify_new_events) ? { notify_new_events: raw.notify_new_events } : {}),
       avatar: resolveAvatar(raw.avatar, existingProfile?.avatar || ''),
       status: sanitizeText(raw.status, 100),
       is_demo: isAdmin ? Boolean(raw.is_demo) : Boolean(existingProfile?.is_demo),
@@ -10351,6 +10550,9 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
     }
     if (patch.hide_whatsapp !== undefined) {
       patch.hide_whatsapp = Boolean(patch.hide_whatsapp);
+    }
+    if (patch.notify_new_events !== undefined && !(NEW_EVENT_NOTIFY_CHOICES as readonly string[]).includes(patch.notify_new_events)) {
+      delete patch.notify_new_events;
     }
   }
 

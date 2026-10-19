@@ -16,7 +16,7 @@ The Kwegatta backend exposes a set of REST endpoints for member matchmaking, Gem
 | `POST` | `/api/ai/ask-kwegatta` | Member (Signed-in) | Natural language search across active members | `server.ts:1860` |
 | `GET` | `/api/events` | Anyone / Member | Upcoming and past events & opportunities | `server.ts:2971` |
 | `GET` | `/api/events/:id` | Anyone / Member | Event detail, attendees (names/photos only), suggested matches | `server.ts:2996` |
-| `POST` | `/api/events/:id/rsvp` | Member (Signed-in) | Toggle attendance ("I'm going" / "Interested") | `server.ts:3080` |
+| `POST` | `/api/events/:id/rsvp` | Member (Signed-in) | Toggle attendance ("I'm going" / "Interested"). Body `{ "action": "cancel" }` only cancels a registration or leaves the waitlist and never registers | `server.ts:3080` |
 | `POST` | `/api/events` | Admin Only | Create new event or opportunity (notifies members) | `server.ts:3121` |
 | `PATCH` | `/api/events/:id` | Admin Only | Edit or publish/unpublish event or opportunity | `server.ts:3196` |
 | `DELETE` | `/api/events/:id` | Admin Only | Delete or unpublish event or opportunity | `server.ts:3262` |

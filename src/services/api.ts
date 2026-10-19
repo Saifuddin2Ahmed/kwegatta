@@ -1136,10 +1136,10 @@ export async function fetchEventById(id: string, guestToken?: string): Promise<a
 
 export async function rsvpEvent(
   id: string,
-  opts?: { show_in_people_to_meet?: boolean; match_optout?: boolean }
+  opts?: { show_in_people_to_meet?: boolean; match_optout?: boolean; action?: 'cancel' }
 ): Promise<{
   success: boolean;
-  status?: 'going' | 'waitlisted' | 'waitlist' | 'left_waitlist' | 'none';
+  status?: 'going' | 'waitlisted' | 'waitlist' | 'left_waitlist' | 'cancelled' | 'none';
   position?: number | null;
   is_attending: boolean;
   attendee_count: number;
@@ -1157,6 +1157,11 @@ export async function rsvpEvent(
     throw new Error(data.error || 'Failed to update RSVP');
   }
   return await res.json();
+}
+
+/** Cancels a registration or leaves the waitlist. Never registers, even if repeated. */
+export function cancelRsvp(id: string) {
+  return rsvpEvent(id, { action: 'cancel' });
 }
 
 export async function fetchPeopleToMeet(eventId: string): Promise<{ people: any[]; is_host_or_admin?: boolean; opted_in_count?: number; message?: string }> {

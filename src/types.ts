@@ -73,6 +73,8 @@ export interface Profile {
   institution?: string;
   whatsapp?: string;
   hide_whatsapp?: boolean;
+  /** Which new events this member hears about: 'all' matching, 'following' only, or 'off'. */
+  notify_new_events?: 'all' | 'following' | 'off';
   has_whatsapp?: boolean;
   avatar?: string;
   status?: string;

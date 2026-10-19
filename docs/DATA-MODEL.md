@@ -104,6 +104,7 @@ export interface NotificationItem {
   from_id?: string;               // Sender member ID (if applicable)
   type: 'match' | 'follow' | 'connect' | 'digest';
   body: string;                   // Descriptive notification text
+  source?: 'new_event';           // Set on new-event notices (used for the 3-per-day limit)
   read: boolean;                  // Unread status indicator
   created_at: string;             // ISO-8601 timestamp
 }
