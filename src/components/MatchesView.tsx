@@ -6,22 +6,18 @@ import {
   AlertCircle,
   RefreshCw,
   Lightbulb,
-  ExternalLink,
-  QrCode,
   Check,
   UserPlus,
   Share2,
   Copy,
   Users,
-  Compass,
-  ArrowRight
+  Compass
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import { Profile, MatchResult } from '../types';
 import { matchCandidatesWithGemma, calculateKeywordMatches, db, APP_NAME, requestMemberConnect } from '../services/api';
 import { formatWhatsAppUrl, generateQrCodeDataUrl } from '../utils';
 import { MatchOverlapAvatars } from './MatchOverlapAvatars';
-import { Avatar } from './Avatar';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 
 interface MatchesViewProps {
   currentProfile: Profile;
@@ -52,6 +48,7 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteQrDataUrl, setInviteQrDataUrl] = useState('');
   const [copiedInvite, setCopiedInvite] = useState(false);
+  const inviteDialogRef = useDialogA11y<HTMLDivElement>(showInviteModal, () => setShowInviteModal(false));
 
   const inviteUrl = `https://kwegatta.ai.studio/#/u/${currentProfile.id}`;
 
@@ -74,13 +71,18 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
         // ignore
       }
 
-      confetti({
-        particleCount: 40,
-        spread: 60,
-        origin: { y: 0.65 },
-        colors: ['#F5B700', '#14B8A6', '#FFFFFF', '#3B82F6'],
-        disableForReducedMotion: true
-      });
+      // Loaded on demand so confetti stays out of the main bundle
+      import('canvas-confetti')
+        .then(({ default: confetti }) =>
+          confetti({
+            particleCount: 40,
+            spread: 60,
+            origin: { y: 0.65 },
+            colors: ['#F5B700', '#14B8A6', '#FFFFFF', '#3B82F6'],
+            disableForReducedMotion: true
+          })
+        )
+        .catch(() => {});
     }
   };
 
@@ -206,11 +208,11 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
           <AlertCircle className="w-4 h-4 text-[var(--attention)] flex-shrink-0 mt-0.5" />
           <div className="flex-1 space-y-1">
             <p>
-              <span className="font-semibold text-[var(--attention)]">Keyword Matching Active:</span>{' '}
-              {errorMessage || 'Gemma is currently busy'}. Results are calculated based on complementary skills.
+              <span className="font-semibold text-[var(--attention)]">Quick matches:</span>{' '}
+              Gemma is not available right now, so these matches are based on your skills and needs.
             </p>
             <p className="text-[13px] text-[var(--fg-muted)]">
-              What to do next: Click <button onClick={() => loadMatches(true)} className="underline text-[var(--gold-text)] font-medium inline">Refresh</button> to re-run AI inference, or explore members in the People tab.
+              Tap <button onClick={() => loadMatches(true)} className="underline text-[var(--gold-text)] font-medium inline">Refresh</button> to try Gemma again, or browse the People tab.
             </p>
           </div>
         </div>
@@ -231,7 +233,9 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
             )}
           </div>
           <p className="text-xs text-[var(--fg-muted)]">
-            Synthesized by Gemma 4 based on complementary needs, offers, and learning goals
+            {isAiUsed && !errorMessage
+              ? 'Picked by Gemma 4 from complementary needs, offers and learning goals'
+              : 'Based on complementary needs, offers and learning goals'}
           </p>
         </div>
 
@@ -328,10 +332,17 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
           {/* Inline Invite Dialog */}
           {showInviteModal && (
             <div className="fixed inset-0 bg-black/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in">
-              <div className="kw-card p-6 max-w-sm w-full space-y-4 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl text-center shadow-2xl">
+              <div
+                ref={inviteDialogRef}
+                tabIndex={-1}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="invite-dialog-title"
+                className="kw-card p-6 max-w-sm w-full space-y-4 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl text-center shadow-2xl outline-none"
+              >
                 <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-sm text-[var(--fg)]">Invite people to Kwegatta</h4>
-                  <button onClick={() => setShowInviteModal(false)} className="text-[var(--fg-subtle)] hover:text-[var(--fg)] p-1">
+                  <h4 id="invite-dialog-title" className="font-bold text-sm text-[var(--fg)]">Invite people to Kwegatta</h4>
+                  <button onClick={() => setShowInviteModal(false)} aria-label="Close" className="text-[var(--fg-subtle)] hover:text-[var(--fg)] p-1">
                     ✕
                   </button>
                 </div>
@@ -350,6 +361,7 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
                   <input
                     type="text"
                     readOnly
+                    aria-label="Invite link"
                     value={inviteUrl}
                     className="kw-input text-xs font-mono select-all flex-1"
                   />
@@ -406,7 +418,7 @@ export const MatchesView: React.FC<MatchesViewProps> = ({
                           {profile.role}
                         </span>
                         {/* Requirement 3: Labelled Quick match or AI match */}
-                        {m.matchType === 'quick' ? (
+                        {m.matchType === 'quick' || !isAiUsed || errorMessage ? (
                           <span className="kw-badge text-[13px] bg-[var(--bg-subtle)] text-[var(--fg-muted)] border border-[var(--card-border)] flex items-center gap-1 font-medium transition-all">
                             <Zap className="w-2.5 h-2.5 text-[var(--gold-text)]" />
                             <span>Quick match</span>

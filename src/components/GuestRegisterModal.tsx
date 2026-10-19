@@ -118,6 +118,9 @@ export const GuestRegisterModal: React.FC<GuestRegisterModalProps> = ({
   return (
     <div
       className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="guest-register-title"
       onClick={e => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -128,7 +131,7 @@ export const GuestRegisterModal: React.FC<GuestRegisterModalProps> = ({
       >
         <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
           <div>
-            <h3 className="font-bold text-sm text-[var(--fg)]">
+            <h3 id="guest-register-title" className="font-bold text-sm text-[var(--fg)]">
               {isWaitlist ? 'Join waitlist as guest' : 'Register for event'}
             </h3>
             <p className="text-xs text-[var(--fg-muted)]">
@@ -153,13 +156,16 @@ export const GuestRegisterModal: React.FC<GuestRegisterModalProps> = ({
             value={guestWebsite}
             onChange={e => setGuestWebsite(e.target.value)}
             style={{ display: 'none' }}
+            aria-hidden="true"
             tabIndex={-1}
             autoComplete="off"
           />
 
           <div>
-            <label className="font-semibold text-[var(--fg)] block mb-1">Full name *</label>
+            <label htmlFor="guest-name" className="font-semibold text-[var(--fg)] block mb-1">Full name *</label>
             <input
+              id="guest-name"
+              autoComplete="name"
               ref={firstInputRef}
               type="text"
               value={guestName}
@@ -171,8 +177,10 @@ export const GuestRegisterModal: React.FC<GuestRegisterModalProps> = ({
           </div>
 
           <div>
-            <label className="font-semibold text-[var(--fg)] block mb-1">WhatsApp or phone</label>
+            <label htmlFor="guest-phone" className="font-semibold text-[var(--fg)] block mb-1">WhatsApp or phone</label>
             <input
+              id="guest-phone"
+              autoComplete="tel"
               type="tel"
               value={guestPhone}
               onChange={e => setGuestPhone(e.target.value)}
@@ -182,8 +190,10 @@ export const GuestRegisterModal: React.FC<GuestRegisterModalProps> = ({
           </div>
 
           <div>
-            <label className="font-semibold text-[var(--fg)] block mb-1">Email</label>
+            <label htmlFor="guest-email" className="font-semibold text-[var(--fg)] block mb-1">Email</label>
             <input
+              id="guest-email"
+              autoComplete="email"
               type="email"
               value={guestEmail}
               onChange={e => setGuestEmail(e.target.value)}

@@ -6,14 +6,12 @@ import {
   ExternalLink,
   Share2,
   Users,
-  Sparkles,
   Check,
   ArrowLeft,
   Bookmark,
   Plus,
   Edit,
   Trash2,
-  Megaphone,
   Flag,
   X,
   Award,
@@ -25,11 +23,8 @@ import {
   Mail,
   MessageSquare,
   Send,
-  ShieldAlert,
-  Lock,
   UserPlus,
   UserCheck,
-  XCircle,
   Search,
   Tag,
   QrCode,
@@ -43,6 +38,8 @@ import { formatTicketCode } from '../lib/ticketCode';
 const HostScannerModal = lazy(() => import('./HostScannerModal'));
 import { Avatar } from './Avatar';
 import { GuestRegisterModal } from './GuestRegisterModal';
+import { PageNotFound } from './PageNotFound';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 import {
   processEventCoverImage,
   formatEventDateTime,
@@ -61,7 +58,6 @@ import {
   cancelEvent,
   deleteEvent,
   reportEvent,
-  sendEventAttendeeUpdate,
   fetchEventQuestions,
   postEventQuestion,
   replyEventQuestion,
@@ -82,11 +78,30 @@ import {
   PUBLIC_APP_URL
 } from '../services/api';
 import { findRecentDuplicate, sortForTab } from '../lib/eventTiming';
+import { validateEventTitle, EVENT_TITLE_MAX } from '../lib/eventTitle';
 
 export const EVENT_KIND_HELP = {
   event: 'Something people attend at a set date and time, in person or online.',
   opportunity: 'Something people apply for before a deadline, like a grant, job or hackathon.'
 } as const;
+
+/** Keyboard access for a clickable card that holds no other buttons: Enter or Space activates it. */
+function activateProps(handler: () => void) {
+  return {
+    role: 'button' as const,
+    tabIndex: 0,
+    onClick: handler,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.target !== e.currentTarget) return;
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        handler();
+      }
+    }
+  };
+}
+
+const FOCUS_RING = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--gold)] focus-visible:ring-offset-1';
 
 export function deleteConfirmMessage(registeredCount: number): string {
   const n = Math.max(0, Number(registeredCount) || 0);
@@ -129,8 +144,9 @@ export const CoverImageUploader: React.FC<CoverImageUploaderProps> = ({ value, o
 
   return (
     <div>
-      <label className="font-semibold text-[var(--fg)] block mb-1">Cover image (optional)</label>
+      <label htmlFor="ev-cover-image-optional-1" className="font-semibold text-[var(--fg)] block mb-1">Cover image (optional)</label>
       <input
+        id="ev-cover-image-optional-1"
         ref={fileInputRef}
         type="file"
         accept="image/jpeg,image/png,image/webp"
@@ -211,6 +227,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [selectedItemId, setSelectedItemId] = useState<string | null>(() => initialItemId || getItemIdFromHash());
   const [detailedItem, setDetailedItem] = useState<any | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  // Id from the link that turned out not to exist; shows a "not found" page instead of the list
+  const [missingEventId, setMissingEventId] = useState<string | null>(null);
   const [rsvpLoading, setRsvpLoading] = useState(false);
 
   // Create / Edit Modal States
@@ -274,19 +292,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [loadingTicket, setLoadingTicket] = useState(false);
 
   const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [manualTicketCode, setManualTicketCode] = useState('');
-  const [scannerSearch, setScannerSearch] = useState('');
-  const [scanResult, setScanResult] = useState<{
-    type: 'success' | 'already' | 'error';
-    name?: string;
-    checkedInAt?: string;
-    message?: string;
-  } | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [isVenueQrOpen, setIsVenueQrOpen] = useState(false);
-  const [venueQrUrl, setVenueQrUrl] = useState('');
   const [venueQrDataUrl, setVenueQrDataUrl] = useState('');
   const [venueCheckedInCount, setVenueCheckedInCount] = useState(0);
   const [venueCountdown, setVenueCountdown] = useState(30);
@@ -311,11 +318,6 @@ export const EventsView: React.FC<EventsViewProps> = ({
   const [isGuestModalOpen, setIsGuestModalOpen] = useState(false);
   const registerBtnRef = useRef<HTMLButtonElement>(null);
   const [eventGuests, setEventGuests] = useState<EventGuest[]>([]);
-
-  // Send Update to Attendees Modal State
-  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
-  const [updateMessage, setUpdateMessage] = useState('');
-  const [sendingUpdate, setSendingUpdate] = useState(false);
 
   // People to meet state
   const [peopleToMeetList, setPeopleToMeetList] = useState<any[]>([]);
@@ -491,6 +493,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
     fetchEventById(selectedItemId, guestToken)
       .then(res => {
         if (res) {
+          setMissingEventId(null);
           setDetailedItem(res);
           loadQuestions(selectedItemId);
           if (
@@ -504,9 +507,8 @@ export const EventsView: React.FC<EventsViewProps> = ({
             loadPeopleToMeet(selectedItemId);
           }
         } else {
-          onToast('This event is no longer available');
+          setMissingEventId(selectedItemId);
           setSelectedItemId(null);
-          if (window.location.hash.startsWith('#/events/')) window.location.hash = '#/events';
         }
       })
       .catch(() => {
@@ -713,8 +715,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
     const errors: Record<string, string> = {};
 
-    if (!formTitle.trim()) {
-      errors.title = 'Title is required';
+    const titleError = validateEventTitle(formTitle);
+    if (titleError) {
+      errors.title = titleError;
     }
     if (!formDescription.trim()) {
       errors.description = 'Description is required';
@@ -874,8 +877,12 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
     const errors: Record<string, string> = {};
 
-    if (!formTitle.trim()) {
-      errors.title = 'Title is required';
+    // Older events may predate the title rules; only check a title that was changed.
+    const titleError = formTitle.trim() === String(editingItem.title || '').trim() && formTitle.trim()
+      ? null
+      : validateEventTitle(formTitle);
+    if (titleError) {
+      errors.title = titleError;
     }
     if (!formDescription.trim()) {
       errors.description = 'Description is required';
@@ -1202,30 +1209,6 @@ export const EventsView: React.FC<EventsViewProps> = ({
     }
   };
 
-  const handleSendAttendeeUpdate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!detailedItem) return;
-    if (!updateMessage.trim()) {
-      onToast('Message cannot be empty');
-      return;
-    }
-    setSendingUpdate(true);
-    try {
-      await sendEventAttendeeUpdate(detailedItem.id, updateMessage.trim());
-      onToast('Update sent to attendees via notification!');
-      setIsUpdateModalOpen(false);
-      setUpdateMessage('');
-      const guestToken = getGuestToken(detailedItem.id);
-      fetchEventById(detailedItem.id, guestToken).then(fresh => {
-        if (fresh) setDetailedItem(fresh);
-      });
-    } catch (err: any) {
-      onToast(err.message || 'Failed to send update');
-    } finally {
-      setSendingUpdate(false);
-    }
-  };
-
   const handleOpenReport = (item: EventOpportunityItem, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (!currentProfile) {
@@ -1334,40 +1317,6 @@ export const EventsView: React.FC<EventsViewProps> = ({
     }
   };
 
-  const handleHostCheckinCode = async (rawCode: string) => {
-    if (!selectedItemId || !rawCode.trim()) return;
-    try {
-      const res = await checkinEventAttendee(selectedItemId, { code: rawCode.trim() });
-      if (res.status === 'already') {
-        const timeStr = res.checked_in_at
-          ? new Date(res.checked_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          : '';
-        setScanResult({
-          type: 'already',
-          name: res.name,
-          checkedInAt: timeStr,
-          message: `Already checked in at ${timeStr}`
-        });
-      } else {
-        setScanResult({
-          type: 'success',
-          name: res.name,
-          checkedInAt: res.checked_in_at
-            ? new Date(res.checked_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : '',
-          message: `${res.name} checked in`
-        });
-      }
-      setManualTicketCode('');
-      refreshDetailAndGuests(selectedItemId);
-    } catch (err: any) {
-      setScanResult({
-        type: 'error',
-        message: err?.message || 'Not a ticket for this event'
-      });
-    }
-  };
-
   const handleHostManualCheckin = async (kind: 'member' | 'guest', refId: string) => {
     if (!selectedItemId) return;
     try {
@@ -1376,27 +1325,12 @@ export const EventsView: React.FC<EventsViewProps> = ({
         const timeStr = res.checked_in_at
           ? new Date(res.checked_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           : '';
-        setScanResult({
-          type: 'already',
-          name: res.name,
-          checkedInAt: timeStr,
-          message: `Already checked in at ${timeStr}`
-        });
         onToast(`Already checked in at ${timeStr}`);
       } else {
-        setScanResult({
-          type: 'success',
-          name: res.name,
-          message: `${res.name} checked in!`
-        });
         onToast(`Checked in ${res.name}`);
       }
       refreshDetailAndGuests(selectedItemId);
     } catch (err: any) {
-      setScanResult({
-        type: 'error',
-        message: err?.message || 'Check-in failed'
-      });
       onToast(err?.message || 'Check-in failed');
     }
   };
@@ -1412,7 +1346,6 @@ export const EventsView: React.FC<EventsViewProps> = ({
       try {
         const data = await fetchEventCheckinToken(selectedItemId);
         if (!active) return;
-        setVenueQrUrl(data.url);
         setVenueCheckedInCount(data.checked_in_count || 0);
         setVenueCountdown(30);
         const QRCode = (await import('qrcode')).default;
@@ -1489,6 +1422,15 @@ export const EventsView: React.FC<EventsViewProps> = ({
   // Upcoming: soonest effective start first. Past (including cancelled): most recent first.
   const upcomingItems = sortForTab(filteredItems.filter(it => it.phase !== 'past' && !it.is_cancelled), 'upcoming');
   const pastItems = sortForTab(filteredItems.filter(it => it.phase === 'past' || it.is_cancelled), 'past');
+
+  // Modal keyboard handling (Escape closes, focus stays inside). Only one of each modal
+  // is mounted at a time, so the detail and list copies share a ref.
+  const createDialogRef = useDialogA11y<HTMLDivElement>(isCreateModalOpen, () => setIsCreateModalOpen(false));
+  const editDialogRef = useDialogA11y<HTMLDivElement>(Boolean(isEditModalOpen && editingItem), () => setIsEditModalOpen(false));
+  const reportDialogRef = useDialogA11y<HTMLDivElement>(Boolean(isReportModalOpen && reportingItem), () => setIsReportModalOpen(false));
+  const ticketDialogRef = useDialogA11y<HTMLDivElement>(isTicketModalOpen, () => setIsTicketModalOpen(false));
+  const venueDialogRef = useDialogA11y<HTMLDivElement>(isVenueQrOpen, () => setIsVenueQrOpen(false));
+  const deleteDialogRef = useDialogA11y<HTMLDivElement>(Boolean(deleteTarget), () => closeDeleteDialog());
 
   // Render Detailed Item View
   if (selectedItemId && detailedItem) {
@@ -1615,6 +1557,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 <input
                   type="email"
                   value={selfCheckinGuestEmail}
+                  aria-label="Email you registered with"
                   onChange={e => setSelfCheckinGuestEmail(e.target.value)}
                   placeholder="Enter the email you registered with..."
                   required={!currentProfile}
@@ -1720,8 +1663,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
             {/* Host Attribution */}
             <div className="flex items-center gap-3 py-1">
               <div
-                onClick={() => detailedItem.author_id && onViewProfile(detailedItem.author_id)}
-                className="flex items-center gap-2.5 cursor-pointer group"
+                {...activateProps(() => detailedItem.author_id && onViewProfile(detailedItem.author_id))}
+                aria-label={`View ${hostName}'s profile`}
+                className={`flex items-center gap-2.5 cursor-pointer group rounded-lg ${FOCUS_RING}`}
               >
                 <Avatar profile={hostProfile || { name: hostName }} size="sm" />
                 <div>
@@ -1747,9 +1691,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 <Calendar className="w-4 h-4 text-[var(--gold-text)] flex-shrink-0 mt-0.5" />
                 <div>
                   <p className="font-semibold text-[var(--fg)]">{timeFormatted.display}</p>
-                  <p className="text-[13px] text-[var(--fg-subtle)] mt-0.5">
-                    {timeFormatted.isLegacy ? 'Legacy time format' : 'Shown in your local timezone'}
-                  </p>
+                  {!timeFormatted.isLegacy && (
+                    <p className="text-[13px] text-[var(--fg-subtle)] mt-0.5">Shown in your local timezone</p>
+                  )}
                 </div>
               </div>
 
@@ -1985,6 +1929,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                               <input
                                 type="text"
                                 readOnly
+                                aria-label="Your ticket link"
                                 value={`${window.location.origin}/#/events/${detailedItem.id}?g=${activeToken || ''}`}
                                 className="kw-input text-xs flex-1 bg-[var(--bg)]"
                               />
@@ -2034,6 +1979,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                             <input
                               type="text"
                               readOnly
+                              aria-label="Your ticket link"
                               value={`${window.location.origin}/#/events/${detailedItem.id}?g=${activeToken || ''}`}
                               className="kw-input text-xs flex-1 bg-[var(--bg)]"
                             />
@@ -2127,7 +2073,6 @@ export const EventsView: React.FC<EventsViewProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            setScanResult(null);
                             setIsScannerOpen(true);
                           }}
                           className="kw-btn px-3.5 py-2.5 text-xs font-bold rounded-lg border border-[var(--gold)]/50 bg-amber-500/10 text-[var(--gold-text)] hover:bg-amber-500/20 inline-flex items-center gap-1.5 cursor-pointer"
@@ -2236,7 +2181,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       if (e.target === e.currentTarget) closeDeleteDialog();
                     }}
                   >
-                    <div className="kw-card max-w-sm w-full p-6 space-y-4 border-rose-500/40 animate-in fade-in zoom-in-95 duration-150">
+                    <div ref={deleteDialogRef} tabIndex={-1} className="kw-card max-w-sm w-full p-6 space-y-4 border-rose-500/40 animate-in fade-in zoom-in-95 duration-150 outline-none">
                       <h3 id="delete-event-title" className="font-bold text-sm text-[var(--fg)]">
                         Delete "{deleteTarget.title}"?
                       </h3>
@@ -2357,8 +2302,14 @@ export const EventsView: React.FC<EventsViewProps> = ({
                         <div className="flex items-center gap-3">
                           <Avatar profile={person} size="md" />
                           <div>
-                            <h3 className="text-xs font-bold text-[var(--fg)] hover:text-[var(--gold-text)] transition-colors cursor-pointer" onClick={() => onViewProfile(person.id)}>
-                              {person.name}
+                            <h3 className="text-xs font-bold text-[var(--fg)]">
+                              <button
+                                type="button"
+                                onClick={() => onViewProfile(person.id)}
+                                className={`hover:text-[var(--gold-text)] transition-colors cursor-pointer text-left rounded ${FOCUS_RING}`}
+                              >
+                                {person.name}
+                              </button>
                             </h3>
                             <p className="text-[11px] text-[var(--fg-subtle)] capitalize">{person.role || 'Member'}</p>
                           </div>
@@ -2429,6 +2380,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
               <form onSubmit={handleAskQuestion} className="space-y-2">
                 <textarea
                   value={newQuestion}
+                  aria-label="Your question for the host"
                   onChange={e => setNewQuestion(e.target.value)}
                   placeholder="Ask the host anything about this event..."
                   rows={3}
@@ -2538,6 +2490,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       <form onSubmit={e => handleReplyQuestion(q.id, e)} className="mt-2 space-y-2 pl-4 border-l-2 border-[var(--gold)]">
                         <textarea
                           value={replyContent}
+                          aria-label="Your reply"
                           onChange={e => setReplyContent(e.target.value)}
                           placeholder="Write a response..."
                           rows={2}
@@ -2714,7 +2667,20 @@ export const EventsView: React.FC<EventsViewProps> = ({
                             <Avatar profile={{ id: row.id, name: row.name, avatar: row.avatar }} size="sm" />
                             <div className="min-w-0 space-y-0.5">
                               <div className="flex flex-wrap items-center gap-2">
-                                <span className="font-bold text-[var(--fg)] truncate">{row.name}</span>
+                                {row.type === 'Member' ? (
+                                  <button
+                                    type="button"
+                                    onClick={e => {
+                                      e.stopPropagation();
+                                      onViewProfile(row.id);
+                                    }}
+                                    className={`font-bold text-[var(--fg)] truncate text-left hover:text-[var(--gold-text)] rounded ${FOCUS_RING}`}
+                                  >
+                                    {row.name}
+                                  </button>
+                                ) : (
+                                  <span className="font-bold text-[var(--fg)] truncate">{row.name}</span>
+                                )}
                                 <span
                                   className={`px-2 py-0.5 rounded text-[11px] font-bold ${
                                     row.type === 'Member'
@@ -2842,8 +2808,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 {attendees.map((att: any) => (
                   <div
                     key={att.id}
-                    onClick={() => onViewProfile(att.id)}
-                    className="flex items-center gap-2.5 p-2.5 rounded-lg bg-[var(--bg)] border border-[var(--card-border)] hover:border-[var(--gold)] transition-colors cursor-pointer"
+                    {...activateProps(() => onViewProfile(att.id))}
+                    aria-label={`View ${att.name}'s profile`}
+                    className={`flex items-center gap-2.5 p-2.5 rounded-lg bg-[var(--bg)] border border-[var(--card-border)] hover:border-[var(--gold)] transition-colors cursor-pointer ${FOCUS_RING}`}
                   >
                     <Avatar profile={att} size="sm" />
                     <div className="min-w-0 flex-1">
@@ -2856,7 +2823,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
             )}
           </div>
         ) : (
-          <div className="p-4 rounded-xl kw-card text-center text-xs text-[var(--fg-muted)] flex items-center justify-between gap-4">
+          <div className="p-4 rounded-xl kw-card text-xs text-[var(--fg-muted)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
             <span>
               {attendeeCount === 0
                 ? 'Be the first to register.'
@@ -2866,7 +2833,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
             </span>
             <button
               onClick={onJoinClick}
-              className="kw-btn kw-btn-gold text-xs py-1.5 px-3 font-semibold cursor-pointer"
+              className="kw-btn kw-btn-gold text-xs py-1.5 px-3 font-semibold cursor-pointer shrink-0"
             >
               Sign in to see attendees
             </button>
@@ -2887,12 +2854,13 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
         {/* EDIT MODAL */}
         {isEditModalOpen && editingItem && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4">
-            <div className="kw-card max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto border-[var(--gold)]/40 animate-in fade-in zoom-in-95 duration-150">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4" role="dialog" aria-modal="true" aria-labelledby="edit-event-dialog-title">
+            <div ref={editDialogRef} tabIndex={-1} className="kw-card max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto border-[var(--gold)]/40 animate-in fade-in zoom-in-95 duration-150 outline-none">
               <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
-                <h3 className="font-bold text-sm text-[var(--fg)]">Edit Event Details</h3>
+                <h3 id="edit-event-dialog-title" className="font-bold text-sm text-[var(--fg)]">Edit Event Details</h3>
                 <button
                   onClick={() => setIsEditModalOpen(false)}
+                  aria-label="Close"
                   className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
                 >
                   <X className="w-4 h-4" />
@@ -2910,6 +2878,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       setFormTitle(e.target.value);
                       if (editErrors.title) setEditErrors(prev => ({ ...prev, title: '' }));
                     }}
+                    maxLength={Math.max(EVENT_TITLE_MAX, String(editingItem?.title || '').length)}
                     aria-invalid={Boolean(editErrors.title)}
                     aria-describedby={editErrors.title ? "edit-title-error" : undefined}
                     className={`kw-input text-xs ${editErrors.title ? 'border-rose-500 focus:border-rose-500' : ''}`}
@@ -3127,8 +3096,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
                         )}
                       </div>
                       <div>
-                        <label className="font-semibold text-[var(--fg)] block mb-1">Tags (optional, up to 5)</label>
+                        <label htmlFor="ev-tags-optional-up-to-5-1" className="font-semibold text-[var(--fg)] block mb-1">Tags (optional, up to 5)</label>
                         <input
+                          id="ev-tags-optional-up-to-5-1"
                           type="text"
                           value={formTagsInput}
                           onChange={e => setFormTagsInput(e.target.value)}
@@ -3225,7 +3195,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   </>
                 )}
 
-                <div className="flex items-center gap-2 pt-3 border-t border-[var(--card-border)]">
+                <div className="sticky bottom-0 z-10 -mx-6 -mb-6 px-6 pt-3 pb-4 flex items-center gap-2 border-t border-[var(--card-border)] bg-[var(--card)]">
                   <button
                     type="submit"
                     disabled={formSubmitting}
@@ -3248,15 +3218,16 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
         {/* REPORT MODAL */}
         {isReportModalOpen && reportingItem && (
-          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4">
-            <div className="kw-card max-w-md w-full p-6 space-y-4 border-rose-500/40 animate-in fade-in zoom-in-95 duration-150">
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4" role="dialog" aria-modal="true" aria-labelledby="report-event-dialog-title">
+            <div ref={reportDialogRef} tabIndex={-1} className="kw-card max-w-md w-full p-6 space-y-4 border-rose-500/40 animate-in fade-in zoom-in-95 duration-150 outline-none">
               <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
                 <div className="flex items-center gap-2 text-rose-400">
                   <Flag className="w-4 h-4" />
-                  <h3 className="font-bold text-sm text-[var(--fg)]">Report Event</h3>
+                  <h3 id="report-event-dialog-title" className="font-bold text-sm text-[var(--fg)]">Report Event</h3>
                 </div>
                 <button
                   onClick={() => setIsReportModalOpen(false)}
+                  aria-label="Close"
                   className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
                 >
                   <X className="w-4 h-4" />
@@ -3269,8 +3240,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
               <form onSubmit={handleReportSubmit} className="space-y-4 text-xs">
                 <div>
-                  <label className="font-semibold text-[var(--fg)] block mb-1">Reason *</label>
+                  <label htmlFor="ev-reason-1" className="font-semibold text-[var(--fg)] block mb-1">Reason *</label>
                   <select
+                    id="ev-reason-1"
                     value={reportReason}
                     onChange={e => setReportReason(e.target.value)}
                     className="kw-input text-xs"
@@ -3283,8 +3255,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="font-semibold text-[var(--fg)] block mb-1">Optional Note</label>
+                  <label htmlFor="ev-optional-note-1" className="font-semibold text-[var(--fg)] block mb-1">Optional Note</label>
                   <textarea
+                    id="ev-optional-note-1"
                     value={reportDetails}
                     onChange={e => setReportDetails(e.target.value)}
                     rows={3}
@@ -3316,16 +3289,17 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
         {/* PERSONAL TICKET MODAL */}
         {isTicketModalOpen && (
-          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm grid place-items-center p-4">
-            <div className="kw-card max-w-sm w-full p-6 space-y-4 text-center border-[var(--gold)]/40">
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm grid place-items-center p-4" role="dialog" aria-modal="true" aria-labelledby="ticket-dialog-title">
+            <div ref={ticketDialogRef} tabIndex={-1} className="kw-card max-w-sm w-full p-6 space-y-4 text-center border-[var(--gold)]/40 outline-none">
               <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
-                <h3 className="font-bold text-sm text-[var(--fg)] flex items-center gap-1.5">
+                <h3 id="ticket-dialog-title" className="font-bold text-sm text-[var(--fg)] flex items-center gap-1.5">
                   <QrCode className="w-4 h-4 text-[var(--gold-text)]" />
                   <span>Personal Event Ticket</span>
                 </h3>
                 <button
                   type="button"
                   onClick={() => setIsTicketModalOpen(false)}
+                  aria-label="Close"
                   className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
                 >
                   <X className="w-4 h-4" />
@@ -3379,7 +3353,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
         {/* ROTATING VENUE QR MODAL (Full-screen) */}
         {isVenueQrOpen && (
-          <div className="fixed inset-0 z-50 bg-[#090D16] text-white flex flex-col items-center justify-center p-6 space-y-6">
+          <div ref={venueDialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="venue-qr-dialog-title" className="fixed inset-0 z-50 bg-[#090D16] text-white flex flex-col items-center justify-center p-6 space-y-6 outline-none">
             <button
               type="button"
               onClick={() => setIsVenueQrOpen(false)}
@@ -3393,7 +3367,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
               <span className="px-3 py-1 rounded-full text-xs font-bold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
                 Venue Self Check-in
               </span>
-              <h2 className="text-2xl sm:text-3xl font-bold">{detailedItem.title}</h2>
+              <h2 id="venue-qr-dialog-title" className="text-2xl sm:text-3xl font-bold">{detailedItem.title}</h2>
               <p className="text-sm text-zinc-400">Scan with your phone camera to check in automatically</p>
             </div>
 
@@ -3434,11 +3408,45 @@ export const EventsView: React.FC<EventsViewProps> = ({
     );
   }
 
+  // Link to an event that does not exist (deleted, or a typo)
+  const linkedId = initialItemId || getItemIdFromHash();
+  if (missingEventId && !selectedItemId && linkedId === missingEventId) {
+    return (
+      <div className="kw-container py-6 space-y-4">
+        <PageNotFound
+          message="This event or opportunity does not exist or was removed."
+          onGoHome={() => {
+            setMissingEventId(null);
+            window.location.hash = '#/home';
+          }}
+        />
+        <div className="text-center">
+          <button
+            type="button"
+            onClick={() => {
+              setMissingEventId(null);
+              window.location.hash = '#/events';
+            }}
+            className="kw-btn kw-btn-gold text-xs py-2 px-4"
+          >
+            See all events
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Render Events List Overview
   const currentTabItems = activeTab === 'upcoming' ? upcomingItems : pastItems;
 
   return (
     <div className="kw-container space-y-6 md:space-y-8">
+      {selectedItemId && !detailedItem && loadingDetail && (
+        <div className="flex items-center gap-2 text-xs text-[var(--fg-muted)]" role="status" aria-live="polite">
+          <div className="w-4 h-4 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin" aria-hidden="true"></div>
+          <span>Opening event…</span>
+        </div>
+      )}
       {/* Top Banner / Heading */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -3625,7 +3633,19 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   </div>
 
                   <h3 className="font-bold text-sm text-[var(--fg)] group-hover:text-[var(--gold-text)] transition-colors line-clamp-2">
-                    {item.title}
+                    {/* Real link so keyboard and screen reader users can open the card */}
+                    <a
+                      href={`#/events/${item.id}`}
+                      onClick={e => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setSelectedItemId(item.id);
+                        window.location.hash = `#/events/${item.id}`;
+                      }}
+                      className={`rounded ${FOCUS_RING}`}
+                    >
+                      {item.title}
+                    </a>
                   </h3>
 
                   <p className="text-xs text-[var(--fg-muted)] line-clamp-2">
@@ -3635,16 +3655,18 @@ export const EventsView: React.FC<EventsViewProps> = ({
                   {cardTags.length > 0 && (
                     <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
                       {cardTags.map(tag => (
-                        <span
+                        <button
+                          type="button"
                           key={tag}
                           onClick={e => {
                             e.stopPropagation();
                             setSearchQuery(tag);
                           }}
-                          className="px-2 py-0.5 rounded text-[11px] font-medium bg-[var(--bg)] border border-[var(--card-border)] text-[var(--fg-muted)] hover:border-[var(--gold)]"
+                          aria-label={`Filter events by ${tag}`}
+                          className={`px-2 py-0.5 rounded text-[11px] font-medium bg-[var(--bg)] border border-[var(--card-border)] text-[var(--fg-muted)] hover:border-[var(--gold)] ${FOCUS_RING}`}
                         >
                           #{tag}
-                        </span>
+                        </button>
                       ))}
                     </div>
                   )}
@@ -3808,17 +3830,18 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
       {/* CREATE EVENT MODAL */}
       {isCreateModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4">
-          <div className="kw-card max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto border-[var(--gold)]/40 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4" role="dialog" aria-modal="true" aria-labelledby="create-event-dialog-title">
+          <div ref={createDialogRef} tabIndex={-1} className="kw-card max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto border-[var(--gold)]/40 animate-in fade-in zoom-in-95 duration-150 outline-none">
             <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
               <div>
-                <h3 className="font-bold text-sm text-[var(--fg)]">Create an Event or Opportunity</h3>
+                <h3 id="create-event-dialog-title" className="font-bold text-sm text-[var(--fg)]">Create an Event or Opportunity</h3>
                 <p className="text-xs text-[var(--fg-muted)]">
                   Published directly to the community.
                 </p>
               </div>
               <button
                 onClick={() => setIsCreateModalOpen(false)}
+                aria-label="Close"
                 className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -3865,6 +3888,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     if (createErrors.title) setCreateErrors(prev => ({ ...prev, title: '' }));
                   }}
                   placeholder="e.g. Flutter Hackday"
+                  maxLength={EVENT_TITLE_MAX}
                   aria-invalid={Boolean(createErrors.title)}
                   aria-describedby={createErrors.title ? "create-title-error" : undefined}
                   className={`kw-input text-xs ${createErrors.title ? 'border-rose-500 focus:border-rose-500' : ''}`}
@@ -4146,8 +4170,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       )}
                     </div>
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">Tags (optional, up to 5)</label>
+                      <label htmlFor="ev-tags-optional-up-to-5-2" className="font-semibold text-[var(--fg)] block mb-1">Tags (optional, up to 5)</label>
                       <input
+                        id="ev-tags-optional-up-to-5-2"
                         type="text"
                         value={formTagsInput}
                         onChange={e => setFormTagsInput(e.target.value)}
@@ -4276,8 +4301,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
               ) : (
                 <>
                   <div>
-                    <label className="font-semibold text-[var(--fg)] block mb-1">Opportunity Type *</label>
+                    <label htmlFor="ev-opportunity-type-1" className="font-semibold text-[var(--fg)] block mb-1">Opportunity Type *</label>
                     <select
+                      id="ev-opportunity-type-1"
                       value={formOppType}
                       onChange={e => setFormOppType(e.target.value as OpportunityType)}
                       className="kw-input text-xs"
@@ -4336,7 +4362,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 </>
               )}
 
-              <div className="flex items-center gap-2 pt-3 border-t border-[var(--card-border)]">
+              <div className="sticky bottom-0 z-10 -mx-6 -mb-6 px-6 pt-3 pb-4 flex items-center gap-2 border-t border-[var(--card-border)] bg-[var(--card)]">
                 <button
                   type="submit"
                   disabled={formSubmitting}
@@ -4359,12 +4385,13 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
       {/* EDIT MODAL */}
       {isEditModalOpen && editingItem && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4">
-          <div className="kw-card max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto border-[var(--gold)]/40 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4" role="dialog" aria-modal="true" aria-labelledby="edit-event-dialog-title">
+          <div ref={editDialogRef} tabIndex={-1} className="kw-card max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto border-[var(--gold)]/40 animate-in fade-in zoom-in-95 duration-150 outline-none">
             <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
-              <h3 className="font-bold text-sm text-[var(--fg)]">Edit Event Details</h3>
+              <h3 id="edit-event-dialog-title" className="font-bold text-sm text-[var(--fg)]">Edit Event Details</h3>
               <button
                 onClick={() => setIsEditModalOpen(false)}
+                aria-label="Close"
                 className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -4382,6 +4409,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                     setFormTitle(e.target.value);
                     if (editErrors.title) setEditErrors(prev => ({ ...prev, title: '' }));
                   }}
+                  maxLength={Math.max(EVENT_TITLE_MAX, String(editingItem?.title || '').length)}
                   aria-invalid={Boolean(editErrors.title)}
                   aria-describedby={editErrors.title ? "edit-title-error" : undefined}
                   className={`kw-input text-xs ${editErrors.title ? 'border-rose-500 focus:border-rose-500' : ''}`}
@@ -4599,8 +4627,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
                       )}
                     </div>
                     <div>
-                      <label className="font-semibold text-[var(--fg)] block mb-1">Tags (optional, up to 5)</label>
+                      <label htmlFor="ev-tags-optional-up-to-5-3" className="font-semibold text-[var(--fg)] block mb-1">Tags (optional, up to 5)</label>
                       <input
+                        id="ev-tags-optional-up-to-5-3"
                         type="text"
                         value={formTagsInput}
                         onChange={e => setFormTagsInput(e.target.value)}
@@ -4688,7 +4717,7 @@ export const EventsView: React.FC<EventsViewProps> = ({
                 </>
               )}
 
-              <div className="flex items-center gap-2 pt-3 border-t border-[var(--card-border)]">
+              <div className="sticky bottom-0 z-10 -mx-6 -mb-6 px-6 pt-3 pb-4 flex items-center gap-2 border-t border-[var(--card-border)] bg-[var(--card)]">
                 <button
                   type="submit"
                   disabled={formSubmitting}
@@ -4721,15 +4750,16 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
       {/* REPORT MODAL */}
       {isReportModalOpen && reportingItem && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4">
-          <div className="kw-card max-w-md w-full p-6 space-y-4 border-rose-500/40 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm grid place-items-center p-4" role="dialog" aria-modal="true" aria-labelledby="report-event-dialog-title">
+          <div ref={reportDialogRef} tabIndex={-1} className="kw-card max-w-md w-full p-6 space-y-4 border-rose-500/40 animate-in fade-in zoom-in-95 duration-150 outline-none">
             <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
               <div className="flex items-center gap-2 text-rose-400">
                 <Flag className="w-4 h-4" />
-                <h3 className="font-bold text-sm text-[var(--fg)]">Report Event</h3>
+                <h3 id="report-event-dialog-title" className="font-bold text-sm text-[var(--fg)]">Report Event</h3>
               </div>
               <button
                 onClick={() => setIsReportModalOpen(false)}
+                aria-label="Close"
                 className="p-1 text-[var(--fg-muted)] hover:text-[var(--fg)] cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -4742,8 +4772,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
 
             <form onSubmit={handleReportSubmit} className="space-y-4 text-xs">
               <div>
-                <label className="font-semibold text-[var(--fg)] block mb-1">Reason *</label>
+                <label htmlFor="ev-reason-2" className="font-semibold text-[var(--fg)] block mb-1">Reason *</label>
                 <select
+                  id="ev-reason-2"
                   value={reportReason}
                   onChange={e => setReportReason(e.target.value)}
                   className="kw-input text-xs"
@@ -4756,8 +4787,9 @@ export const EventsView: React.FC<EventsViewProps> = ({
               </div>
 
               <div>
-                <label className="font-semibold text-[var(--fg)] block mb-1">Optional Note</label>
+                <label htmlFor="ev-optional-note-2" className="font-semibold text-[var(--fg)] block mb-1">Optional Note</label>
                 <textarea
+                  id="ev-optional-note-2"
                   value={reportDetails}
                   onChange={e => setReportDetails(e.target.value)}
                   rows={3}

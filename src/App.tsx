@@ -2,20 +2,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Header } from './components/Header';
 import { NavTabs } from './components/NavTabs';
 import { MatchesView } from './components/MatchesView';
-import { LearnView } from './components/LearnView';
 import { PeopleView } from './components/PeopleView';
 import { FeedView } from './components/FeedView';
-import { InboxView } from './components/InboxView';
-import { ProfileView } from './components/ProfileView';
 import { HeroSection, KampalaStorySection } from './components/LivingNetworkHero';
 import { Footer } from './components/Footer';
-import { EventsView } from './components/EventsView';
 import { PinnedAnnouncementBar } from './components/PinnedAnnouncementBar';
 import { PageNotFound } from './components/PageNotFound';
 import { Profile, Post, NotificationItem, Follow } from './types';
 import {
   db,
-  APP_NAME,
   ensureAuthToken,
   getFreshAuthToken,
   claimExistingProfile,
@@ -32,7 +27,6 @@ import {
 } from './utils';
 import { auth, handleRedirectResult, logOut } from './services/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { AuthModal } from './components/AuthModal';
 
 const AdminView = React.lazy(() => import('./components/AdminView').then(m => ({ default: m.AdminView })));
 const WallView = React.lazy(() => import('./components/WallView').then(m => ({ default: m.WallView })));
@@ -40,6 +34,12 @@ const SetupView = React.lazy(() => import('./components/SetupView').then(m => ({
 const AboutView = React.lazy(() => import('./components/AboutView').then(m => ({ default: m.AboutView })));
 const PrivacyView = React.lazy(() => import('./components/PrivacyView').then(m => ({ default: m.PrivacyView })));
 const LicenseView = React.lazy(() => import('./components/LicenseView').then(m => ({ default: m.LicenseView })));
+// Heavier screens load on first visit so the landing page stays small.
+const EventsView = React.lazy(() => import('./components/EventsView').then(m => ({ default: m.EventsView })));
+const LearnView = React.lazy(() => import('./components/LearnView').then(m => ({ default: m.LearnView })));
+const InboxView = React.lazy(() => import('./components/InboxView').then(m => ({ default: m.InboxView })));
+const ProfileView = React.lazy(() => import('./components/ProfileView').then(m => ({ default: m.ProfileView })));
+const AuthModal = React.lazy(() => import('./components/AuthModal').then(m => ({ default: m.AuthModal })));
 const OnboardingChat = React.lazy(() => import('./components/OnboardingChat').then(m => ({ default: m.OnboardingChat })));
 
 export default function App() {
@@ -49,14 +49,14 @@ export default function App() {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   const [currentProfile, setCurrentProfile] = useState<Profile | null>(null);
-  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(() => auth.currentUser);
+  const [, setFirebaseUser] = useState<FirebaseUser | null>(() => auth.currentUser);
   const [showSignInModal, setShowSignInModal] = useState<boolean>(false);
   const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
   const [follows, setFollows] = useState<Follow[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [matches, setMatches] = useState<any[]>([]);
-  const [isDemoMode, setIsDemoMode] = useState(false);
+  const [isDemoMode] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
@@ -295,7 +295,8 @@ export default function App() {
       setViewedProfileId(null);
       setSelectedEventId(null);
     } else {
-      setActiveTab('home');
+      // Unknown link: show "Page not found" instead of silently opening home
+      setActiveTab('notfound');
       setViewedProfileId(null);
       setSelectedEventId(null);
     }
@@ -514,7 +515,7 @@ export default function App() {
   const isAdminAuthenticated = Boolean(sessionStorage.getItem('kw_admin_token'));
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--fg)] flex flex-col font-sans transition-colors selection:bg-[var(--gold)] selection:text-[#090D16]">
+    <div className={`min-h-screen bg-[var(--bg)] text-[var(--fg)] flex flex-col font-sans transition-colors selection:bg-[var(--gold)] selection:text-[#090D16] ${currentProfile && activeTab !== 'onboard' ? 'pb-16 md:pb-0' : ''}`}>
       {/* Pinned Announcement Bar */}
       <PinnedAnnouncementBar />
 
@@ -590,7 +591,8 @@ export default function App() {
       )}
 
       {/* Main Content Container with standard 1200px container and vertical rhythm */}
-      <main className={`flex-1 kw-container py-6 sm:py-8 space-y-6 md:space-y-10 ${currentProfile && activeTab !== 'onboard' ? 'pb-20 md:pb-8' : ''}`}>
+      <main className={`flex-1 kw-container py-6 sm:py-8 space-y-6 md:space-y-10`}>
+        <React.Suspense fallback={<div className="p-12 text-center" role="status" aria-label="Loading"><div className="w-8 h-8 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin mx-auto"></div></div>}>
         
         {/* Onboarding & Landing View (when visitor has no profile on home/onboard/me, or member explicitly opened onboard) */}
         {(!currentProfile && (activeTab === 'home' || activeTab === 'onboard' || activeTab === 'me')) || (currentProfile && activeTab === 'onboard') ? (
@@ -753,6 +755,7 @@ export default function App() {
             onGoHome={() => navigateTo(currentProfile ? 'home' : 'people')}
           />
         )}
+        </React.Suspense>
       </main>
 
       {/* Production-Grade Multi-Column Startup Footer */}
@@ -760,6 +763,7 @@ export default function App() {
 
       {/* Global Sign In Dialog for Visitors */}
       {showSignInModal && (
+        <React.Suspense fallback={null}>
         <AuthModal
           isOpen={showSignInModal}
           onClose={() => setShowSignInModal(false)}
@@ -768,6 +772,7 @@ export default function App() {
           subtitle="Sign in with Google in one tap to access your profile, matches, and chats from any device."
           existingProfile={currentProfile}
         />
+        </React.Suspense>
       )}
     </div>
   );

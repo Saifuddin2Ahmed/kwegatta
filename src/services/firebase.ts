@@ -14,7 +14,6 @@ import {
   sendPasswordResetEmail,
   sendEmailVerification,
   signOut,
-  onAuthStateChanged,
   User,
   AuthError
 } from 'firebase/auth';

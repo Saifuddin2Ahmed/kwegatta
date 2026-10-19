@@ -12,10 +12,12 @@ import nodemailer from 'nodemailer';
 import sharp from 'sharp';
 import wawoff2 from 'wawoff2';
 import { ISO_COUNTRIES, deriveLocation } from './src/lib/countries';
-import { ROLE_CHOICES, STAGE_CHOICES, INTENT_CHOICES, normalizeIntent } from './src/lib/profileChoices';
-import { normalizeTicketCode, isValidTicketCode, formatTicketCode } from './src/lib/ticketCode';
+import { ROLE_CHOICES, STAGE_CHOICES, normalizeIntent } from './src/lib/profileChoices';
+import { normalizeTicketCode } from './src/lib/ticketCode';
 import { formatTzLabel } from './src/lib/timezoneLabel';
-import { getEffectiveStartMs, getEffectiveEndMs, getOpportunityDeadlineMs, sortForTab } from './src/lib/eventTiming';
+import { validateEventTitle } from './src/lib/eventTitle';
+import { validateTeamPayload, checkPhotoDataUrl, checkX, checkWebsite, whatsappLink, TEAM_VISIBILITY_FLAGS } from './src/lib/teamFields';
+import { getEffectiveStartMs, getEffectiveEndMs, getOpportunityDeadlineMs, sortForTab, findRecentDuplicate } from './src/lib/eventTiming';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -201,11 +203,19 @@ app.use((_req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: '50mb' }));
+// JSON body size: 2 MB covers profiles (avatar up to 1 MB) and event covers.
+// Admin uploads (team and event photos) get more room; nothing else needs it.
+const jsonDefault = express.json({ limit: '2mb' });
+const jsonLarge = express.json({ limit: '12mb' });
+export function needsLargeJsonBody(path: string): boolean {
+  return path.startsWith('/api/admin/') || path === '/api/upload-photo';
+}
+app.use((req, res, next) => (needsLargeJsonBody(req.path) ? jsonLarge : jsonDefault)(req, res, next));
 
 interface AuthUserData {
   uid: string;
   email?: string;
+  email_verified?: boolean;
   name?: string;
 }
 
@@ -229,6 +239,7 @@ app.use(async (req: Request, _res: Response, next: () => void) => {
         (req as any).authUser = {
           uid: decoded.uid,
           email: decoded.email,
+          email_verified: decoded.email_verified === true,
           name: decoded.name
         } as AuthUserData;
       }
@@ -241,6 +252,7 @@ app.use(async (req: Request, _res: Response, next: () => void) => {
     (req as any).authUser = {
       uid: token,
       email: `${token}@kwegatta.test`,
+      email_verified: !token.startsWith('unverified-'),
       name: `User ${token}`
     } as AuthUserData;
   }
@@ -377,18 +389,18 @@ function createSmartApiRateLimiter() {
 const globalApiLimiter = createSmartApiRateLimiter();
 app.use('/api/', globalApiLimiter);
 
-// Gemma model rate limit: 25 calls per minute per IP
-const gemmaLimiter = createRateLimiter({
-  windowMs: 60000,
-  max: 25,
-  message: 'AI inference rate limit reached. Please wait a moment.'
-});
-
 // Admin login rate limit: 10 attempts per minute per IP
 const adminLoginLimiter = createRateLimiter({
   windowMs: 60000,
   max: 10,
   message: 'Too many admin login attempts. Please wait 1 minute.'
+});
+
+// Reports: 10 per IP per 10 minutes
+const reportLimiter = createRateLimiter({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  message: 'Too many reports sent. Please wait a few minutes.'
 });
 
 // Initial realistic MUBS / Hack Day Kampala demo cohort
@@ -645,13 +657,21 @@ export interface TeamMember {
   line2: string;
   github?: string | null;
   linkedin?: string | null;
+  bio?: string;
+  x?: string | null;
+  website?: string | null;
+  whatsapp?: string | null;
   linked_profile_id?: string | null;
   photo?: string | null;
   order: number;
   hidden: boolean;
   show_title?: boolean;
   show_line1?: boolean;
+  show_bio?: boolean;
   show_linkedin?: boolean;
+  show_x?: boolean;
+  show_website?: boolean;
+  show_whatsapp?: boolean;
   team_since?: string | null;
   show_since?: boolean;
   created_at?: string;
@@ -813,12 +833,16 @@ function issueAdminToken(): string {
   return token;
 }
 
-export function getAdminEmailsList(): string[] {
-  const envEmails = (process.env.ADMIN_EMAILS || '')
+function getEnvAdminEmails(): string[] {
+  return (process.env.ADMIN_EMAILS || '')
     .split(',')
     .map(e => e.trim().toLowerCase())
     .filter(Boolean);
-  
+}
+
+export function getAdminEmailsList(): string[] {
+  const envEmails = getEnvAdminEmails();
+
   const storedEmails = Array.isArray(store.admin_emails)
     ? store.admin_emails.map((e: string) => String(e).trim().toLowerCase()).filter(Boolean)
     : [];
@@ -828,13 +852,16 @@ export function getAdminEmailsList(): string[] {
 }
 
 export function resolveAdminInfo(req: Request): { isAdmin: boolean; adminName: string; adminEmail: string } {
-  // 1. Primary: Check signed-in account by email (Google or Email/Password)
+  // 1. Primary: the signed-in account's own email (from the verified ID token).
+  // A profile's stored email is never used, because members can edit their profiles.
+  // Emails added from the Admin panel also need a verified address, so nobody can
+  // register an unverified account under an admin email that has not signed up yet.
   const authUser = (req as any).authUser as AuthUserData | undefined;
-  const adminEmails = getAdminEmailsList();
-  
   if (authUser && authUser.email) {
     const userEmail = authUser.email.trim().toLowerCase();
-    if (adminEmails.includes(userEmail)) {
+    const envEmails = getEnvAdminEmails();
+    const allowed = envEmails.includes(userEmail) || (authUser.email_verified === true && getAdminEmailsList().includes(userEmail));
+    if (allowed) {
       return {
         isAdmin: true,
         adminName: authUser.name || authUser.email.split('@')[0] || 'Admin',
@@ -843,24 +870,8 @@ export function resolveAdminInfo(req: Request): { isAdmin: boolean; adminName: s
     }
   }
 
-  // Also check if authUserId matches a profile linked to an admin email
-  const authUserId = resolveAuthUserId(req);
-  if (authUserId) {
-    const profile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
-    if (profile && profile.email) {
-      const pEmail = profile.email.trim().toLowerCase();
-      if (adminEmails.includes(pEmail)) {
-        return {
-          isAdmin: true,
-          adminName: profile.name || profile.email.split('@')[0] || 'Admin',
-          adminEmail: pEmail
-        };
-      }
-    }
-  }
-
   // 2. Emergency fallback: ADMIN_FALLBACK=true + session token
-  const token = (req.headers['x-admin-token'] as string) || (req.query.token as string);
+  const token = req.headers['x-admin-token'] as string;
   if (token && activeAdminTokens.has(token)) {
     if (process.env.ADMIN_FALLBACK === 'true') {
       const createdAt = activeAdminTokens.get(token)!;
@@ -1019,7 +1030,7 @@ export function sanitizePostForPublic(post: any, req: Request): any {
     }
   }
   const reactionsBy = post.reactions_by || {};
-  for (const [pId, type] of Object.entries(reactionsBy)) {
+  for (const [, type] of Object.entries(reactionsBy)) {
     if (type === 'like') counts.like++;
     else if (type === 'launch') counts.launch++;
     else if (type === 'love') counts.love++;
@@ -1396,7 +1407,8 @@ async function batchRemoveDocs(collectionName: string, ids: string[]): Promise<v
 /**
  * Audited list of every Firestore collection written via persistDoc, removeDoc,
  * batchPersistDocs, or batchRemoveDocs. Every collection in PERSISTED_COLLECTIONS
- * has a real-time onSnapshot listener in setupFirestoreListeners().
+ * has a real-time onSnapshot listener in setupFirestoreListeners(), except those in
+ * WRITE_ONLY_COLLECTIONS, which are read once at boot.
  */
 export const PERSISTED_COLLECTIONS = [
   'profiles',
@@ -1412,11 +1424,13 @@ export const PERSISTED_COLLECTIONS = [
   'event_guests',
   'event_questions',
   'event_checkins',
-  'event_match_feedback'
+  'event_match_feedback',
+  'migrations'
 ] as const;
 
-// Explicit write-only allowlist (empty: all persisted collections are loaded in setupFirestoreListeners)
-export const WRITE_ONLY_COLLECTIONS: readonly string[] = [] as const;
+// Collections written with persistDoc but not loaded by a listener.
+// "migrations" holds flag and settings documents that are read once at boot (loadStoredAdminEmails, migration checks).
+export const WRITE_ONLY_COLLECTIONS: readonly string[] = ['migrations'] as const;
 
 let usingMockFirestoreInTest = false;
 export function setMockFirestoreDbForTest(mockDb: any): void {
@@ -1832,16 +1846,49 @@ export async function initStorage(mockDbForTest?: any): Promise<void> {
     }
   }
 
-  // Run one-time Saifuddin profile migrations (v1, v2, v3) and test events cleanup
+  await loadStoredAdminEmails();
+
+  // One-time profile migrations (v1, v2, v3) and test events cleanup run after the
+  // server starts listening, so they do not add to cold start. Each is flag-guarded.
+  void (async () => {
+    try {
+      await runSaifuddinProfileMigration();
+      await runSaifuddinProfileMigrationV2();
+      await runSaifuddinProfileMigrationV3();
+      await cleanupTestEvents();
+      await publishExistingPendingEvents();
+    } catch (mErr: any) {
+      console.warn('[Migration/Cleanup] Notice during migrations or cleanup:', mErr?.message || mErr);
+    }
+  })();
+}
+
+/* Admin emails added from the Admin panel are kept in one settings document. */
+const ADMIN_EMAILS_SETTINGS_DOC = 'admin_emails_settings';
+
+async function loadStoredAdminEmails(): Promise<void> {
+  if (storageMode !== 'firestore' || !firestoreDb) return;
   try {
-    await runSaifuddinProfileMigration();
-    await runSaifuddinProfileMigrationV2();
-    await runSaifuddinProfileMigrationV3();
-    await cleanupTestEvents();
-    await publishExistingPendingEvents();
-  } catch (mErr: any) {
-    console.warn('[Migration/Cleanup] Notice during migrations or cleanup:', mErr?.message || mErr);
+    const snap = await firestoreDb.collection('migrations').doc(ADMIN_EMAILS_SETTINGS_DOC).get();
+    const emails = snap.exists ? snap.data()?.emails : null;
+    if (Array.isArray(emails)) {
+      store.admin_emails = emails.map((e: unknown) => String(e).trim().toLowerCase()).filter(Boolean);
+    }
+  } catch (err: any) {
+    console.warn('[Admin] Could not load stored admin emails:', err?.message || err);
   }
+}
+
+async function persistStoredAdminEmails(): Promise<void> {
+  if (storageMode === 'disk') {
+    saveStore(store);
+    return;
+  }
+  await persistDoc('migrations', ADMIN_EMAILS_SETTINGS_DOC, {
+    id: ADMIN_EMAILS_SETTINGS_DOC,
+    emails: store.admin_emails || [],
+    updated_at: new Date().toISOString()
+  });
 }
 
 /* =========================================================================
@@ -2409,6 +2456,9 @@ app.post('/api/auth/claim-profile', async (req: Request, res: Response) => {
   // Prevent hijacking: only allow claiming if profile has no account_uid or already belongs to this uid
   if (profile.account_uid && profile.account_uid !== authUserId) {
     return res.status(403).json({ error: 'This profile is already linked to another account' });
+  }
+  if (!canClaimProfile(profile, authUserId, (req as any).authUser?.email)) {
+    return res.status(403).json({ error: 'This profile belongs to a different email address' });
   }
 
   profile.account_uid = authUserId;
@@ -3376,7 +3426,7 @@ interface AdminLockoutInfo {
 }
 const adminLockoutMap = new Map<string, AdminLockoutInfo>();
 
-app.post('/api/admin/login', async (req: Request, res: Response) => {
+app.post('/api/admin/login', adminLoginLimiter, async (req: Request, res: Response) => {
   const clientIp = getClientIp(req);
   const ipKey = String(clientIp).trim();
   const now = Date.now();
@@ -3459,13 +3509,21 @@ export interface AdminResolution {
   adminEmail: string;
 }
 
+/** Admin-only routes: 401 when signed out, 403 when signed in without admin rights. */
 function verifyAdmin(req: Request, res: Response): AdminResolution | null {
   const info = resolveAdminInfo(req);
-  if (!info.isAdmin) {
+  if (info.isAdmin) return info;
+  if (resolveAuthUserId(req)) {
+    res.status(403).json({ error: 'Admin access required' });
+  } else {
     res.status(401).json({ error: 'Unauthorized: Admin session required' });
-    return null;
   }
-  return info;
+  return null;
+}
+
+/** Unique audit-log id; a bare timestamp collides when two actions land in the same millisecond. */
+export function newAuditId(): string {
+  return `audit-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
 }
 
 app.get('/api/admin/overview', (req: Request, res: Response) => {
@@ -3609,7 +3667,7 @@ app.post('/api/posts/:id/react', reactionLimiter, async (req: Request, res: Resp
       else if (k === '💡' || k === 'idea') counts.idea += num;
     }
   }
-  for (const [pId, t] of Object.entries(post.reactions_by)) {
+  for (const [, t] of Object.entries(post.reactions_by)) {
     if (t === 'like') counts.like++;
     else if (t === 'launch') counts.launch++;
     else if (t === 'love') counts.love++;
@@ -3733,6 +3791,8 @@ app.post('/api/admin/action', async (req: Request, res: Response) => {
   if (action === 'delete_member') {
     const target = store.profiles.find(p => p.id === id);
     const deletedPosts = store.posts.filter(p => p.author_id === id).map(p => p.id);
+    // Same cascade as self-deletion: follows, matches, notifications, RSVPs, team links.
+    if (target) await cascadeDeleteMemberData(id, target.account_uid);
     store.profiles = store.profiles.filter(p => p.id !== id);
     store.posts = store.posts.filter(p => p.author_id !== id);
     if (storageMode === 'firestore' && firestoreDb) {
@@ -3740,7 +3800,7 @@ app.post('/api/admin/action', async (req: Request, res: Response) => {
       if (deletedPosts.length > 0) await batchRemoveDocs('posts', deletedPosts);
     }
     const auditEntry = {
-      id: 'audit-' + Date.now(),
+      id: newAuditId(),
       timestamp: new Date().toISOString(),
       action: 'DELETE_MEMBER',
       details: `Deleted member: ${target?.name || id}`,
@@ -3754,7 +3814,7 @@ app.post('/api/admin/action', async (req: Request, res: Response) => {
       target.hidden = hidden;
       await persistDoc('profiles', target.id, target);
       const auditEntry = {
-        id: 'audit-' + Date.now(),
+        id: newAuditId(),
         timestamp: new Date().toISOString(),
         action: hidden ? 'HIDE_MEMBER' : 'UNHIDE_MEMBER',
         details: `${hidden ? 'Hid' : 'Unhid'} member: ${target.name}`,
@@ -3767,7 +3827,7 @@ app.post('/api/admin/action', async (req: Request, res: Response) => {
     store.posts = store.posts.filter(p => p.id !== id);
     await removeDoc('posts', id);
     const auditEntry = {
-      id: 'audit-' + Date.now(),
+      id: newAuditId(),
       timestamp: new Date().toISOString(),
       action: 'DELETE_POST',
       details: `Deleted post ID: ${id}`,
@@ -3779,7 +3839,7 @@ app.post('/api/admin/action', async (req: Request, res: Response) => {
     const newNotifs: Array<{ id: string; data: any }> = [];
     for (const p of store.profiles) {
       const notif = {
-        id: 'notif-ann-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+        id: 'notif-ann-' + Date.now() + '-' + crypto.randomBytes(5).toString('hex'),
         to_id: p.id,
         from_id: 'organiser',
         type: 'digest',
@@ -3794,7 +3854,7 @@ app.post('/api/admin/action', async (req: Request, res: Response) => {
       await batchPersistDocs('notifications', newNotifs);
     }
     const auditEntry = {
-      id: 'audit-' + Date.now(),
+      id: newAuditId(),
       timestamp: new Date().toISOString(),
       action: 'SEND_ANNOUNCEMENT',
       details: `Broadcasted notice to ${store.profiles.length} members: "${message.slice(0, 50)}..."`,
@@ -3816,7 +3876,7 @@ app.get('/api/admin/audit-log', (req: Request, res: Response) => {
 });
 
 // Member Safety: Report a profile with reason
-app.post('/api/reports', async (req: Request, res: Response) => {
+app.post('/api/reports', reportLimiter, async (req: Request, res: Response) => {
   const authUserId = resolveAuthUserId(req);
   const { reported_id, reason, details } = req.body || {};
   if (!reported_id || typeof reported_id !== 'string') {
@@ -3842,7 +3902,7 @@ app.post('/api/reports', async (req: Request, res: Response) => {
   await persistDoc('reports', report.id, report);
 
   const auditEntry = {
-    id: 'audit-' + Date.now(),
+    id: newAuditId(),
     timestamp: new Date().toISOString(),
     action: 'MEMBER_REPORTED',
     details: `Member "${report.reported_name}" (${report.reported_id}) reported by ${report.reporter_name}: ${report.reason}`,
@@ -3995,7 +4055,7 @@ app.post('/api/admin/import', async (req: Request, res: Response) => {
         avatar: sanitizeAvatar(raw.avatar),
         status: sanitizeText(raw.status, 100),
         is_demo: Boolean(raw.is_demo),
-        created_at: sanitizeText(raw.created_at, 50) || new Date().toISOString(),
+        created_at: new Date().toISOString(),
         gh: raw.gh && typeof raw.gh === 'object' ? raw.gh : null,
         blocked_ids: sanitizeArray(raw.blocked_ids, 200, 64),
         hidden: Boolean(raw.hidden)
@@ -4038,7 +4098,7 @@ app.post('/api/admin/import', async (req: Request, res: Response) => {
     }
 
     const auditEntry = {
-      id: 'audit-' + Date.now(),
+      id: newAuditId(),
       timestamp: new Date().toISOString(),
       action: 'ADMIN_IMPORT',
       details: `Imported and restored ${restoredCount} member profile(s) with preserved IDs.`,
@@ -4372,7 +4432,6 @@ app.delete('/api/account', async (req: Request, res: Response) => {
   const existing = store.profiles.find((p: any) => p.id === authUserId || p.account_uid === authUserId);
   const id = existing ? existing.id : authUserId;
 
-  const initialCount = store.profiles.length;
   await cascadeDeleteMemberData(id, existing?.account_uid || authUserId);
   store.profiles = store.profiles.filter((p: any) => p.id !== id && p.account_uid !== authUserId);
 
@@ -4437,7 +4496,7 @@ app.get('/api/avatar/:id', (req: Request, res: Response) => {
   if (!profile || !profile.avatar) {
     const name = profile?.name || '?';
     const initial = name.charAt(0).toUpperCase();
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><rect width="128" height="128" rx="64" fill="#1e293b"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" fill="#F0F3F6" font-family="Inter, sans-serif" font-size="52" font-weight="bold">${initial}</text></svg>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><rect width="128" height="128" rx="64" fill="#1e293b"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" fill="#F0F3F6" font-family="Inter, sans-serif" font-size="52" font-weight="bold">${escapeHtml(initial)}</text></svg>`;
     const etag = `W/"svg-${id}-${initial}"`;
     if (req.headers['if-none-match'] === etag) {
       return res.status(304).end();
@@ -4466,7 +4525,8 @@ app.get('/api/avatar/:id', (req: Request, res: Response) => {
       res.setHeader('ETag', etag);
       return res.send(buffer);
     }
-  } else if (avatar.startsWith('http')) {
+  } else if (/^https:\/\/[^/]/i.test(avatar)) {
+    // Only https photo links (e.g. Google account photos); never plain http.
     return res.redirect(avatar);
   }
 
@@ -4540,7 +4600,6 @@ export async function handleEventImageUpload(req: Request, res: Response) {
   const isAdmin = checkAdmin(req);
   const callerProfile = callerId ? store.profiles.find((p: any) => p.account_uid === callerId || p.id === callerId) : null;
   const callerProfileId = callerProfile?.id || callerId;
-  const isOrganiser = Boolean(callerProfile?.is_organiser);
 
   const eventId = req.body?.event_id || req.query.event_id;
   let targetEvent: any = null;
@@ -4830,11 +4889,12 @@ export function injectEventOgIntoHtml(baseHtml: string, item: any): string {
     `    <meta name="twitter:description" content="${escapedDesc}" />`,
     `    <meta name="twitter:image" content="${escapeHtml(ogImageUrl)}" />`,
     `    <link rel="canonical" href="${escapeHtml(canonicalUrl)}" />`,
-    `    <script>(function(){try{if(window.location.pathname.indexOf('/e/')===0){window.history.replaceState(null,'','/#/events/${safeId}');}}catch(_){}})();</script>`
+    `    <script>(function(){try{if(window.location.pathname.indexOf('/e/')===0){window.history.replaceState(null,'','/#/events/${safeId.replace(/'/g, '%27')}');}}catch(_){}})();</script>`
   ].join('\n');
 
   if (cleaned.includes('</head>')) {
-    return cleaned.replace('</head>', `    ${injectedBlock}\n  </head>`);
+    // Function replacement: a title containing "$&" or "$'" must not be expanded by String.replace.
+    return cleaned.replace('</head>', () => `    ${injectedBlock}\n  </head>`);
   }
   return `${injectedBlock}\n${cleaned}`;
 }
@@ -5200,7 +5260,7 @@ app.post('/api/admin/announcement/pin', (req: Request, res: Response) => {
   };
 
   const auditEntry = {
-    id: 'audit-' + Date.now(),
+    id: newAuditId(),
     timestamp: new Date().toISOString(),
     action: 'PIN_ANNOUNCEMENT',
     details: `Pinned announcement: "${cleanText.slice(0, 60)}"`,
@@ -5221,7 +5281,7 @@ app.post('/api/admin/announcement/unpin', (req: Request, res: Response) => {
   store.pinned_announcement = null;
 
   const auditEntry = {
-    id: 'audit-' + Date.now(),
+    id: newAuditId(),
     timestamp: new Date().toISOString(),
     action: 'UNPIN_ANNOUNCEMENT',
     details: `Unpinned announcement${prev ? `: "${prev.slice(0, 50)}"` : ''}`,
@@ -5276,10 +5336,10 @@ app.post('/api/admin/admins', async (req: Request, res: Response) => {
 
   if (!store.admin_emails.includes(cleanEmail)) {
     store.admin_emails.push(cleanEmail);
-    if (storageMode === 'disk') saveStore(store);
+    await persistStoredAdminEmails();
 
     const auditEntry = {
-      id: 'audit-' + Date.now(),
+      id: newAuditId(),
       timestamp: new Date().toISOString(),
       action: 'ADD_ADMIN',
       details: `Added admin account: ${cleanEmail}`,
@@ -5299,10 +5359,10 @@ app.delete('/api/admin/admins/:email', async (req: Request, res: Response) => {
   const targetEmail = req.params.email.trim().toLowerCase();
   if (store.admin_emails) {
     store.admin_emails = store.admin_emails.filter(e => e.trim().toLowerCase() !== targetEmail);
-    if (storageMode === 'disk') saveStore(store);
+    await persistStoredAdminEmails();
 
     const auditEntry = {
-      id: 'audit-' + Date.now(),
+      id: newAuditId(),
       timestamp: new Date().toISOString(),
       action: 'REMOVE_ADMIN',
       details: `Removed admin account: ${targetEmail}`,
@@ -5329,7 +5389,7 @@ app.post('/api/admin/members/:id/suspend', async (req: Request, res: Response) =
   await persistDoc('profiles', target.id, target);
 
   const auditEntry = {
-    id: 'audit-' + Date.now(),
+    id: newAuditId(),
     timestamp: new Date().toISOString(),
     action: 'SUSPEND_MEMBER',
     details: `Suspended member: ${target.name} (${target.id})`,
@@ -5355,7 +5415,7 @@ app.post('/api/admin/members/:id/unsuspend', async (req: Request, res: Response)
   await persistDoc('profiles', target.id, target);
 
   const auditEntry = {
-    id: 'audit-' + Date.now(),
+    id: newAuditId(),
     timestamp: new Date().toISOString(),
     action: 'UNSUSPEND_MEMBER',
     details: `Unsuspended member: ${target.name} (${target.id})`,
@@ -6682,6 +6742,8 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
   });
 });
 
+const EVENT_DOUBLE_SUBMIT_MS = 2 * 60 * 1000;
+
 app.post('/api/events', async (req: Request, res: Response) => {
   const adminInfo = resolveAdminInfo(req);
   const isAdmin = adminInfo.isAdmin;
@@ -6705,11 +6767,23 @@ app.post('/api/events', async (req: Request, res: Response) => {
 
   const raw = req.body || {};
   const kind = raw.kind === 'opportunity' ? 'opportunity' : 'event';
-  const title = sanitizeText(raw.title, 150);
+  const title = sanitizeText(typeof raw.title === 'string' ? raw.title.replace(/\s+/g, ' ') : raw.title, 150);
   const description = sanitizeText(raw.description, 2000);
 
   if (!title || !description) {
     return res.status(400).json({ error: 'Title and description are required.' });
+  }
+  const titleError = validateEventTitle(title);
+  if (titleError) {
+    return res.status(400).json({ error: titleError, field: 'title' });
+  }
+
+  // Double submit (same author, same title, within 2 minutes): return the event already created.
+  if (callerProfile) {
+    const recent = findRecentDuplicate(store.events || [], [callerProfile.id, callerProfile.account_uid], title);
+    if (recent && Date.now() - new Date((recent as any).created_at).getTime() < EVENT_DOUBLE_SUBMIT_MS) {
+      return res.json({ success: true, duplicate: true, item: sanitizeEventForPublic(recent, callerId, true, isAdmin) });
+    }
   }
 
   // Validate times, format, and locations for events
@@ -6866,7 +6940,7 @@ app.post('/api/events', async (req: Request, res: Response) => {
   for (const p of store.profiles) {
     if (p.hidden || p.suspended || p.id === authorId) continue;
     const notif = {
-      id: 'notif-ev-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      id: 'notif-ev-' + Date.now() + '-' + crypto.randomBytes(5).toString('hex'),
       to_id: p.id,
       from_id: 'organiser',
       type: 'digest',
@@ -6891,7 +6965,7 @@ app.post('/api/events', async (req: Request, res: Response) => {
   }
 
   const auditEntry = {
-    id: 'audit-' + Date.now(),
+    id: newAuditId(),
     timestamp: new Date().toISOString(),
     action: 'CREATE_EVENT',
     details: `Created ${kind}: "${item.title}" (${status})`,
@@ -7011,7 +7085,14 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
     }
   }
 
-  if (raw.title !== undefined) item.title = sanitizeText(raw.title, 150);
+  if (raw.title !== undefined) {
+    const nextTitle = sanitizeText(typeof raw.title === 'string' ? raw.title.replace(/\s+/g, ' ') : raw.title, 150);
+    if (nextTitle !== String(item.title || '').trim()) {
+      const titleError = validateEventTitle(nextTitle);
+      if (titleError) return res.status(400).json({ error: titleError, field: 'title' });
+    }
+    item.title = nextTitle;
+  }
   if (raw.description !== undefined) item.description = sanitizeText(raw.description, 2000);
   if (raw.datetime !== undefined) item.datetime = sanitizeText(raw.datetime, 60);
   if (raw.cover_image !== undefined) {
@@ -7049,7 +7130,7 @@ app.patch('/api/events/:id', async (req: Request, res: Response) => {
   }
 
   const auditEntry = {
-    id: 'audit-' + Date.now(),
+    id: newAuditId(),
     timestamp: new Date().toISOString(),
     action: item.is_cancelled ? 'CANCEL_EVENT' : 'UPDATE_EVENT',
     details: `${item.is_cancelled ? 'Cancelled' : 'Updated'} ${item.kind}: "${item.title}"`,
@@ -7085,7 +7166,7 @@ app.post('/api/events/:id/cancel', async (req: Request, res: Response) => {
   await persistDoc('events', item.id, item);
 
   const auditEntry = {
-    id: 'audit-' + Date.now(),
+    id: newAuditId(),
     timestamp: new Date().toISOString(),
     action: 'CANCEL_EVENT',
     details: `Cancelled ${item.kind}: "${item.title}"`,
@@ -7132,7 +7213,7 @@ async function deleteEventWithCascade(
   const notifs: Array<{ id: string; data: any }> = [];
   for (const memberId of registeredMemberIds) {
     const notif = {
-      id: 'notif-evdel-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      id: 'notif-evdel-' + Date.now() + '-' + crypto.randomBytes(5).toString('hex'),
       to_id: memberId,
       from_id: removedBy === 'moderator' ? 'moderator' : 'organiser',
       type: 'digest',
@@ -7171,7 +7252,7 @@ app.delete('/api/events/:id', async (req: Request, res: Response) => {
     await deleteEventWithCascade(item, [callerProfileId, callerId]);
 
   const auditEntry = {
-    id: 'audit-' + Date.now(),
+    id: newAuditId(),
     timestamp: new Date().toISOString(),
     action: 'DELETE_EVENT',
     details: `Deleted ${item.kind}: "${item.title}" (${id}). Notified ${registeredMemberIds.length} member(s); removed ${deletedGuestIds.length} guest(s), ${deletedQuestionIds.length} question(s), ${deletedCheckinIds.length} check-in(s).`,
@@ -7190,7 +7271,7 @@ app.delete('/api/events/:id', async (req: Request, res: Response) => {
 });
 
 // Part 5: Report an event for moderation
-app.post('/api/events/:id/report', async (req: Request, res: Response) => {
+app.post('/api/events/:id/report', reportLimiter, async (req: Request, res: Response) => {
   const callerId = resolveAuthUserId(req);
   if (!callerId) {
     return res.status(401).json({ error: 'Please sign in to report an event.' });
@@ -7806,7 +7887,7 @@ app.post('/api/admin/events/:id/hide', async (req: Request, res: Response) => {
   item.hidden_reason = reasonStr;
 
   const auditEntry = {
-    id: 'audit-' + Date.now(),
+    id: newAuditId(),
     timestamp: new Date().toISOString(),
     action: 'HIDE_EVENT',
     details: `Admin hid event "${item.title}" (${id}). Reason: ${reasonStr}`,
@@ -7854,7 +7935,7 @@ app.post('/api/admin/events/:id/restore', async (req: Request, res: Response) =>
   item.awaiting_review = false;
 
   const auditEntry = {
-    id: 'audit-' + Date.now(),
+    id: newAuditId(),
     timestamp: new Date().toISOString(),
     action: 'RESTORE_EVENT',
     details: `Admin restored event "${item.title}" (${id})`,
@@ -7909,7 +7990,7 @@ app.delete('/api/admin/events/:id', async (req: Request, res: Response) => {
     await deleteEventWithCascade(item, [], 'moderator');
 
   const auditEntry = {
-    id: 'audit-' + Date.now(),
+    id: newAuditId(),
     timestamp: new Date().toISOString(),
     action: 'DELETE_EVENT_ADMIN',
     details: `Admin deleted event "${item.title}" (${id}). Reason: ${reasonStr}. Notified ${registeredMemberIds.length} member(s); removed ${deletedGuestIds.length} guest(s), ${deletedQuestionIds.length} question(s), ${deletedCheckinIds.length} check-in(s).`,
@@ -7962,7 +8043,7 @@ app.post('/api/admin/events/:id/block-author', async (req: Request, res: Respons
   await persistDoc('profiles', authorProfile.id, authorProfile);
 
   const auditEntry = {
-    id: 'audit-' + Date.now(),
+    id: newAuditId(),
     timestamp: new Date().toISOString(),
     action: 'BLOCK_EVENT_AUTHOR',
     details: `Admin blocked author ${authorProfile.name} (${authorProfile.id}) from creating events`,
@@ -7992,7 +8073,7 @@ app.post('/api/admin/events/:id/unblock-author', async (req: Request, res: Respo
   await persistDoc('profiles', authorProfile.id, authorProfile);
 
   const auditEntry = {
-    id: 'audit-' + Date.now(),
+    id: newAuditId(),
     timestamp: new Date().toISOString(),
     action: 'UNBLOCK_EVENT_AUTHOR',
     details: `Admin unblocked author ${authorProfile.name} (${authorProfile.id}) from creating events`,
@@ -8058,7 +8139,7 @@ app.post('/api/admin/members/:id/organiser', async (req: Request, res: Response)
   await persistDoc('profiles', target.id, target);
 
   const auditEntry = {
-    id: 'audit-' + Date.now(),
+    id: newAuditId(),
     timestamp: new Date().toISOString(),
     action: target.is_organiser ? 'GRANT_ORGANISER' : 'REVOKE_ORGANISER',
     details: `${target.is_organiser ? 'Granted' : 'Revoked'} Organiser label for ${target.name} (${target.id})`,
@@ -8109,7 +8190,7 @@ app.post('/api/events/:id/update', async (req: Request, res: Response) => {
 
   for (const attId of attendeeIds) {
     const notif = {
-      id: 'notif-upd-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      id: 'notif-upd-' + Date.now() + '-' + crypto.randomBytes(5).toString('hex'),
       to_id: attId,
       from_id: item.author_id || 'organiser',
       type: 'digest',
@@ -8996,55 +9077,125 @@ export function validateTeamSince(val: unknown): { valid: boolean; value: string
   return { valid: true, value: str };
 }
 
+function teamPhotoUrl(m: any): string {
+  return `/api/team-photo/${encodeURIComponent(m.id)}?v=${encodeURIComponent(m.updated_at || '')}`;
+}
+
+function isTeamSettingsDoc(m: any): boolean {
+  return !m || m.id === '__team_settings__' || Boolean(m.is_settings);
+}
+
+function linkedProfileFor(m: any): { profile: any; avatarUrl: string | null } {
+  if (!m.linked_profile_id) return { profile: null, avatarUrl: null };
+  const lp = store.profiles.find((p: any) => p.id === m.linked_profile_id && !p.hidden);
+  if (!lp) return { profile: null, avatarUrl: null };
+  return {
+    profile: { id: lp.id, name: lp.name, role: lp.role, headline: lp.headline },
+    avatarUrl: lp.avatar ? `/api/avatar/${lp.id}` : null
+  };
+}
+
 export function getPublicTeamList(): any[] {
   let list = Array.isArray(store.team) ? [...store.team] : [];
-  list = list.filter((m: any) => m && !m.hidden && m.id !== '__team_settings__' && !m.is_settings);
+  list = list.filter((m: any) => !isTeamSettingsDoc(m) && !m.hidden);
   list.sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
 
   const detailsEnabled = Boolean(store.team_details_enabled);
 
   return list.map((m: any) => {
-    let linkedAvatar = null;
-    let linkedProfile = null;
-    if (m.linked_profile_id) {
-      const lp = store.profiles.find((p: any) => p.id === m.linked_profile_id);
-      if (lp) {
-        linkedProfile = { id: lp.id, name: lp.name, role: lp.role, headline: lp.headline };
-        linkedAvatar = lp.avatar ? `/api/avatar/${lp.id}` : null;
-      }
-    }
+    const linked = linkedProfileFor(m);
     const pub: Record<string, any> = {
       id: m.id,
       name: m.name,
       line2: m.line2,
       github: m.github || null,
-      linked_profile_id: m.linked_profile_id || null,
+      linked_profile_id: linked.profile ? m.linked_profile_id : null,
       order: Number(m.order) || 0,
-      photo_url: m.photo ? `/api/team-photo/${m.id}` : null,
-      linked_avatar: linkedAvatar,
-      linked_profile: linkedProfile
+      photo_url: m.photo ? teamPhotoUrl(m) : null,
+      linked_avatar: linked.avatarUrl,
+      linked_profile: linked.profile
     };
 
     if (detailsEnabled) {
-      if (m.show_title === true && m.title && String(m.title).trim()) {
-        pub.title = String(m.title).trim();
-      }
-      if (m.show_line1 === true && m.line1 && String(m.line1).trim()) {
-        pub.line1 = String(m.line1).trim();
-      }
-      if (m.show_linkedin === true && isValidLinkedinUrl(m.linkedin)) {
-        pub.linkedin = String(m.linkedin).trim();
+      const text = (v: unknown) => (v && String(v).trim() ? String(v).trim() : null);
+      if (m.show_title === true && text(m.title)) pub.title = text(m.title);
+      if (m.show_line1 === true && text(m.line1)) pub.line1 = text(m.line1);
+      if (m.show_bio === true && text(m.bio)) pub.bio = text(m.bio);
+      if (m.show_linkedin === true && isValidLinkedinUrl(m.linkedin)) pub.linkedin = String(m.linkedin).trim();
+      if (m.show_x === true && checkX(m.x).ok && m.x) pub.x = m.x;
+      if (m.show_website === true && checkWebsite(m.website).ok && m.website) pub.website = m.website;
+      if (m.show_whatsapp === true && m.whatsapp) {
+        const link = whatsappLink(m.whatsapp);
+        if (link) pub.whatsapp_url = link;
       }
       if (m.show_since === true && m.team_since) {
         const formattedSince = formatTeamSince(m.team_since);
-        if (formattedSince) {
-          pub.since = formattedSince;
-        }
+        if (formattedSince) pub.since = formattedSince;
       }
     }
 
     return pub;
   });
+}
+
+async function writeAdminAudit(admin: AdminResolution, action: string, details: string): Promise<void> {
+  const auditEntry = {
+    id: newAuditId(),
+    timestamp: new Date().toISOString(),
+    action,
+    details,
+    admin: admin.adminName
+  };
+  store.audit_log.unshift(auditEntry);
+  await persistDoc('audit_log', auditEntry.id, auditEntry);
+  if (storageMode === 'disk') saveStore(store);
+}
+
+function firstError(errors: Record<string, string>): string {
+  return Object.values(errors)[0] || 'Invalid team member details';
+}
+
+/** Validates type and size, then resizes to a 400x400 WebP. Rejects anything sharp cannot decode. */
+export async function processTeamPhoto(dataUrl: unknown): Promise<{ ok: true; photo: string } | { ok: false; error: string }> {
+  const check = checkPhotoDataUrl(dataUrl);
+  if (!check.ok) return check;
+  const b64 = String(dataUrl).slice(String(dataUrl).indexOf(',') + 1).replace(/\s/g, '');
+  try {
+    const resized = await sharp(Buffer.from(b64, 'base64'), { limitInputPixels: 40_000_000 })
+      .rotate()
+      .resize(400, 400, { fit: 'cover', position: 'center' })
+      .webp({ quality: 85 })
+      .toBuffer();
+    return { ok: true, photo: `data:image/webp;base64,${resized.toString('base64')}` };
+  } catch {
+    return { ok: false, error: 'Photo could not be read. Please upload a JPEG, PNG, WebP or GIF image.' };
+  }
+}
+
+function checkLinkedProfileId(val: unknown): { ok: true; value: string | null } | { ok: false; error: string } {
+  if (val === null || val === undefined || String(val).trim() === '') return { ok: true, value: null };
+  const id = String(val).trim();
+  if (!store.profiles.some((p: any) => p.id === id)) {
+    return { ok: false, error: 'Linked Kwegatta profile was not found' };
+  }
+  return { ok: true, value: id };
+}
+
+function adminTeamView(m: any) {
+  const linked = linkedProfileFor(m);
+  return {
+    ...m,
+    has_photo: Boolean(m.photo),
+    bio: m.bio || '',
+    x: m.x || null,
+    website: m.website || null,
+    whatsapp: m.whatsapp || null,
+    team_since: m.team_since || null,
+    ...Object.fromEntries(TEAM_VISIBILITY_FLAGS.map(f => [f, Boolean(m[f])])),
+    photo_url: m.photo && !m.hidden ? teamPhotoUrl(m) : null,
+    linked_avatar: linked.avatarUrl,
+    linked_profile: linked.profile
+  };
 }
 
 // Public: Get team members
@@ -9064,7 +9215,7 @@ const handleUpdateTeamSettings = async (req: Request, res: Response) => {
   if (!admin) return;
 
   const raw = req.body || {};
-  const enabled = Boolean(raw.team_details_enabled);
+  const enabled = raw.team_details_enabled === true;
   store.team_details_enabled = enabled;
 
   await persistDoc('team', '__team_settings__', {
@@ -9074,17 +9225,7 @@ const handleUpdateTeamSettings = async (req: Request, res: Response) => {
     updated_at: new Date().toISOString()
   });
 
-  const auditEntry = {
-    id: 'audit-' + Date.now(),
-    timestamp: new Date().toISOString(),
-    action: 'TEAM_SETTINGS_UPDATED',
-    details: `Admin set team_details_enabled to ${enabled}`,
-    admin: admin.adminName
-  };
-  store.audit_log.unshift(auditEntry);
-  await persistDoc('audit_log', auditEntry.id, auditEntry);
-
-  if (storageMode === 'disk') saveStore(store);
+  await writeAdminAudit(admin, 'TEAM_SETTINGS_UPDATED', `Admin set team_details_enabled to ${enabled}`);
   return res.json({ success: true, team_details_enabled: enabled });
 };
 
@@ -9098,34 +9239,28 @@ app.get('/api/admin/team', (req: Request, res: Response) => {
   const admin = verifyAdmin(req, res);
   if (!admin) return;
 
-  let list = Array.isArray(store.team) ? [...store.team] : [];
-  list = list.filter((m: any) => m && m.id !== '__team_settings__' && !m.is_settings);
-  list.sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
+  const list = (Array.isArray(store.team) ? [...store.team] : [])
+    .filter((m: any) => !isTeamSettingsDoc(m))
+    .sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
+  return res.json(list.map(adminTeamView));
+});
 
-  const enriched = list.map((m: any) => {
-    let linkedAvatar = null;
-    let linkedProfile = null;
-    if (m.linked_profile_id) {
-      const lp = store.profiles.find((p: any) => p.id === m.linked_profile_id);
-      if (lp) {
-        linkedProfile = { id: lp.id, name: lp.name, role: lp.role, headline: lp.headline };
-        linkedAvatar = lp.avatar || null;
-      }
-    }
-    return {
-      ...m,
-      show_title: Boolean(m.show_title),
-      show_line1: Boolean(m.show_line1),
-      show_linkedin: Boolean(m.show_linkedin),
-      team_since: m.team_since || null,
-      show_since: Boolean(m.show_since),
-      photo_url: m.photo ? `/api/team-photo/${m.id}` : null,
-      linked_avatar: linkedAvatar,
-      linked_profile: linkedProfile
-    };
-  });
-
-  return res.json(enriched);
+// Admin: Search Kwegatta profiles to link a team card to
+app.get('/api/admin/team/profile-search', (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+  const q = String(req.query.q || '').trim().toLowerCase().slice(0, 60);
+  if (q.length < 2) return res.json([]);
+  const results = store.profiles
+    .filter((p: any) => !p.hidden && [p.name, p.headline, p.email].some(v => String(v || '').toLowerCase().includes(q)))
+    .slice(0, 10)
+    .map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      headline: p.headline || '',
+      avatar_url: p.avatar ? `/api/avatar/${p.id}` : null
+    }));
+  return res.json(results);
 });
 
 // Admin: Add new team member
@@ -9134,65 +9269,97 @@ app.post('/api/admin/team', async (req: Request, res: Response) => {
   if (!admin) return;
 
   const raw = req.body || {};
-  const name = sanitizeText(raw.name, 100);
-  if (!name) {
-    return res.status(400).json({ error: 'Name is required' });
-  }
-
-  const rawTitle = raw.title !== undefined ? String(raw.title).trim() : (raw.role !== undefined ? String(raw.role).trim() : '');
-  if (rawTitle.length > 80) {
-    return res.status(400).json({ error: 'Title must be 80 characters or fewer' });
-  }
-
-  const rawLine1 = raw.line1 !== undefined ? String(raw.line1).trim() : (raw.background !== undefined ? String(raw.background).trim() : '');
-  if (rawLine1.length > 120) {
-    return res.status(400).json({ error: 'Line 1 (description) must be 120 characters or fewer' });
-  }
+  const checked = validateTeamPayload(raw, true);
+  if (!checked.ok) return res.status(400).json({ error: firstError(checked.errors), fields: checked.errors });
+  const v = checked.values;
 
   const sinceCheck = validateTeamSince(raw.team_since);
   if (!sinceCheck.valid) {
     return res.status(400).json({ error: sinceCheck.error || 'Invalid team_since' });
   }
+  const linkCheck = checkLinkedProfileId(raw.linked_profile_id);
+  if (!linkCheck.ok) return res.status(400).json({ error: linkCheck.error });
+
+  let photo: string | null = null;
+  if (raw.photo) {
+    const processed = await processTeamPhoto(raw.photo);
+    if (!processed.ok) return res.status(400).json({ error: processed.error });
+    photo = processed.photo;
+  }
 
   if (!Array.isArray(store.team)) store.team = [];
-  const maxOrder = store.team.reduce((max: number, m: any) => Math.max(max, Number(m.order) || 0), -1);
+  const maxOrder = store.team
+    .filter((m: any) => !isTeamSettingsDoc(m))
+    .reduce((max: number, m: any) => Math.max(max, Number(m.order) || 0), -1);
 
+  const now = new Date().toISOString();
   const member: TeamMember = {
-    id: 'team-' + Date.now() + '-' + crypto.randomBytes(2).toString('hex'),
-    name,
-    title: sanitizeText(rawTitle, 80),
-    line1: sanitizeText(rawLine1, 120),
-    line2: sanitizeText(raw.line2 || raw.affiliation, 200),
-    github: sanitizeText(raw.github, 60).replace(/^@/, '') || null,
-    linkedin: sanitizeText(raw.linkedin, 150) || null,
-    linked_profile_id: sanitizeText(raw.linked_profile_id, 80) || null,
-    photo: sanitizeAvatar(raw.photo) || null,
+    id: 'team-' + Date.now() + '-' + crypto.randomBytes(3).toString('hex'),
+    name: String(v.name),
+    title: String(v.title ?? ''),
+    line1: String(v.line1 ?? ''),
+    line2: String(v.line2 ?? ''),
+    bio: String(v.bio ?? ''),
+    github: (v.github as string | null) ?? null,
+    linkedin: (v.linkedin as string | null) ?? null,
+    x: (v.x as string | null) ?? null,
+    website: (v.website as string | null) ?? null,
+    whatsapp: (v.whatsapp as string | null) ?? null,
+    linked_profile_id: linkCheck.value,
+    photo,
     order: maxOrder + 1,
-    hidden: Boolean(raw.hidden),
-    show_title: Boolean(raw.show_title),
-    show_line1: Boolean(raw.show_line1),
-    show_linkedin: Boolean(raw.show_linkedin),
+    hidden: v.hidden === true,
     team_since: sinceCheck.value,
-    show_since: Boolean(raw.show_since),
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
+    created_at: now,
+    updated_at: now
   };
+  for (const flag of TEAM_VISIBILITY_FLAGS) (member as any)[flag] = v[flag] === true;
 
   store.team.push(member);
   await persistDoc('team', member.id, member);
+  await writeAdminAudit(admin, 'TEAM_MEMBER_CREATED', `Admin added team member "${member.name}"${member.title ? ` (${member.title})` : ''}`);
+  return res.status(201).json({ success: true, member: adminTeamView(member) });
+});
 
-  const auditEntry = {
-    id: 'audit-' + Date.now(),
-    timestamp: new Date().toISOString(),
-    action: 'TEAM_MEMBER_CREATED',
-    details: `Admin added team member "${member.name}"${member.title ? ` (${member.title})` : ''}`,
-    admin: admin.adminName
-  };
-  store.audit_log.unshift(auditEntry);
-  await persistDoc('audit_log', auditEntry.id, auditEntry);
+// Admin: Reorder team members. Registered before "/:id" routes.
+app.post('/api/admin/team/reorder', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
 
-  if (storageMode === 'disk') saveStore(store);
-  return res.status(201).json({ success: true, member });
+  const { ordered_ids } = req.body || {};
+  if (!Array.isArray(ordered_ids) || ordered_ids.length > 500 || !ordered_ids.every(id => typeof id === 'string')) {
+    return res.status(400).json({ error: 'ordered_ids must be a list of team member ids' });
+  }
+  if (new Set(ordered_ids).size !== ordered_ids.length) {
+    return res.status(400).json({ error: 'ordered_ids contains duplicates' });
+  }
+
+  if (!Array.isArray(store.team)) store.team = [];
+  const members = store.team.filter((m: any) => !isTeamSettingsDoc(m));
+  const known = new Set(members.map((m: any) => m.id));
+  const unknown = ordered_ids.filter((id: string) => !known.has(id));
+  if (unknown.length) return res.status(400).json({ error: 'Unknown team member id in ordered_ids' });
+
+  // Listed members first in the given order, any others keep their relative order after them.
+  const rest = members
+    .filter((m: any) => !ordered_ids.includes(m.id))
+    .sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
+  const byId = new Map(members.map((m: any) => [m.id, m]));
+  const finalOrder = [...ordered_ids.map((id: string) => byId.get(id)), ...rest];
+  const now = new Date().toISOString();
+  const changed: any[] = [];
+  finalOrder.forEach((m: any, i: number) => {
+    if (m.order !== i) {
+      m.order = i;
+      m.updated_at = now;
+      changed.push(m);
+    }
+  });
+  await Promise.all(changed.map((m: any) => persistDoc('team', m.id, m)));
+
+  store.team.sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
+  await writeAdminAudit(admin, 'TEAM_REORDERED', `Admin reordered team members (${finalOrder.length} members)`);
+  return res.json({ success: true, team: finalOrder.map(adminTeamView) });
 });
 
 // Admin: Update team member
@@ -9201,150 +9368,73 @@ app.patch('/api/admin/team/:id', async (req: Request, res: Response) => {
   if (!admin) return;
 
   const { id } = req.params;
-  const member = (store.team || []).find((m: any) => m.id === id);
+  const member = (store.team || []).find((m: any) => m.id === id && !isTeamSettingsDoc(m));
   if (!member) {
     return res.status(404).json({ error: 'Team member not found' });
   }
 
   const raw = req.body || {};
-  if (raw.title !== undefined) {
-    const tStr = String(raw.title ?? '').trim();
-    if (tStr.length > 80) {
-      return res.status(400).json({ error: 'Title must be 80 characters or fewer' });
-    }
-    member.title = sanitizeText(tStr, 80);
-  }
-  if (raw.line1 !== undefined) {
-    const l1Str = String(raw.line1 ?? '').trim();
-    if (l1Str.length > 120) {
-      return res.status(400).json({ error: 'Line 1 (description) must be 120 characters or fewer' });
-    }
-    member.line1 = sanitizeText(l1Str, 120);
-  }
+  const checked = validateTeamPayload(raw, false);
+  if (!checked.ok) return res.status(400).json({ error: firstError(checked.errors), fields: checked.errors });
+
+  let sinceValue: string | null | undefined;
   if (raw.team_since !== undefined) {
     const sinceCheck = validateTeamSince(raw.team_since);
     if (!sinceCheck.valid) {
       return res.status(400).json({ error: sinceCheck.error || 'Invalid team_since' });
     }
-    member.team_since = sinceCheck.value;
+    sinceValue = sinceCheck.value;
+  }
+  let linkedValue: string | null | undefined;
+  if (raw.linked_profile_id !== undefined) {
+    const linkCheck = checkLinkedProfileId(raw.linked_profile_id);
+    if (!linkCheck.ok) return res.status(400).json({ error: linkCheck.error });
+    linkedValue = linkCheck.value;
+  }
+  // Photos are uploaded through the photo route; PATCH can only clear one.
+  if (raw.photo !== undefined && raw.photo !== null && raw.photo !== '') {
+    return res.status(400).json({ error: 'Use the photo upload to change a photo' });
+  }
+  let order: number | undefined;
+  if (raw.order !== undefined) {
+    order = Number(raw.order);
+    if (!Number.isInteger(order) || order < 0 || order > 10000) {
+      return res.status(400).json({ error: 'order must be a whole number' });
+    }
   }
 
-  if (raw.name !== undefined) member.name = sanitizeText(raw.name, 100);
-  if (raw.line2 !== undefined) member.line2 = sanitizeText(raw.line2, 200);
-  if (raw.github !== undefined) member.github = sanitizeText(raw.github, 60).replace(/^@/, '') || null;
-  if (raw.linkedin !== undefined) member.linkedin = sanitizeText(raw.linkedin, 150) || null;
-  if (raw.linked_profile_id !== undefined) member.linked_profile_id = sanitizeText(raw.linked_profile_id, 80) || null;
-  if (raw.photo !== undefined) member.photo = raw.photo ? (sanitizeAvatar(raw.photo) || null) : null;
-  if (raw.hidden !== undefined) member.hidden = Boolean(raw.hidden);
-  if (raw.show_title !== undefined) member.show_title = Boolean(raw.show_title);
-  if (raw.show_line1 !== undefined) member.show_line1 = Boolean(raw.show_line1);
-  if (raw.show_linkedin !== undefined) member.show_linkedin = Boolean(raw.show_linkedin);
-  if (raw.show_since !== undefined) member.show_since = Boolean(raw.show_since);
-  if (raw.order !== undefined) member.order = Number(raw.order) || 0;
+  Object.assign(member, checked.values);
+  if (sinceValue !== undefined) member.team_since = sinceValue;
+  if (linkedValue !== undefined) member.linked_profile_id = linkedValue;
+  if (raw.photo !== undefined) member.photo = null;
+  if (order !== undefined) member.order = order;
   member.updated_at = new Date().toISOString();
 
   await persistDoc('team', member.id, member);
-
-  const auditEntry = {
-    id: 'audit-' + Date.now(),
-    timestamp: new Date().toISOString(),
-    action: 'TEAM_MEMBER_UPDATED',
-    details: `Admin updated team member "${member.name}"`,
-    admin: admin.adminName
-  };
-  store.audit_log.unshift(auditEntry);
-  await persistDoc('audit_log', auditEntry.id, auditEntry);
-
-  if (storageMode === 'disk') saveStore(store);
-  return res.json({ success: true, member });
+  const changedKeys = Object.keys(raw).filter(k => k !== 'id').slice(0, 12).join(', ');
+  await writeAdminAudit(admin, 'TEAM_MEMBER_UPDATED', `Admin updated team member "${member.name}" (${changedKeys || 'no fields'})`);
+  return res.json({ success: true, member: adminTeamView(member) });
 });
 
-// Admin: Upload or replace photo (resized, WebP)
+// Admin: Upload or replace photo (type and size checked, resized, WebP)
 app.post('/api/admin/team/:id/photo', async (req: Request, res: Response) => {
   const admin = verifyAdmin(req, res);
   if (!admin) return;
 
   const { id } = req.params;
-  const member = (store.team || []).find((m: any) => m.id === id);
+  const member = (store.team || []).find((m: any) => m.id === id && !isTeamSettingsDoc(m));
   if (!member) {
     return res.status(404).json({ error: 'Team member not found' });
   }
 
-  const { photo } = req.body || {};
-  if (!photo || typeof photo !== 'string') {
-    return res.status(400).json({ error: 'Photo data is required' });
-  }
+  const processed = await processTeamPhoto((req.body || {}).photo);
+  if (!processed.ok) return res.status(400).json({ error: processed.error });
 
-  let webpDataUrl = photo;
-  try {
-    const match = photo.match(/^data:([^;]+);base64,(.+)$/);
-    if (match) {
-      const sharp = (await import('sharp')).default;
-      const buffer = Buffer.from(match[2], 'base64');
-      const resized = await sharp(buffer)
-        .resize(400, 400, { fit: 'cover', position: 'center' })
-        .webp({ quality: 85 })
-        .toBuffer();
-      webpDataUrl = `data:image/webp;base64,${resized.toString('base64')}`;
-    }
-  } catch (err: any) {
-    console.warn('[Sharp] Team photo conversion warning:', err?.message || err);
-  }
-
-  member.photo = webpDataUrl;
+  member.photo = processed.photo;
   member.updated_at = new Date().toISOString();
   await persistDoc('team', member.id, member);
-
-  const auditEntry = {
-    id: 'audit-' + Date.now(),
-    timestamp: new Date().toISOString(),
-    action: 'TEAM_PHOTO_UPDATED',
-    details: `Admin updated photo for team member "${member.name}"`,
-    admin: admin.adminName
-  };
-  store.audit_log.unshift(auditEntry);
-  await persistDoc('audit_log', auditEntry.id, auditEntry);
-
-  if (storageMode === 'disk') saveStore(store);
-  return res.json({ success: true, photo_url: `/api/team-photo/${member.id}`, member });
-});
-
-// Admin: Reorder team members
-app.post('/api/admin/team/reorder', async (req: Request, res: Response) => {
-  const admin = verifyAdmin(req, res);
-  if (!admin) return;
-
-  const { ordered_ids } = req.body || {};
-  if (!Array.isArray(ordered_ids)) {
-    return res.status(400).json({ error: 'ordered_ids array is required' });
-  }
-
-  if (!Array.isArray(store.team)) store.team = [];
-  const idMap = new Map(store.team.map((m: any) => [m.id, m]));
-
-  for (let i = 0; i < ordered_ids.length; i++) {
-    const m = idMap.get(ordered_ids[i]);
-    if (m) {
-      m.order = i;
-      m.updated_at = new Date().toISOString();
-      persistDoc('team', m.id, m).catch(() => {});
-    }
-  }
-
-  store.team.sort((a: any, b: any) => (Number(a.order) || 0) - (Number(b.order) || 0));
-
-  const auditEntry = {
-    id: 'audit-' + Date.now(),
-    timestamp: new Date().toISOString(),
-    action: 'TEAM_REORDERED',
-    details: `Admin reordered team members (${ordered_ids.length} members)`,
-    admin: admin.adminName
-  };
-  store.audit_log.unshift(auditEntry);
-  await persistDoc('audit_log', auditEntry.id, auditEntry);
-
-  if (storageMode === 'disk') saveStore(store);
-  return res.json({ success: true, team: store.team });
+  await writeAdminAudit(admin, 'TEAM_PHOTO_UPDATED', `Admin updated photo for team member "${member.name}"`);
+  return res.json({ success: true, photo_url: teamPhotoUrl(member), member: adminTeamView(member) });
 });
 
 // Admin: Delete team member
@@ -9353,56 +9443,34 @@ app.delete('/api/admin/team/:id', async (req: Request, res: Response) => {
   if (!admin) return;
 
   const { id } = req.params;
-  const member = (store.team || []).find((m: any) => m.id === id);
+  const member = (store.team || []).find((m: any) => m.id === id && !isTeamSettingsDoc(m));
   if (!member) {
     return res.status(404).json({ error: 'Team member not found' });
   }
 
   store.team = (store.team || []).filter((m: any) => m.id !== id);
   await removeDoc('team', id);
-
-  const auditEntry = {
-    id: 'audit-' + Date.now(),
-    timestamp: new Date().toISOString(),
-    action: 'TEAM_MEMBER_DELETED',
-    details: `Admin removed team member "${member.name}" (${member.id})`,
-    admin: admin.adminName
-  };
-  store.audit_log.unshift(auditEntry);
-  await persistDoc('audit_log', auditEntry.id, auditEntry);
-
-  if (storageMode === 'disk') saveStore(store);
+  await writeAdminAudit(admin, 'TEAM_MEMBER_DELETED', `Admin removed team member "${member.name}" (${member.id})`);
   return res.json({ success: true });
 });
 
-// Photo serving endpoint: Cached with ETag & 304, served like avatars
-app.get('/api/team-photo/:id', (req: Request, res: Response) => {
-  const { id } = req.params;
-  const member = (store.team || []).find((m: any) => m.id === id);
-  if (!member || !member.photo || member.hidden) {
-    return res.status(404).send('Team photo not found');
-  }
+function sendTeamPhoto(req: Request, res: Response, member: any, cacheControl: string) {
+  const match = String(member?.photo || '').match(/^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/);
+  if (!match) return res.status(404).send('Team photo not found');
+  const buffer = Buffer.from(match[2], 'base64');
+  const etag = `"${crypto.createHash('md5').update(buffer).digest('hex')}"`;
+  if (req.headers['if-none-match'] === etag) return res.status(304).end();
+  res.setHeader('Content-Type', match[1]);
+  res.setHeader('Cache-Control', cacheControl);
+  res.setHeader('ETag', etag);
+  return res.send(buffer);
+}
 
-  const photo = String(member.photo);
-  if (photo.startsWith('data:')) {
-    const match = photo.match(/^data:([^;]+);base64,(.+)$/);
-    if (match) {
-      const mimeType = match[1];
-      const buffer = Buffer.from(match[2], 'base64');
-      const hash = crypto.createHash('md5').update(buffer).digest('hex');
-      const etag = `"${hash}"`;
-      if (req.headers['if-none-match'] === etag) {
-        return res.status(304).end();
-      }
-      res.setHeader('Content-Type', mimeType);
-      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
-      res.setHeader('ETag', etag);
-      return res.send(buffer);
-    }
-  } else if (photo.startsWith('http') || photo.startsWith('/')) {
-    return res.redirect(photo);
-  }
-  return res.status(404).send('Team photo not found');
+// Public photo endpoint: cached with ETag & 304. Hidden members are not served.
+app.get('/api/team-photo/:id', (req: Request, res: Response) => {
+  const member = (store.team || []).find((m: any) => m.id === req.params.id && !isTeamSettingsDoc(m));
+  if (!member || member.hidden) return res.status(404).send('Team photo not found');
+  return sendTeamPhoto(req, res, member, 'public, max-age=86400, stale-while-revalidate=604800');
 });
 
 /* =========================================================================
@@ -9720,6 +9788,40 @@ app.get('/api/data/:collection', (req: Request, res: Response) => {
 });
 
 // Profile & Data Creation (Protected / Strict Validation / Session Required)
+/** Profile fields members may never set on themselves; they are managed by sign-in or admins. */
+export const PROTECTED_PROFILE_FIELDS = [
+  'id', 'account_uid', 'email', 'email_verified', 'suspended', 'hidden', 'is_organiser',
+  'events_blocked', 'is_admin', 'admin', 'is_demo', 'created_at', 'claimed_at',
+  'privacy_accepted_at', 'privacy_version', 'report_count', 'hidden_by_moderation'
+] as const;
+
+/** Client notification types; anything else is stored as "message". */
+const CLIENT_NOTIFICATION_TYPES = ['follow', 'connect', 'message'];
+const NOTIFICATION_SEND_LIMIT = 30;
+const NOTIFICATION_SEND_WINDOW_MS = 10 * 60 * 1000;
+const notificationSendLog = new Map<string, number[]>();
+
+/** Per-sender limit on member-to-member notifications. Returns false when over the limit. */
+export function allowNotificationSend(senderId: string, now = Date.now()): boolean {
+  const recent = (notificationSendLog.get(senderId) || []).filter(t => now - t < NOTIFICATION_SEND_WINDOW_MS);
+  if (recent.length >= NOTIFICATION_SEND_LIMIT) {
+    notificationSendLog.set(senderId, recent);
+    return false;
+  }
+  recent.push(now);
+  notificationSendLog.set(senderId, recent);
+  return true;
+}
+
+/** An unclaimed profile may be linked only by the account whose email it carries (or when it has none). */
+export function canClaimProfile(profile: any, authUserId: string | null, tokenEmail: string | undefined): boolean {
+  if (!profile || !authUserId) return false;
+  if (profile.account_uid) return profile.account_uid === authUserId;
+  const stored = String(profile.email || '').trim().toLowerCase();
+  if (!stored) return true;
+  return Boolean(tokenEmail) && stored === String(tokenEmail).trim().toLowerCase();
+}
+
 app.post('/api/data/:collection', async (req: Request, res: Response) => {
   const col = req.params.collection as string;
   if (!isAllowedDataCollection(col)) {
@@ -9746,7 +9848,7 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
       existingProfile = store.profiles.find((p: any) => p.id === requestedId);
     }
 
-    const userEmail = (req as any).authUser?.email || sanitizeText(raw.email, 100);
+    const userEmail = (req as any).authUser?.email || '';
     if (!existingProfile && userEmail) {
       const profileWithEmail = store.profiles.find((p: any) => p.email && p.email.toLowerCase() === userEmail.toLowerCase());
       if (profileWithEmail) {
@@ -9756,7 +9858,7 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
 
     // Authorization check
     if (existingProfile) {
-      const isOwner = authUserId && (existingProfile.id === authUserId || existingProfile.account_uid === authUserId || !existingProfile.account_uid);
+      const isOwner = Boolean(authUserId) && (existingProfile.id === authUserId || canClaimProfile(existingProfile, authUserId, userEmail));
       if (!isOwner && !isAdmin) {
         return res.status(403).json({ error: 'Forbidden: You can only edit your own profile' });
       }
@@ -9860,21 +9962,24 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
       hide_whatsapp: Boolean(raw.hide_whatsapp),
       avatar: resolveAvatar(raw.avatar, existingProfile?.avatar || ''),
       status: sanitizeText(raw.status, 100),
-      is_demo: Boolean(raw.is_demo),
-      created_at: sanitizeText(raw.created_at, 50) || existingProfile?.created_at || new Date().toISOString(),
+      is_demo: isAdmin ? Boolean(raw.is_demo) : Boolean(existingProfile?.is_demo),
+      created_at: existingProfile?.created_at || new Date().toISOString(),
       gh: raw.gh && typeof raw.gh === 'object' ? raw.gh : (existingProfile?.gh || null),
       blocked_ids: sanitizeArray(raw.blocked_ids, 200, 64)
     };
 
+    // Merge so admin-managed fields (suspended, hidden, organiser...) survive a re-save.
     const existingIdx = store.profiles.findIndex((item: any) => item.id === row.id);
+    let saved: any = row;
     if (existingIdx >= 0) {
-      store.profiles[existingIdx] = { ...store.profiles[existingIdx], ...row };
+      saved = { ...store.profiles[existingIdx], ...row };
+      store.profiles[existingIdx] = saved;
     } else {
       store.profiles.unshift(row);
     }
 
-    await persistDoc('profiles', row.id, row);
-    return res.json(sanitizePublicProfile(row, authUserId, isAdmin));
+    await persistDoc('profiles', saved.id, saved);
+    return res.json(sanitizePublicProfile(saved, authUserId, isAdmin));
   }
 
   // ALL other collections REQUIRE a valid active session
@@ -9895,13 +10000,13 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
     const authorId = myProfile?.id || authUserId || 'admin';
 
     const row = {
-      id: sanitizeText(raw.id, 64) || ('post-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex')),
+      id: 'post-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex'),
       author_id: authorId,
       title: sanitizeText(raw.title, 200),
       body: sanitizeText(rawBody, 2000),
       kind,
       tags: sanitizeArray(raw.tags, 10, 30),
-      created_at: sanitizeText(raw.created_at, 50) || new Date().toISOString()
+      created_at: new Date().toISOString()
     };
 
     store.posts.unshift(row);
@@ -9919,10 +10024,10 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
     }
 
     const row = {
-      id: sanitizeText(raw.id, 64) || ('follow-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex')),
+      id: 'follow-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex'),
       follower_id: followerId,
       following_id: followingId,
-      created_at: sanitizeText(raw.created_at, 50) || new Date().toISOString()
+      created_at: new Date().toISOString()
     };
 
     const existingIdx = store.follows.findIndex((f: any) => f.follower_id === row.follower_id && f.following_id === row.following_id);
@@ -9942,15 +10047,22 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
     if (!toId || !notifBody) {
       return res.status(400).json({ error: 'Recipient and notification body are required' });
     }
+    if (!store.profiles.some((p: any) => p.id === toId || p.account_uid === toId)) {
+      return res.status(400).json({ error: 'Recipient not found' });
+    }
+    if (!isAdmin && !allowNotificationSend(String(authUserId))) {
+      return res.status(429).json({ error: 'You are sending messages too quickly. Please wait a few minutes.' });
+    }
+    const rawType = sanitizeText(raw.type, 30);
 
     const row = {
-      id: sanitizeText(raw.id, 64) || ('notif-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex')),
+      id: 'notif-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex'),
       to_id: toId,
       from_id: authUserId || 'system',
-      type: sanitizeText(raw.type, 30) || 'message',
+      type: isAdmin ? (rawType || 'message') : (CLIENT_NOTIFICATION_TYPES.includes(rawType) ? rawType : 'message'),
       body: notifBody,
       read: false,
-      created_at: sanitizeText(raw.created_at, 50) || new Date().toISOString()
+      created_at: new Date().toISOString()
     };
 
     store.notifications.unshift(row);
@@ -9966,17 +10078,31 @@ app.post('/api/data/:collection', async (req: Request, res: Response) => {
     if (!aId || !bId || score <= 0) {
       return res.status(400).json({ error: 'Valid matching pairs and score required' });
     }
+    if (!isAdmin) {
+      const me = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
+      if (!me || aId !== me.id) {
+        return res.status(403).json({ error: 'You can only record your own matches' });
+      }
+    }
 
     const row = {
-      id: sanitizeText(raw.id, 64) || ('match-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex')),
+      id: 'match-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex'),
       a_id: aId,
       b_id: bId,
-      score,
+      score: Math.min(100, score),
       reason: sanitizeText(raw.reason, 500),
       spark: sanitizeText(raw.spark, 300),
-      created_at: sanitizeText(raw.created_at, 50) || new Date().toISOString()
+      created_at: new Date().toISOString()
     };
 
+    // One row per pair: refresh the existing one instead of piling up duplicates.
+    const prevIdx = store.matches.findIndex((m: any) => m.a_id === aId && m.b_id === bId);
+    if (prevIdx >= 0) {
+      const updated = { ...store.matches[prevIdx], score: row.score, reason: row.reason, spark: row.spark, updated_at: row.created_at };
+      store.matches[prevIdx] = updated;
+      await persistDoc('matches', updated.id, updated);
+      return res.json(updated);
+    }
     store.matches.unshift(row);
     await persistDoc('matches', row.id, row);
     return res.json(row);
@@ -10014,6 +10140,16 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
   const myProfile = store.profiles.find((p: any) => p.account_uid === authUserId || p.id === authUserId);
   const myProfileId = myProfile?.id;
 
+  // Team cards change only through the audited admin team routes.
+  if (col === 'team') {
+    return res.status(403).json({ error: 'Team cards are managed from the Admin team page' });
+  }
+  // Members may edit their own profile and posts and mark their own notifications read;
+  // everything else (events, follows, matches) has dedicated routes with their own checks.
+  if (!isAdmin && col !== 'profiles' && col !== 'notifications' && col !== 'posts') {
+    return res.status(403).json({ error: 'Forbidden: This record cannot be edited here' });
+  }
+
   // Enforce resource-level authorization
   if (col === 'profiles' && !isAdmin) {
     const isOwner = authUserId === id || existing.account_uid === authUserId || myProfileId === id;
@@ -10047,7 +10183,21 @@ app.patch('/api/data/:collection/:id', async (req: Request, res: Response) => {
   }
 
   // Validate patch fields
-  const patch = req.body || {};
+  const patch = { ...(req.body || {}) };
+  if (col === 'notifications' && !isAdmin) {
+    for (const k of Object.keys(patch)) if (k !== 'read') delete patch[k];
+    if (patch.read !== undefined) patch.read = patch.read === true;
+  }
+  if (col === 'profiles' && !isAdmin) {
+    for (const k of PROTECTED_PROFILE_FIELDS) delete patch[k];
+  }
+  if (col === 'posts' && !isAdmin) {
+    for (const k of Object.keys(patch)) if (!['title', 'body', 'kind', 'tags'].includes(k)) delete patch[k];
+    if (patch.title !== undefined) patch.title = sanitizeText(patch.title, 200);
+    if (patch.kind !== undefined && !['idea', 'need', 'offer', 'question'].includes(patch.kind)) delete patch.kind;
+    if (patch.tags !== undefined) patch.tags = sanitizeArray(patch.tags, 10, 30);
+  }
+  delete patch.id;
   if (col === 'posts') {
     delete patch.reactions;
     delete patch.reactions_by;
@@ -10246,6 +10396,10 @@ app.delete('/api/data/:collection/:id', async (req: Request, res: Response) => {
     return res.status(401).json({ error: 'Authentication required' });
   }
 
+  if (col === 'team') {
+    return res.status(403).json({ error: 'Team cards are managed from the Admin team page' });
+  }
+
   const existing = (store[colKey] as any[]).find((item: any) => item.id === id);
   if (!existing) {
     return res.json({ success: true, message: 'Item already not present' });
@@ -10285,9 +10439,20 @@ app.delete('/api/data/:collection/:id', async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Forbidden: You can only delete your own submissions' });
     }
   }
+  if (col === 'matches' && !isAdmin) {
+    const isMine = [existing.a_id, existing.b_id].some(v => v && (v === authUserId || v === myProfileId));
+    if (!isMine) {
+      return res.status(403).json({ error: 'Forbidden: You can only delete your own matches' });
+    }
+  }
 
   if (col === 'profiles') {
     await cascadeDeleteMemberData(id, existing.account_uid);
+  }
+  if (col === 'events') {
+    // Same cascade as the event routes: guests, questions, check-ins and attendee notices.
+    await deleteEventWithCascade(existing, [authUserId, myProfileId], isAdmin && existing.author_id !== myProfileId ? 'moderator' : 'host');
+    return res.json({ success: true });
   }
 
   (store as any)[colKey] = (store[colKey] as any[]).filter((item: any) => item.id !== id);
@@ -10295,59 +10460,52 @@ app.delete('/api/data/:collection/:id', async (req: Request, res: Response) => {
   return res.json({ success: true });
 });
 
-// Photo upload for authentic event photos (admin only)
-app.post('/api/upload-photo', (req: Request, res: Response) => {
-  if (!checkAdmin(req)) {
-    return res.status(401).json({ error: 'Admin session required' });
+// Photo upload for the three site photos (admin only). Only known slots are accepted,
+// the image is decoded and re-encoded as WebP at both sizes the site uses.
+export const SITE_PHOTO_SLOTS: Record<string, string> = {
+  hero: 'table-coding',
+  hall: 'mubs-hall',
+  team: 'team-session'
+};
+
+app.post('/api/upload-photo', async (req: Request, res: Response) => {
+  const admin = verifyAdmin(req, res);
+  if (!admin) return;
+  const { slot, dataUrl } = req.body || {};
+  const base = typeof slot === 'string' && Object.prototype.hasOwnProperty.call(SITE_PHOTO_SLOTS, slot) ? SITE_PHOTO_SLOTS[slot] : null;
+  if (!base) {
+    return res.status(400).json({ error: 'Unknown photo slot' });
   }
+  const check = checkPhotoDataUrl(dataUrl);
+  if (!check.ok) return res.status(400).json({ error: check.error });
+
+  let sizes: Array<{ name: string; data: Buffer }>;
   try {
-    const { slot, dataUrl } = req.body;
-    if (!slot || !dataUrl) {
-      return res.status(400).json({ error: 'Missing slot or dataUrl' });
-    }
-    const matches = dataUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-    if (!matches || matches.length !== 3) {
-      return res.status(400).json({ error: 'Invalid base64 dataUrl format' });
-    }
-    const buffer = Buffer.from(matches[2], 'base64');
-    
-    // Determine target filenames based on slot
-    const slotFilenames: Record<string, string[]> = {
-      hero: ['table-coding.jpg', 'kwegatta_table_coding_1791028315565.jpg', 'table-coding-800.webp', 'table-coding-1600.webp'],
-      hall: ['mubs-hall.jpg', 'mubs_hackathon_hall_1791028302284.jpg', 'mubs-hall-800.webp', 'mubs-hall-1600.webp'],
-      team: ['team-session.jpg', 'mubs_collaborators_session_1791028328078.jpg', 'winning-team.jpg', 'team-session-800.webp', 'team-session-1600.webp']
-    };
-    
-    const targets = slotFilenames[slot] || [`${slot}.jpg`];
-    const dirs = [
-      path.join(__dirname, 'public', 'images'),
-      path.join(__dirname, 'dist', 'images'),
-      path.join(__dirname, 'src', 'assets', 'images')
-    ];
-    
-    for (const dir of dirs) {
-      if (!fs.existsSync(dir)) {
-        try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
-      }
-      for (const target of targets) {
-        try {
-          fs.writeFileSync(path.join(dir, target), buffer);
-        } catch (_) {}
-      }
-    }
-    
-    return res.json({ success: true, slot, targets });
-  } catch (err: any) {
-    console.error('Failed to save uploaded photo:', err);
-    return res.status(500).json({ error: err.message || 'Failed to save photo' });
+    const input = Buffer.from(String(dataUrl).slice(String(dataUrl).indexOf(',') + 1), 'base64');
+    sizes = await Promise.all([800, 1600].map(async width => ({
+      name: `${base}-${width}.webp`,
+      data: await sharp(input, { limitInputPixels: 60_000_000 }).rotate().resize({ width, withoutEnlargement: true }).webp({ quality: 82 }).toBuffer()
+    })));
+  } catch {
+    return res.status(400).json({ error: 'Photo could not be read. Please upload a JPEG, PNG or WebP image.' });
   }
+
+  const dirs = [path.join(__dirname, 'public', 'images'), path.join(__dirname, 'dist', 'images')];
+  for (const dir of dirs) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      for (const f of sizes) fs.writeFileSync(path.join(dir, f.name), f.data);
+    } catch (err: any) {
+      console.warn('[upload-photo] Could not write to', dir, err?.message || err);
+    }
+  }
+  await writeAdminAudit(admin, 'SITE_PHOTO_UPDATED', `Admin replaced the "${slot}" site photo`);
+  return res.json({ success: true, slot, targets: sizes.map(f => f.name) });
 });
 
 // Demo data operations (Admin session required)
 app.post('/api/demo/seed', async (req: Request, res: Response) => {
-  if (!checkAdmin(req)) {
-    return res.status(401).json({ error: 'Admin session required' });
-  }
+  if (!verifyAdmin(req, res)) return;
   const toAdd: Array<{ id: string; data: any }> = [];
   for (const demo of INITIAL_DEMO_MEMBERS) {
     if (!store.profiles.some(p => p.id === demo.id)) {
@@ -10364,9 +10522,7 @@ app.post('/api/demo/seed', async (req: Request, res: Response) => {
 });
 
 app.post('/api/demo/clear', async (req: Request, res: Response) => {
-  if (!checkAdmin(req)) {
-    return res.status(401).json({ error: 'Admin session required' });
-  }
+  if (!verifyAdmin(req, res)) return;
   const demoIds = store.profiles.filter(p => p.is_demo).map(p => p.id);
   store.profiles = store.profiles.filter(p => !p.is_demo);
   if (demoIds.length > 0 && storageMode === 'firestore' && firestoreDb) {
@@ -10384,6 +10540,10 @@ app.post('/api/demo/clear', async (req: Request, res: Response) => {
 export function errorHandler(err: any, req: Request, res: Response, _next: express.NextFunction) {
   if (err && (err instanceof SyntaxError || err.type === 'entity.parse.failed' || err.name === 'SyntaxError') && (err.status === 400 || err.statusCode === 400) && 'body' in err) {
     res.status(400).json({ error: 'Invalid request body.' });
+    return;
+  }
+  if (err && err.type === 'entity.too.large') {
+    res.status(413).json({ error: 'That upload is too large.' });
     return;
   }
   console.error(`[Server Error] ${req.method} ${req.originalUrl || req.url}:`, err?.message || err);

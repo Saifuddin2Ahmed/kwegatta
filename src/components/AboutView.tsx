@@ -6,17 +6,11 @@ import {
   ArrowLeft,
   ArrowUpRight,
   Shield,
-  Cpu,
   Sparkles,
-  Users,
-  Compass,
-  Code2,
   ArrowRight,
-  Heart,
   MessageCircle,
   Zap,
   Globe2,
-  BookOpen,
   Lock,
   CheckCircle2
 } from 'lucide-react';
@@ -24,88 +18,24 @@ import { Avatar } from './Avatar';
 import { useEventPhotos } from '../hooks/useEventPhotos';
 import { useTeam } from '../hooks/useTeam';
 
+function XLogo() {
+  return (
+    <svg viewBox="0 0 24 24" className="w-4 h-4" fill="currentColor" aria-hidden="true">
+      <path d="M18.9 2H22l-6.8 7.8L23 22h-6.2l-4.8-6.3L6.4 22H3.3l7.3-8.3L1 2h6.3l4.4 5.8L18.9 2Zm-1.1 18h1.7L6.3 3.9H4.5L17.8 20Z" />
+    </svg>
+  );
+}
+
 interface AboutViewProps {
   onNavigateHome: () => void;
   /** Signed-out visitors have no Matches page, so the back links are hidden for them */
   isSignedIn?: boolean;
 }
 
-const TEAM_MEMBERS = [
-  {
-    name: 'Saifuddin Ahmed',
-    role: 'Team lead and engineering',
-    title: 'Team lead and engineering',
-    background: 'Software and AI Engineer • Systems Architect',
-    line1: 'Software and AI Engineer • Systems Architect',
-    affiliation: 'Future Stars Center for Development and Capacity Building',
-    line2: 'Future Stars Center for Development and Capacity Building',
-    github: 'Saifuddin2Ahmed'
-  },
-  {
-    name: 'Abubaker Mohamed Adam',
-    affiliation: 'Sub-Saharan College',
-    line2: 'Sub-Saharan College',
-    background: 'NGO volunteer',
-    line1: 'NGO volunteer',
-    role: 'Community and NGO partnerships',
-    title: 'Community and NGO partnerships',
-    github: 'abubakermohammed092077-bit'
-  },
-  {
-    name: 'Adinan Juuko',
-    affiliation: 'Victoria University',
-    line2: 'Victoria University',
-    background: 'Software Engineering',
-    line1: 'Software Engineering',
-    role: 'Testing and quality',
-    title: 'Testing and quality',
-    github: 'Aditech-191'
-  },
-  {
-    name: 'Amme Patience Esther',
-    affiliation: 'Makerere University Business School',
-    line2: 'Makerere University Business School',
-    background: 'Bachelor of Marketing',
-    line1: 'Bachelor of Marketing',
-    role: 'Marketing and communications',
-    title: 'Marketing and communications',
-    github: null
-  },
-  {
-    name: 'Mupole Uwizeye Alexis',
-    affiliation: 'Bugema University',
-    line2: 'Bugema University',
-    background: 'Business Computing',
-    line1: 'Business Computing',
-    role: 'Product and data',
-    title: 'Product and data',
-    github: 'Alexis-Mupole'
-  },
-  {
-    name: 'Nabagulanyi Prossy Sherry',
-    affiliation: 'Makerere University Business School',
-    line2: 'Makerere University Business School',
-    background: 'Student',
-    line1: 'Student',
-    role: 'User research and outreach',
-    title: 'User research and outreach',
-    github: null
-  },
-  {
-    name: 'Ojambo Emmanuel',
-    affiliation: 'Makerere University Business School',
-    line2: 'Makerere University Business School',
-    background: 'Accounting',
-    line1: 'Accounting',
-    role: 'Business model and sustainability',
-    title: 'Business model and sustainability',
-    github: null
-  }
-];
 
 export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome, isSignedIn = false }) => {
   const photos = useEventPhotos();
-  const { team } = useTeam();
+  const { team, loading: teamLoading } = useTeam();
   return (
     <div className="kw-container py-6 sm:py-12 space-y-6 md:space-y-10 animate-in fade-in">
       
@@ -366,114 +296,90 @@ export const AboutView: React.FC<AboutViewProps> = ({ onNavigateHome, isSignedIn
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-start">
+        {teamLoading && team.length === 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6" aria-busy="true" aria-label="Loading the team">
+            {[0, 1, 2, 3].map(i => (
+              <div key={i} className="h-28 rounded-xl bg-[var(--card)] border border-[var(--card-border)] animate-pulse" />
+            ))}
+          </div>
+        ) : team.length === 0 ? (
+          <p className="text-sm text-[var(--fg-muted)]">The team list will appear here soon.</p>
+        ) : (
+        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-start" aria-label="Kwegatta team">
           {team.map((member) => {
-            const photoUrl = member.photo_url || member.photo || member.linked_avatar || (member.linked_profile_id ? `/api/avatar/${member.linked_profile_id}` : null);
-            const line2 = member.line2 || (member as any).affiliation || '';
+            const photoUrl = member.photo_url || member.linked_avatar || null;
+            const line2 = member.line2 || '';
             const title = member.title ? String(member.title).trim() : '';
             const line1 = member.line1 ? String(member.line1).trim() : '';
+            const bio = member.bio ? String(member.bio).trim() : '';
             const since = member.since ? String(member.since).trim() : '';
-            const linkedin = member.linkedin ? String(member.linkedin).trim() : '';
-            const hasExtraFields = Boolean(title || line1 || since || linkedin);
+            const links: Array<{ href: string; label: string; icon: React.ReactNode }> = [];
+            if (member.github) links.push({ href: `https://github.com/${member.github}`, label: 'GitHub', icon: <Github className="w-4 h-4" /> });
+            if (member.linkedin) links.push({ href: member.linkedin, label: 'LinkedIn', icon: <Linkedin className="w-4 h-4" /> });
+            if (member.x) links.push({ href: member.x, label: 'X', icon: <XLogo /> });
+            if (member.website) links.push({ href: member.website, label: 'website', icon: <Globe2 className="w-4 h-4" /> });
+            if (member.whatsapp_url) links.push({ href: member.whatsapp_url, label: 'WhatsApp', icon: <MessageCircle className="w-4 h-4" /> });
 
             return (
-              <div
+              <li
                 key={member.id || member.name}
-                className="relative p-5 rounded-xl bg-[var(--card)] border border-[var(--card-border)] flex flex-col justify-start space-y-3 hover:border-[var(--card-border)]/80 transition-all"
+                className="p-5 rounded-xl bg-[var(--card)] border border-[var(--card-border)] flex flex-col gap-3 min-w-0"
               >
-                <div className="space-y-2.5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className={`flex items-center gap-3 min-w-0 ${!hasExtraFields && member.github ? 'pr-8' : ''}`}>
-                      {photoUrl ? (
-                        <img
-                          src={photoUrl}
-                          alt={member.name}
-                          className="w-10 h-10 rounded-full object-cover flex-shrink-0 border border-[var(--card-border)]"
-                        />
-                      ) : (
-                        <Avatar
-                          profile={{ name: member.name } as any}
-                          className="w-10 h-10 flex-shrink-0"
-                        />
-                      )}
-                      <div className="min-w-0">
-                        {member.linked_profile_id ? (
-                          <a
-                            href={`/#/u/${member.linked_profile_id}`}
-                            className="font-semibold text-sm sm:text-base text-[var(--fg)] hover:text-[var(--gold-text)] hover:underline block"
-                            title={`View ${member.name}'s profile`}
-                          >
-                            {member.name}
-                          </a>
-                        ) : (
-                          <h4 className="font-semibold text-sm sm:text-base text-[var(--fg)]">
-                            {member.name}
-                          </h4>
-                        )}
-                        {title && (
-                          <p className="text-xs text-[var(--fg-muted)] mt-0.5 truncate">
-                            {title}
-                          </p>
-                        )}
-                      </div>
-                    </div>
+                <div className="flex items-center gap-3 min-w-0">
+                  {photoUrl ? (
+                    <img
+                      src={photoUrl}
+                      alt=""
+                      loading="lazy"
+                      width={48}
+                      height={48}
+                      className="w-12 h-12 rounded-full object-cover flex-shrink-0 border border-[var(--card-border)]"
+                    />
+                  ) : (
+                    <Avatar profile={{ name: member.name } as any} className="w-12 h-12 flex-shrink-0" />
+                  )}
+                  <div className="min-w-0">
+                    {member.linked_profile_id ? (
+                      <a
+                        href={`/#/u/${member.linked_profile_id}`}
+                        className="font-semibold text-sm sm:text-base text-[var(--fg)] hover:text-[var(--gold-text)] hover:underline block break-words"
+                      >
+                        {member.name}
+                      </a>
+                    ) : (
+                      <h3 className="font-semibold text-sm sm:text-base text-[var(--fg)] break-words">{member.name}</h3>
+                    )}
+                    {title && <p className="text-xs text-[var(--teal-text)] font-medium mt-0.5 break-words">{title}</p>}
                   </div>
                 </div>
 
-                {line2 && (
-                  <div className="pt-2 border-t border-[var(--card-border)]/50 text-[13px] text-[var(--fg-subtle)] truncate">
-                    {line2}
-                  </div>
-                )}
+                {line2 && <p className="text-[13px] text-[var(--fg-subtle)] break-words">{line2}</p>}
+                {line1 && <p className="text-xs text-[var(--fg-muted)] leading-relaxed break-words">{line1}</p>}
+                {bio && <p className="text-xs text-[var(--fg-muted)] leading-relaxed break-words whitespace-pre-line">{bio}</p>}
+                {since && <p className="text-xs text-[var(--fg-subtle)]">On the team since {since}</p>}
 
-                {line1 && (
-                  <p className="text-xs text-[var(--fg-muted)] leading-relaxed line-clamp-2">
-                    {line1}
-                  </p>
-                )}
-
-                {since && (
-                  <p className="text-xs text-[var(--fg-subtle)]">
-                    On the team since {since}
-                  </p>
-                )}
-
-                {(member.github || linkedin) && (
-                  <div
-                    className={
-                      hasExtraFields
-                        ? 'flex items-center gap-2 pt-0.5'
-                        : 'absolute top-5 right-5 flex items-center gap-1.5'
-                    }
-                  >
-                    {member.github && (
+                {links.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1 -ml-1.5">
+                    {links.map(l => (
                       <a
-                        href={`https://github.com/${member.github}`}
+                        key={l.label}
+                        href={l.href}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-[var(--fg-subtle)] hover:text-[var(--fg)] p-1 transition-colors"
-                        aria-label={`${member.name} on GitHub`}
+                        className="text-[var(--fg-subtle)] hover:text-[var(--fg)] p-1.5 rounded-md transition-colors"
+                        aria-label={`${member.name} on ${l.label}`}
+                        title={l.label}
                       >
-                        <Github className="w-4 h-4" />
+                        {l.icon}
                       </a>
-                    )}
-                    {linkedin && (
-                      <a
-                        href={linkedin}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[var(--fg-subtle)] hover:text-[var(--fg)] p-1 transition-colors"
-                        aria-label={`${member.name} on LinkedIn`}
-                      >
-                        <Linkedin className="w-4 h-4" />
-                      </a>
-                    )}
+                    ))}
                   </div>
                 )}
-              </div>
+              </li>
             );
           })}
-        </div>
+        </ul>
+        )}
       </section>
 
       {/* 07. Open Source & Community Roots */}

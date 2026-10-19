@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { X, Mail, Check, Copy, ExternalLink, Github, MessageSquare, MapPin } from 'lucide-react';
+import { X, Mail, Check, Copy, ExternalLink, Github, MapPin } from 'lucide-react';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 
 interface ContactModalProps {
   isOpen: boolean;
@@ -8,6 +9,7 @@ interface ContactModalProps {
 
 export const ContactModal: React.FC<ContactModalProps> = ({ isOpen, onClose }) => {
   const [copied, setCopied] = useState(false);
+  const dialogRef = useDialogA11y<HTMLDivElement>(isOpen, onClose);
   const email = 'saifuddin.ai.dev@gmail.com';
 
   if (!isOpen) return null;
@@ -24,12 +26,17 @@ export const ContactModal: React.FC<ContactModalProps> = ({ isOpen, onClose }) =
     <div
       role="dialog"
       aria-modal="true"
+      aria-labelledby="contact-modal-title"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in"
       onClick={e => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-md bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-2xl overflow-hidden p-6 space-y-6 text-[var(--fg)]">
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        className="w-full max-w-md bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-2xl overflow-hidden p-6 space-y-6 text-[var(--fg)] outline-none"
+      >
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-[var(--card-border)]">
           <div className="flex items-center gap-2.5">
@@ -37,7 +44,7 @@ export const ContactModal: React.FC<ContactModalProps> = ({ isOpen, onClose }) =
               <Mail className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-display font-bold text-base text-[var(--fg)]">
+              <h3 id="contact-modal-title" className="font-display font-bold text-base text-[var(--fg)]">
                 Contact Maintainers
               </h3>
               <p className="text-xs text-[var(--fg-muted)]">Kwegatta Open-Source Team</p>
@@ -69,15 +76,16 @@ export const ContactModal: React.FC<ContactModalProps> = ({ isOpen, onClose }) =
 
         {/* Email Box with One-Click Copy */}
         <div className="space-y-2">
-          <label className="text-xs font-semibold text-[var(--fg-muted)] block">
+          <label htmlFor="contact-email-copy" className="text-xs font-semibold text-[var(--fg-muted)] block">
             Direct Email Address
           </label>
-          <div className="flex items-center gap-2 p-2 rounded-xl bg-[var(--bg)] border border-[var(--card-border)]">
+          <div className="flex items-center gap-2 p-2 rounded-xl bg-[var(--bg)] border border-[var(--card-border)] focus-within:border-[var(--gold)] focus-within:ring-2 focus-within:ring-[var(--gold)]/30">
             <input
+              id="contact-email-copy"
               type="text"
               readOnly
               value={email}
-              className="flex-1 bg-transparent text-xs font-mono text-[var(--fg)] outline-none select-all px-1"
+              className="flex-1 bg-transparent text-xs font-mono text-[var(--fg)] outline-none focus-visible:outline-none select-all px-1"
             />
             <button
               onClick={handleCopy}

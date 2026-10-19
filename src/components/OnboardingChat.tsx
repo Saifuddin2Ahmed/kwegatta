@@ -11,18 +11,17 @@ import {
   RotateCcw,
   Check,
   MapPin,
-  Image as ImageIcon,
   Edit2,
   CheckCheck
 } from 'lucide-react';
 import { Profile } from '../types';
-import { buildProfileWithGemma, fetchGitHubData, db, fetchMyAccountProfile } from '../services/api';
+import { buildProfileWithGemma, db, fetchMyAccountProfile } from '../services/api';
 import { resizeImageFile } from '../utils';
 import { Avatar } from './Avatar';
 import { auth } from '../services/firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { AuthModal } from './AuthModal';
-import { ISO_COUNTRIES, getSortedCountries, guessCountry, deriveLocation } from '../lib/countries';
+import { getSortedCountries, guessCountry, deriveLocation } from '../lib/countries';
 import { INTENT_CHOICES, ROLE_CHOICES, STAGE_CHOICES, toggleChoice } from '../lib/profileChoices';
 
 interface OnboardingChatProps {
@@ -182,19 +181,10 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
   const [aiPolishStatus, setAiPolishStatus] = useState<'idle' | 'polishing' | 'done' | 'failed'>('idle');
   const [polishNotice, setPolishNotice] = useState<string | null>(null);
   const [errorState, setErrorState] = useState<string | null>(null);
-  const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
-  const noticeTimerRef = useRef<any>(null);
-
-  const showSelectionNotice = (msg: string) => {
-    setSelectionNotice(msg);
-    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
-    noticeTimerRef.current = setTimeout(() => {
-      setSelectionNotice(null);
-    }, 2000);
-  };
+  const [selectionNotice] = useState<string | null>(null);
 
   // Auth Dialog state
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(() => auth.currentUser);
+  const [, setCurrentUser] = useState<FirebaseUser | null>(() => auth.currentUser);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
   const [authModalPurpose, setAuthModalPurpose] = useState<'initial' | 'before_save'>('initial');
   const [pendingSaveData, setPendingSaveData] = useState<Partial<Profile> | null>(null);
@@ -915,10 +905,11 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
 
                 {/* Name */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-[var(--fg)] block">
+                  <label htmlFor="onboard-name" className="text-xs font-semibold text-[var(--fg)] block">
                     Your Name <span className="text-[var(--gold-text)]">*</span>
                   </label>
                   <input
+                    id="onboard-name"
                     type="text"
                     placeholder="e.g. Sandra Nabirye"
                     value={formData.name || ''}
@@ -956,10 +947,11 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
 
                 {/* City */}
                 <div className="space-y-1.5 pt-1">
-                  <label className="text-xs font-semibold text-[var(--fg)] block">
+                  <label htmlFor="onboard-city" className="text-xs font-semibold text-[var(--fg)] block">
                     City
                   </label>
                   <input
+                    id="onboard-city"
                     type="text"
                     placeholder="Your city"
                     maxLength={100}
@@ -1052,6 +1044,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                   </div>
                   <textarea
                     rows={2}
+                    aria-label="What you offer"
                     placeholder="e.g. React &amp; Tailwind development, retail distribution knowledge..."
                     value={formData.offers || ''}
                     onChange={e => setFormData(prev => ({ ...prev, offers: e.target.value }))}
@@ -1083,6 +1076,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                   </div>
                   <textarea
                     rows={2}
+                    aria-label="What you need"
                     placeholder="e.g. Technical partner to build mobile app, financial strategist..."
                     value={formData.needs || ''}
                     onChange={e => setFormData(prev => ({ ...prev, needs: e.target.value }))}
@@ -1151,6 +1145,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                   </div>
                   <input
                     type="text"
+                    aria-label="What you can teach"
                     placeholder="e.g. Retail business strategy, Figma design, Pitching..."
                     value={formData.teaches || ''}
                     onChange={e => setFormData(prev => ({ ...prev, teaches: e.target.value }))}
@@ -1182,6 +1177,7 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
                   </div>
                   <input
                     type="text"
+                    aria-label="What you want to learn"
                     placeholder="e.g. React &amp; modern TypeScript, AI prompt engineering..."
                     value={formData.learns || ''}
                     onChange={e => setFormData(prev => ({ ...prev, learns: e.target.value }))}
@@ -1227,10 +1223,11 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
 
                 {/* Profile Link or GitHub */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-[var(--fg)] block">
+                  <label htmlFor="onboard-github" className="text-xs font-semibold text-[var(--fg)] block">
                     GitHub username, LinkedIn or Website
                   </label>
                   <input
+                    id="onboard-github"
                     type="text"
                     placeholder="e.g. github.com/username or linkedin.com/in/name"
                     value={formData.github || formData.linkedin || formData.website || ''}
@@ -1251,10 +1248,11 @@ export const OnboardingChat: React.FC<OnboardingChatProps> = ({ onCompleted }) =
 
                 {/* WhatsApp */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-[var(--fg)] block">
+                  <label htmlFor="onboard-whatsapp" className="text-xs font-semibold text-[var(--fg)] block">
                     WhatsApp phone number
                   </label>
                   <input
+                    id="onboard-whatsapp"
                     type="text"
                     placeholder="e.g. +256 700 000000"
                     value={formData.whatsapp || ''}

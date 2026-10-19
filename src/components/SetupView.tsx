@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Database, Check, AlertCircle, RefreshCw, UserMinus, UserPlus, LogOut, ShieldCheck, Cpu } from 'lucide-react';
-import { callGemma, GEMMA_MODEL_ID, db, APP_NAME } from '../services/api';
+import { Sparkles, Database, UserMinus, UserPlus, LogOut, ShieldCheck, Cpu } from 'lucide-react';
+import { callGemma, GEMMA_MODEL_ID, db } from '../services/api';
 
 interface SetupViewProps {
   onSignOut: () => void;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, GraduationCap, Users2, MessageCircle, RefreshCw, UserPlus, UserCheck } from 'lucide-react';
+import { GraduationCap, Users2, MessageCircle, RefreshCw, UserPlus, UserCheck } from 'lucide-react';
 import { Profile, LearnMatchResult } from '../types';
 import { matchLearningPartners, db, APP_NAME, requestMemberConnect } from '../services/api';
 import { formatWhatsAppUrl } from '../utils';
@@ -26,6 +26,7 @@ export const LearnView: React.FC<LearnViewProps> = ({
   const [isLoading, setIsLoading] = useState(false);
 
   const candidates = currentProfile ? allProfiles.filter(p => p.id !== currentProfile.id) : allProfiles;
+  const teachers = allProfiles.filter(p => p.teaches);
 
   const calculateLearningMatches = async () => {
     if (!currentProfile) return;
@@ -124,13 +125,13 @@ export const LearnView: React.FC<LearnViewProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-3 pt-2">
+            <div className="flex flex-wrap items-center gap-3 pt-2">
               <button
                 onClick={() => {
                   if (onJoinClick) onJoinClick();
                   else window.location.hash = '#/onboard';
                 }}
-                className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold"
+                className="kw-btn kw-btn-gold text-xs py-2 px-4 font-bold w-full sm:w-auto whitespace-normal text-center"
               >
                 Get matched in about 2 minutes
               </button>
@@ -140,14 +141,32 @@ export const LearnView: React.FC<LearnViewProps> = ({
           {/* Community Skills Directory */}
           <div className="space-y-3 pt-2">
             <h3 className="font-semibold text-sm text-[var(--fg)]">
-              Members Teaching &amp; Sharing Knowledge ({allProfiles.filter(p => p.teaches).length})
+              Members Teaching &amp; Sharing Knowledge
+              {teachers.length > 0 ? ` (${teachers.length})` : ''}
             </h3>
+            {teachers.length === 0 ? (
+              <div className="p-4 rounded-xl border border-dashed border-[var(--card-border)] text-xs text-[var(--fg-muted)] space-y-2">
+                <p>No one has shared what they can teach yet. Be the first: add it to your profile and learners will find you here.</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onJoinClick) onJoinClick();
+                    else window.location.hash = '#/onboard';
+                  }}
+                  className="kw-btn kw-btn-ghost text-xs py-1.5 px-3 border border-[var(--card-border)]"
+                >
+                  Share what you can teach
+                </button>
+              </div>
+            ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-              {allProfiles.filter(p => p.teaches).slice(0, 9).map(profile => (
-                <div
+              {teachers.slice(0, 9).map(profile => (
+                <button
+                  type="button"
                   key={profile.id}
                   onClick={() => onViewProfile(profile.id)}
-                  className="p-4 rounded-xl bg-[var(--card)] border border-[var(--card-border)] hover:border-[var(--gold)]/50 cursor-pointer transition-all space-y-2.5"
+                  aria-label={`View ${profile.name}'s profile`}
+                  className="text-left w-full p-4 rounded-xl bg-[var(--card)] border border-[var(--card-border)] hover:border-[var(--gold)]/50 focus-visible:outline-2 focus-visible:outline-[var(--gold)] cursor-pointer transition-all space-y-2.5"
                 >
                   <div className="flex items-center gap-3">
                     <Avatar profile={profile} className="w-9 h-9" />
@@ -160,9 +179,10 @@ export const LearnView: React.FC<LearnViewProps> = ({
                     <span className="block text-[13px] uppercase font-bold text-[var(--teal-text)] opacity-80">Teaches:</span>
                     <span className="line-clamp-2">{profile.teaches}</span>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
+            )}
           </div>
         </div>
       ) : isLoading ? (

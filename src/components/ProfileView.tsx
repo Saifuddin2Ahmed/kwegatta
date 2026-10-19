@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 import {
   Sparkles,
   Link as LinkIcon,
@@ -14,7 +15,6 @@ import {
   UserCheck,
   Zap,
   Camera,
-  Upload,
   Share2,
   Award,
   Maximize2,
@@ -25,11 +25,7 @@ import {
   AlertCircle,
   Flag,
   Ban,
-  Globe,
   MapPin,
-  Clock,
-  Compass,
-  Layers,
   LogOut,
   Lock,
   KeyRound,
@@ -52,7 +48,6 @@ import { SocialLinksRow } from './SocialLinksRow';
 import { getSortedCountries, deriveLocation } from '../lib/countries';
 import { ROLE_CHOICES, STAGE_CHOICES, INTENT_CHOICES, parseIntents, toggleChoice, makeFirst } from '../lib/profileChoices';
 import { auth, addPasswordToAccount, validatePasswordStrength, formatAuthError } from '../services/firebase';
-import { EmailAuthProvider, linkWithCredential } from 'firebase/auth';
 
 const ShareCardModal = React.lazy(() => import('./ShareCardModal').then(m => ({ default: m.ShareCardModal })));
 
@@ -216,6 +211,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [gemmaInstruction, setGemmaInstruction] = useState('');
   const [isRewriting, setIsRewriting] = useState(false);
 
+  const closeDeleteModal = () => {
+    setShowDeleteModal(false);
+    setConfirmDeleteInput('');
+  };
+  const qrDialogRef = useDialogA11y<HTMLDivElement>(showQrModal, () => setShowQrModal(false));
+  const deleteDialogRef = useDialogA11y<HTMLDivElement>(showDeleteModal, closeDeleteModal);
+  const reportDialogRef = useDialogA11y<HTMLDivElement>(showReportModal, () => setShowReportModal(false));
+  const blockDialogRef = useDialogA11y<HTMLDivElement>(showBlockModal, () => setShowBlockModal(false));
+
   // Check auth user provider
   const currentUser = auth.currentUser;
   const isGoogleUser = currentUser?.providerData.some(p => p.providerId === 'google.com');
@@ -270,7 +274,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     try {
       const cleanCity = editCity.trim().slice(0, 100);
       const cleanCountry = editCountry;
-      const derivedLoc = deriveLocation(cleanCity, cleanCountry);
 
       const finalRoles = editRoles;
 
@@ -568,10 +571,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
       {/* Modal for Fullscreen QR Code */}
       {showQrModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-          <div className="bg-[var(--bg)] border border-[var(--border)] rounded-lg p-6 max-w-sm w-full text-center space-y-4 shadow-2xl animate-in fade-in zoom-in-95">
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowQrModal(false); }}>
+          <div
+            ref={qrDialogRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="profile-qr-title"
+            className="bg-[var(--bg)] border border-[var(--border)] rounded-lg p-6 max-w-sm w-full text-center space-y-4 shadow-2xl animate-in fade-in zoom-in-95 outline-none"
+          >
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-sm">Scan Profile</span>
+              <h2 id="profile-qr-title" className="font-semibold text-sm">Scan Profile</h2>
               <button
                 onClick={() => setShowQrModal(false)}
                 className="primer-btn text-xs p-1"
@@ -598,17 +608,21 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       {/* Modal for Deleting Profile Permanently */}
       {showDeleteModal && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-          <div className="bg-[var(--bg)] border border-[var(--danger)] rounded-lg p-6 max-w-md w-full space-y-4 shadow-2xl animate-in fade-in zoom-in-95">
+          <div
+            ref={deleteDialogRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="profile-delete-title"
+            className="bg-[var(--bg)] border border-[var(--danger)] rounded-lg p-6 max-w-md w-full space-y-4 shadow-2xl animate-in fade-in zoom-in-95 outline-none"
+          >
             <div className="flex items-center justify-between">
-              <span className="font-bold text-sm text-[var(--danger)] flex items-center gap-2">
+              <h2 id="profile-delete-title" className="font-bold text-sm text-[var(--danger)] flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-[var(--danger)]" />
                 <span>Delete Profile Permanently</span>
-              </span>
+              </h2>
               <button
-                onClick={() => {
-                  setShowDeleteModal(false);
-                  setConfirmDeleteInput('');
-                }}
+                onClick={closeDeleteModal}
                 className="primer-btn text-xs p-1"
                 aria-label="Close modal"
               >
@@ -621,10 +635,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </p>
 
             <div className="space-y-1.5 text-xs bg-[var(--subtle)] p-3 rounded-md border border-[var(--border)]">
-              <label className="text-[var(--muted)] block">
+              <label htmlFor="profile-delete-confirm" className="text-[var(--muted)] block">
                 Type your full name <strong className="text-[var(--fg)] font-mono">{profile.name}</strong> to confirm:
               </label>
               <input
+                id="profile-delete-confirm"
                 type="text"
                 value={confirmDeleteInput}
                 onChange={e => setConfirmDeleteInput(e.target.value)}
@@ -672,6 +687,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   <input
                     type="file"
                     accept="image/*"
+                    aria-label="Change photo"
                     onChange={handlePhotoUpload}
                     hidden
                   />
@@ -1067,6 +1083,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       </p>
                       <input
                         type="password"
+                        aria-label="New password"
                         placeholder="Enter password (min 8 characters)"
                         value={newPassword}
                         onChange={e => {
@@ -1168,12 +1185,14 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
 
             {qrCodeDataUrl ? (
-              <div
+              <button
+                type="button"
                 onClick={() => setShowQrModal(true)}
-                className="bg-white p-2 rounded inline-block shadow-sm cursor-pointer hover:opacity-95"
+                aria-label="Enlarge QR code"
+                className="bg-white p-2 rounded inline-block shadow-sm cursor-pointer hover:opacity-95 focus-visible:outline-2 focus-visible:outline-[var(--gold)]"
               >
                 <img src={qrCodeDataUrl} alt="Profile QR Code" className="w-36 h-36 mx-auto" />
-              </div>
+              </button>
             ) : (
               <div className="w-36 h-36 mx-auto bg-gray-200 animate-pulse rounded" />
             )}
@@ -1398,10 +1417,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-[var(--fg)] mb-1">
+                  <label htmlFor="profile-headline" className="block text-xs font-semibold text-[var(--fg)] mb-1">
                     Headline (max 8 words)
                   </label>
                   <input
+                    id="profile-headline"
                     type="text"
                     value={editHeadline}
                     onChange={e => setEditHeadline(e.target.value)}
@@ -1411,10 +1431,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-[var(--fg)] mb-1">
+                  <label htmlFor="profile-bio" className="block text-xs font-semibold text-[var(--fg)] mb-1">
                     Bio (2 sentences)
                   </label>
                   <textarea
+                    id="profile-bio"
                     value={editBio}
                     onChange={e => setEditBio(e.target.value)}
                     className="primer-textarea text-xs w-full"
@@ -1433,6 +1454,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     <input
                       type="text"
                       placeholder="e.g. shorter, more focused on fintech, casual tone..."
+                      aria-label="How Gemma should rewrite your bio"
                       value={gemmaInstruction}
                       onChange={e => setGemmaInstruction(e.target.value)}
                       className="primer-input text-xs flex-1"
@@ -1451,10 +1473,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-semibold text-[var(--gold-text)] mb-1">
+                    <label htmlFor="profile-offers" className="block text-xs font-semibold text-[var(--gold-text)] mb-1">
                       What you OFFER
                     </label>
                     <textarea
+                      id="profile-offers"
                       value={editOffers}
                       onChange={e => setEditOffers(e.target.value)}
                       className="primer-textarea text-xs w-full"
@@ -1463,10 +1486,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-[var(--teal-text)] mb-1">
+                    <label htmlFor="profile-needs" className="block text-xs font-semibold text-[var(--teal-text)] mb-1">
                       What you NEED
                     </label>
                     <textarea
+                      id="profile-needs"
                       value={editNeeds}
                       onChange={e => setEditNeeds(e.target.value)}
                       className="primer-textarea text-xs w-full"
@@ -1478,10 +1502,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-[var(--muted)] mb-1">
+                    <label htmlFor="profile-teaches" className="block text-xs font-medium text-[var(--muted)] mb-1">
                       What you can TEACH (mentorship)
                     </label>
                     <input
+                      id="profile-teaches"
                       type="text"
                       value={editTeaches}
                       onChange={e => setEditTeaches(e.target.value)}
@@ -1490,10 +1515,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-[var(--muted)] mb-1">
+                    <label htmlFor="profile-learns" className="block text-xs font-medium text-[var(--muted)] mb-1">
                       What you want to LEARN (study partners)
                     </label>
                     <input
+                      id="profile-learns"
                       type="text"
                       value={editLearns}
                       onChange={e => setEditLearns(e.target.value)}
@@ -1521,8 +1547,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       <div>
-                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">LinkedIn</label>
+                        <label htmlFor="profile-linkedin" className="text-[13px] text-[var(--fg-muted)] block mb-0.5">LinkedIn</label>
                         <input
+                          id="profile-linkedin"
                           type="text"
                           placeholder="https://linkedin.com/in/username"
                           value={editLinkedin}
@@ -1531,8 +1558,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">GitHub</label>
+                        <label htmlFor="profile-github" className="text-[13px] text-[var(--fg-muted)] block mb-0.5">GitHub</label>
                         <input
+                          id="profile-github"
                           type="text"
                           placeholder="username or github.com/username"
                           value={editGithub}
@@ -1541,8 +1569,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">GitLab (gitlab.com)</label>
+                        <label htmlFor="profile-gitlab" className="text-[13px] text-[var(--fg-muted)] block mb-0.5">GitLab (gitlab.com)</label>
                         <input
+                          id="profile-gitlab"
                           type="text"
                           placeholder="https://gitlab.com/username"
                           value={editGitlab}
@@ -1561,8 +1590,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Google Developer Profile (g.dev)</label>
+                        <label htmlFor="profile-google-dev" className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Google Developer Profile (g.dev)</label>
                         <input
+                          id="profile-google-dev"
                           type="text"
                           placeholder="https://g.dev/username"
                           value={editGoogleDev}
@@ -1571,8 +1601,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Personal Website</label>
+                        <label htmlFor="profile-website" className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Personal Website</label>
                         <input
+                          id="profile-website"
                           type="text"
                           placeholder="https://yoursite.com"
                           value={editWebsite}
@@ -1590,8 +1621,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       <div>
-                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">X (Twitter)</label>
+                        <label htmlFor="profile-twitter" className="text-[13px] text-[var(--fg-muted)] block mb-0.5">X (Twitter)</label>
                         <input
+                          id="profile-twitter"
                           type="text"
                           placeholder="https://x.com/username"
                           value={editTwitter}
@@ -1600,8 +1632,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Facebook</label>
+                        <label htmlFor="profile-facebook" className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Facebook</label>
                         <input
+                          id="profile-facebook"
                           type="text"
                           placeholder="https://facebook.com/username"
                           value={editFacebook}
@@ -1610,8 +1643,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Instagram</label>
+                        <label htmlFor="profile-instagram" className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Instagram</label>
                         <input
+                          id="profile-instagram"
                           type="text"
                           placeholder="https://instagram.com/username"
                           value={editInstagram}
@@ -1620,8 +1654,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">TikTok</label>
+                        <label htmlFor="profile-tiktok" className="text-[13px] text-[var(--fg-muted)] block mb-0.5">TikTok</label>
                         <input
+                          id="profile-tiktok"
                           type="text"
                           placeholder="https://tiktok.com/@username"
                           value={editTiktok}
@@ -1630,8 +1665,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">YouTube</label>
+                        <label htmlFor="profile-youtube" className="text-[13px] text-[var(--fg-muted)] block mb-0.5">YouTube</label>
                         <input
+                          id="profile-youtube"
                           type="text"
                           placeholder="https://youtube.com/@channel"
                           value={editYoutube}
@@ -1649,8 +1685,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       <div>
-                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Google Scholar</label>
+                        <label htmlFor="profile-scholar" className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Google Scholar</label>
                         <input
+                          id="profile-scholar"
                           type="text"
                           placeholder="https://scholar.google.com/citations?user=..."
                           value={editScholar}
@@ -1659,8 +1696,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">ORCID</label>
+                        <label htmlFor="profile-orcid" className="text-[13px] text-[var(--fg-muted)] block mb-0.5">ORCID</label>
                         <input
+                          id="profile-orcid"
                           type="text"
                           placeholder="https://orcid.org/0000-0000-0000-0000"
                           value={editOrcid}
@@ -1669,8 +1707,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">IEEE Collabratec (ieee-collabratec.ieee.org)</label>
+                        <label htmlFor="profile-ieee" className="text-[13px] text-[var(--fg-muted)] block mb-0.5">IEEE Collabratec (ieee-collabratec.ieee.org)</label>
                         <input
+                          id="profile-ieee"
                           type="text"
                           placeholder="https://ieee-collabratec.ieee.org/app/p/..."
                           value={editIeee}
@@ -1679,8 +1718,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Hugging Face (huggingface.co)</label>
+                        <label htmlFor="profile-huggingface" className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Hugging Face (huggingface.co)</label>
                         <input
+                          id="profile-huggingface"
                           type="text"
                           placeholder="https://huggingface.co/username"
                           value={editHuggingface}
@@ -1689,8 +1729,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Kaggle (kaggle.com)</label>
+                        <label htmlFor="profile-kaggle" className="text-[13px] text-[var(--fg-muted)] block mb-0.5">Kaggle (kaggle.com)</label>
                         <input
+                          id="profile-kaggle"
                           type="text"
                           placeholder="https://kaggle.com/username"
                           value={editKaggle}
@@ -1730,6 +1771,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                               type="text"
                               maxLength={24}
                               placeholder="Label (max 24 chars)"
+                            aria-label="Link label"
                               value={custom.label}
                               onChange={e => {
                                 const next = [...editCustomLinks];
@@ -1740,6 +1782,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                             />
                             <input
                               type="url"
+                              aria-label="Link address"
                               placeholder="https://..."
                               value={custom.url}
                               onChange={e => {
@@ -1768,8 +1811,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
                   <div>
-                    <label className="block text-xs font-semibold text-[var(--fg)] mb-1">Status</label>
+                    <label htmlFor="profile-status" className="block text-xs font-semibold text-[var(--fg)] mb-1">Status</label>
                     <select
+                      id="profile-status"
                       value={editStatus}
                       onChange={e => setEditStatus(e.target.value)}
                       className="primer-select text-xs w-full"
@@ -1782,8 +1826,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     </select>
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-[var(--fg)] mb-1">WhatsApp number</label>
+                    <label htmlFor="profile-whats-app" className="block text-xs font-semibold text-[var(--fg)] mb-1">WhatsApp number</label>
                     <input
+                      id="profile-whats-app"
                       type="tel"
                       value={editWhatsApp}
                       onChange={e => setEditWhatsApp(e.target.value)}
@@ -1887,44 +1932,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
           )}
 
-          {/* GitHub Activity / Commit Stream */}
-          <div className="primer-box p-3.5 space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold">Hack Day Activity &amp; Commit Stream</span>
-              <span className="text-[13px] text-[var(--muted)]">October 2026</span>
-            </div>
-            <div className="grid grid-cols-12 sm:grid-cols-24 gap-1 pt-1">
-              {Array.from({ length: 48 }).map((_, i) => {
-                const levels = [
-                  'bg-[var(--border-muted)]',
-                  'bg-[#0e4429]',
-                  'bg-[#006d32]',
-                  'bg-[#26a641]',
-                  'bg-[#39d353]'
-                ];
-                const activeIndex = (i * 7 + (profile.name.charCodeAt(0) || 5)) % levels.length;
-                return (
-                  <div
-                    key={i}
-                    className={`h-3 rounded-xs ${levels[activeIndex]} transition-opacity hover:opacity-80`}
-                    title={`Activity day ${i + 1}`}
-                  />
-                );
-              })}
-            </div>
-            <div className="flex items-center justify-between text-[13px] text-[var(--muted)] pt-1">
-              <span>Less</span>
-              <div className="flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded-xs bg-[var(--border-muted)]" />
-                <span className="w-2.5 h-2.5 rounded-xs bg-[#0e4429]" />
-                <span className="w-2.5 h-2.5 rounded-xs bg-[#006d32]" />
-                <span className="w-2.5 h-2.5 rounded-xs bg-[#26a641]" />
-                <span className="w-2.5 h-2.5 rounded-xs bg-[#39d353]" />
-              </div>
-              <span>More</span>
-            </div>
-          </div>
-
           {/* Top Repositories */}
           {profile.gh?.top && profile.gh.top.length > 0 && (
             <div className="space-y-2.5">
@@ -1987,15 +1994,23 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       {/* Report Modal */}
       {showReportModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in">
-          <div className="kw-card p-6 max-w-md w-full bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-2xl space-y-4">
+          <div
+            ref={reportDialogRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="profile-report-title"
+            className="kw-card p-6 max-w-md w-full bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-2xl space-y-4 outline-none"
+          >
             <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
-              <div className="flex items-center gap-2 text-[var(--danger)] font-bold text-sm">
+              <h2 id="profile-report-title" className="flex items-center gap-2 text-[var(--danger)] font-bold text-sm">
                 <Flag className="w-4 h-4 text-red-500" />
                 <span>Report {profile.name}</span>
-              </div>
+              </h2>
               <button
                 type="button"
                 onClick={() => setShowReportModal(false)}
+                aria-label="Close"
                 className="text-[var(--fg-muted)] hover:text-[var(--fg)] p-1 rounded-md cursor-pointer"
               >
                 <X className="w-4 h-4" />
@@ -2007,8 +2022,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </p>
 
             <div className="space-y-2">
-              <label className="text-xs font-semibold text-[var(--fg)]">Reason for report</label>
+              <label htmlFor="profile-report-reason" className="text-xs font-semibold text-[var(--fg)]">Reason for report</label>
               <select
+                id="profile-report-reason"
                 value={reportReason}
                 onChange={e => setReportReason(e.target.value)}
                 className="w-full p-2.5 rounded-xl bg-[var(--bg-subtle)] border border-[var(--card-border)] text-xs text-[var(--fg)] focus:outline-none focus:border-[var(--gold)]"
@@ -2022,8 +2038,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-[var(--fg)]">Additional context (optional)</label>
+              <label htmlFor="profile-report-details" className="text-xs font-semibold text-[var(--fg)]">Additional context (optional)</label>
               <textarea
+                id="profile-report-details"
                 value={reportDetails}
                 onChange={e => setReportDetails(e.target.value)}
                 placeholder="Describe what occurred or paste relevant details..."
@@ -2066,15 +2083,23 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       {/* Block Modal */}
       {showBlockModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in">
-          <div className="kw-card p-6 max-w-md w-full bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-2xl space-y-4">
+          <div
+            ref={blockDialogRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="profile-block-title"
+            className="kw-card p-6 max-w-md w-full bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-2xl space-y-4 outline-none"
+          >
             <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
-              <div className="flex items-center gap-2 text-[var(--fg)] font-bold text-sm">
+              <h2 id="profile-block-title" className="flex items-center gap-2 text-[var(--fg)] font-bold text-sm">
                 <Ban className="w-4 h-4 text-red-500" />
                 <span>Block {profile.name}?</span>
-              </div>
+              </h2>
               <button
                 type="button"
                 onClick={() => setShowBlockModal(false)}
+                aria-label="Close"
                 className="text-[var(--fg-muted)] hover:text-[var(--fg)] p-1 rounded-md cursor-pointer"
               >
                 <X className="w-4 h-4" />

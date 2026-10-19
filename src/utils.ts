@@ -243,17 +243,16 @@ export function formatEventDateTime(
   display: string;
   isLegacy: boolean;
 } {
-  if (!startsAt) {
+  const startDate = startsAt ? new Date(startsAt) : null;
+  if (!startDate || isNaN(startDate.getTime())) {
+    // Older events keep only a free-text date. If it is a machine date (ISO), format it
+    // like a normal start time instead of showing "2026-10-24T14:47:49.690Z".
+    const legacy = String(legacyText || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(legacy) && !isNaN(new Date(legacy).getTime())) {
+      return formatEventDateTime(legacy, endsAt, eventTimezone);
+    }
     return {
-      display: legacyText || 'Date TBA',
-      isLegacy: true
-    };
-  }
-
-  const startDate = new Date(startsAt);
-  if (isNaN(startDate.getTime())) {
-    return {
-      display: legacyText || 'Date TBA',
+      display: legacy || 'Date TBA',
       isLegacy: true
     };
   }

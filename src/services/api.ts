@@ -89,7 +89,7 @@ export function createFallbackMatch(me: Profile, candidate: Profile, score: numb
   } else {
     const cRole = (candidate.roles && candidate.roles.length ? candidate.roles.join('/') : candidate.role) || 'collaborator';
     const mRole = (me.roles && me.roles.length ? me.roles.join('/') : me.role) || 'collaborator';
-    reason = `You and ${candidate.name.split(' ')[0]} bring complementary ${cRole} and ${mRole} perspectives to collaborate.`;
+    reason = roleReason(candidate.name.split(' ')[0], cRole, mRole);
   }
 
   const firstName = candidate.name.split(' ')[0];
@@ -99,9 +99,34 @@ export function createFallbackMatch(me: Profile, candidate: Profile, score: numb
     id: candidate.id,
     score,
     reason,
-    spark: `A project combining ${me.offers ? me.offers.slice(0, 30) : 'your expertise'} with ${candidate.offers ? candidate.offers.slice(0, 30) : 'their expertise'}.`,
+    spark: sparkSentence(me.offers, candidate.offers),
     icebreaker: `Hi ${firstName}, I'm ${myFirstName}. I found you on ${APP_NAME} and noticed our skills align. Would you like to connect?`
   };
+}
+
+/** Fallback match reason built from roles; avoids "Developer and Developer". */
+export function roleReason(firstName: string, theirRole: string, myRole: string): string {
+  if (theirRole.toLowerCase() === myRole.toLowerCase()) {
+    return `You and ${firstName} are both ${theirRole === 'collaborator' ? 'builders' : `${theirRole}s`}, so you can pair up and share the work.`;
+  }
+  return `You and ${firstName} bring complementary ${theirRole} and ${myRole} perspectives to collaborate.`;
+}
+
+function shortPhrase(text: string | undefined | null): string {
+  const first = String(text || '').split(/[,;.\n]/)[0].trim();
+  if (first.length <= 40) return first;
+  return first.slice(0, 40).replace(/\s+\S*$/, '');
+}
+
+/** One-line project idea from what both people offer. */
+export function sparkSentence(myOffers?: string | null, theirOffers?: string | null): string {
+  const mine = shortPhrase(myOffers);
+  const theirs = shortPhrase(theirOffers);
+  if (mine && theirs && mine.toLowerCase() !== theirs.toLowerCase()) {
+    return `A project combining ${mine} with ${theirs}.`;
+  }
+  if (mine || theirs) return `A project where you both put ${mine || theirs} to work.`;
+  return 'A small project that uses both of your strengths.';
 }
 
 // Track hedged request frequency for tail latency logging
@@ -780,7 +805,7 @@ export async function fetchGitHubData(input: string): Promise<GitHubData | null>
   return out;
 }
 
-import { auth, getCurrentIdToken } from './firebase';
+import { getCurrentIdToken } from './firebase';
 
 export function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -822,7 +847,7 @@ export async function ensureAuthToken(userId?: string): Promise<string | null> {
 }
 
 export async function claimExistingProfile(profileId: string): Promise<Profile | null> {
-  const token = await getFreshAuthToken();
+  await getFreshAuthToken();
   const headers = getAuthHeaders({ 'Content-Type': 'application/json' });
   const res = await fetch('/api/auth/claim-profile', {
     method: 'POST',
@@ -1706,8 +1731,8 @@ export async function createTeamMember(data: any): Promise<any> {
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(data)
   });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Failed to add team member');
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(json.error || 'Failed to add team member'), { fields: json.fields });
   return json.member;
 }
 
@@ -1718,8 +1743,8 @@ export async function updateTeamMember(id: string, patch: any): Promise<any> {
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(patch)
   });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Failed to update team member');
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(json.error || 'Failed to update team member'), { fields: json.fields });
   return json.member;
 }
 
@@ -1733,6 +1758,13 @@ export async function uploadTeamMemberPhoto(id: string, photo: string): Promise<
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || 'Failed to upload photo');
   return json;
+}
+
+export async function searchTeamProfiles(q: string): Promise<Array<{ id: string; name: string; headline: string; avatar_url: string | null }>> {
+  await getFreshAuthToken();
+  const res = await fetch(`/api/admin/team/profile-search?q=${encodeURIComponent(q)}`, { headers: getAuthHeaders() });
+  if (!res.ok) return [];
+  return await res.json();
 }
 
 export async function reorderTeamMembers(ordered_ids: string[]): Promise<any[]> {

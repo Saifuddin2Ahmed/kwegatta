@@ -1,7 +1,8 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { X, Download, Share2, Sparkles, Check, QrCode } from 'lucide-react';
+import { X, Download, Share2, Sparkles } from 'lucide-react';
 import { Profile } from '../types';
 import { generateQrCodeDataUrl } from '../utils';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 
 interface ShareCardModalProps {
   profile: Profile;
@@ -22,6 +23,7 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [dataUrl, setDataUrl] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState(true);
+  const dialogRef = useDialogA11y<HTMLDivElement>(isOpen, onClose);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -348,11 +350,18 @@ export const ShareCardModal: React.FC<ShareCardModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
-      <div className="kw-card max-w-2xl w-full p-5 sm:p-6 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-2xl space-y-4">
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="share-card-title"
+        className="kw-card max-w-2xl w-full p-5 sm:p-6 bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-2xl space-y-4 outline-none"
+      >
         <div className="flex items-center justify-between border-b border-[var(--card-border)]/60 pb-3">
           <div className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-[var(--gold-text)]" />
-            <h3 className="text-base sm:text-lg font-bold font-display text-[var(--fg)]">
+            <h3 id="share-card-title" className="text-base sm:text-lg font-bold font-display text-[var(--fg)]">
               Share Profile Card
             </h3>
           </div>

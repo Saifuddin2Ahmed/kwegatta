@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Upload, Check, Camera, AlertCircle, Loader2 } from 'lucide-react';
 import { useEventPhotos, setInMemoryPreview } from '../hooks/useEventPhotos';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 
 interface EventPhotosModalProps {
   isOpen: boolean;
@@ -17,6 +18,7 @@ export const EventPhotosModal: React.FC<EventPhotosModalProps> = ({
   const [uploadingSlot, setUploadingSlot] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const dialogRef = useDialogA11y<HTMLDivElement>(isOpen, onClose);
 
   if (!isOpen) return null;
 
@@ -104,7 +106,14 @@ export const EventPhotosModal: React.FC<EventPhotosModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in">
-      <div className="relative w-full max-w-2xl bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-2xl p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto">
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="event-photos-title"
+        className="relative w-full max-w-2xl bg-[var(--card)] border border-[var(--card-border)] rounded-2xl shadow-2xl p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto outline-none"
+      >
         
         {/* Header */}
         <div className="flex items-start justify-between gap-4 border-b border-[var(--card-border)] pb-4">
@@ -113,7 +122,7 @@ export const EventPhotosModal: React.FC<EventPhotosModalProps> = ({
               <Camera className="w-3.5 h-3.5" />
               <span>Admin Photo Manager</span>
             </div>
-            <h3 className="text-xl font-display font-bold text-[var(--fg)]">
+            <h3 id="event-photos-title" className="text-xl font-display font-bold text-[var(--fg)]">
               Update Authentic Event Photos
             </h3>
             <p className="text-xs text-[var(--fg-muted)] mt-1">
@@ -123,6 +132,7 @@ export const EventPhotosModal: React.FC<EventPhotosModalProps> = ({
           <button
             onClick={onClose}
             className="p-1.5 rounded-lg text-[var(--fg-muted)] hover:text-[var(--fg)] hover:bg-[var(--bg-subtle)] transition-colors"
+            aria-label="Close"
           >
             <X className="w-5 h-5" />
           </button>

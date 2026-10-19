@@ -1,4 +1,5 @@
 import React, { useState, useEffect, Suspense } from 'react';
+import { useDialogA11y } from '../hooks/useDialogA11y';
 import { Camera, X, Search } from 'lucide-react';
 import { hostCheckinAttendee } from '../services/api';
 import {
@@ -118,6 +119,8 @@ export const HostScannerModal: React.FC<HostScannerModalProps> = ({
     }
   };
 
+  const dialogRef = useDialogA11y<HTMLDivElement>(isOpen, onClose);
+
   if (!isOpen) return null;
 
   const allRegistrants = [
@@ -141,11 +144,11 @@ export const HostScannerModal: React.FC<HostScannerModalProps> = ({
   const isManualCodeValid = isValidTicketCode(normalizedManual);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm grid place-items-center p-4">
-      <div className="kw-card max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto border-[var(--gold)]/40">
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm grid place-items-center p-4" role="dialog" aria-modal="true" aria-labelledby="host-scanner-title">
+      <div ref={dialogRef} tabIndex={-1} className="kw-card max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto border-[var(--gold)]/40 outline-none">
         <div className="flex items-center justify-between border-b border-[var(--card-border)] pb-3 gap-2">
           <div className="space-y-0.5">
-            <h3 className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">
+            <h3 id="host-scanner-title" className="font-bold text-sm text-[var(--fg)] flex items-center gap-2">
               <Camera className="w-4 h-4 text-[var(--gold-text)]" />
               <span>Check in guests — {eventTitle}</span>
             </h3>
@@ -237,6 +240,7 @@ export const HostScannerModal: React.FC<HostScannerModalProps> = ({
               value={scannerSearch}
               onChange={e => setScannerSearch(e.target.value)}
               placeholder="Search registered members or guests..."
+              aria-label="Search registered members or guests"
               className="kw-input text-xs pl-9 py-1.5 w-full"
             />
           </div>

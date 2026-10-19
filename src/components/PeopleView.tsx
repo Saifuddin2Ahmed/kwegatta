@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Search,
   UserPlus,
@@ -7,21 +7,15 @@ import {
   Sparkles,
   ArrowRight,
   RefreshCw,
-  AlertCircle,
   MapPin,
   Lock,
-  MessageSquare,
   Share2,
-  Copy,
-  Check,
   Compass,
-  QrCode,
   Users
 } from 'lucide-react';
 import { Profile, AskKwegattaMatch } from '../types';
 import { Avatar } from './Avatar';
 import { askKwegatta } from '../services/api';
-import { generateQrCodeDataUrl } from '../utils';
 
 interface PeopleViewProps {
   currentProfile: Profile | null;
@@ -66,7 +60,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
   const [isAsking, setIsAsking] = useState(false);
   const [askResults, setAskResults] = useState<Array<{ profile: Profile; reason?: string }>>([]);
   const [askSource, setAskSource] = useState<'keyword' | 'gemma' | null>(null);
-  const [askError, setAskError] = useState<string | null>(null);
+  const [, setAskError] = useState<string | null>(null);
 
   const searchRequestIdRef = useRef(0);
 
@@ -253,6 +247,7 @@ export const PeopleView: React.FC<PeopleViewProps> = ({
                 <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--fg-subtle)] pointer-events-none" />
                 <input
                   type="text"
+                  aria-label="Ask Gemma who you should meet"
                   placeholder='e.g. "I need someone who knows solar energy in Gulu", "Who can teach me accounting?"'
                   value={askInput}
                   onChange={e => setAskInput(e.target.value)}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Sparkles, Send, Users, X, MessageSquare, Lightbulb, MessageCircle, ThumbsUp, Rocket, Heart } from 'lucide-react';
-import { Profile, Post, PostComment } from '../types';
+import { Profile, Post } from '../types';
 import { classifyPostWithGemma, db, extractKeywords, intersection, reactToPost, addPostComment, deletePostComment } from '../services/api';
 import { formatTimeAgo, formatWhatsAppUrl } from '../utils';
 import { Avatar } from './Avatar';
@@ -159,6 +159,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
             <div className="flex gap-3 items-start">
               <Avatar profile={currentProfile} className="w-8 h-8 flex-shrink-0" />
               <textarea
+                aria-label="Write a post"
                 value={postContent}
                 onChange={e => setPostContent(e.target.value)}
                 placeholder="Share a project ask, offer skills, or propose an idea..."
@@ -420,6 +421,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                       <div className="flex gap-2">
                         <input
                           type="text"
+                          aria-label="Write a reply"
                           placeholder="Write a reply or offer to collaborate..."
                           value={commentText}
                           onChange={e => setCommentText(e.target.value)}

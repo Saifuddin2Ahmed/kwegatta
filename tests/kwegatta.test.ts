@@ -344,8 +344,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.10.4
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.10.4'");
+    // 1. Cache name includes version kwegatta-1.11.0
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.11.0'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -2025,8 +2025,22 @@ describe('Release 1.5.0 Features', () => {
     });
 
     it('b) Render: About team card does NOT contain the text of member.title or member.line1, and DOES contain name and line2', async () => {
-      const { act, render, screen } = await import('@testing-library/react');
+      const { act, render, screen, waitFor } = await import('@testing-library/react');
       const { AboutView } = await import('../src/components/AboutView');
+      const { getPublicTeamList, INITIAL_TEAM_MEMBERS } = await import('../server');
+
+      // The page shows exactly what /api/team returns (details switched off here).
+      const savedTeam = store.team;
+      const savedEnabled = store.team_details_enabled;
+      store.team = INITIAL_TEAM_MEMBERS.map(m => ({ ...m }));
+      store.team_details_enabled = false;
+      const publicList = getPublicTeamList();
+      store.team = savedTeam;
+      store.team_details_enabled = savedEnabled;
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any) => {
+        if (String(input) === '/api/team') return new Response(JSON.stringify(publicList));
+        return new Response('[]');
+      });
 
       await act(async () => {
         render(
@@ -2036,7 +2050,8 @@ describe('Release 1.5.0 Features', () => {
         );
       });
 
-      expect(screen.getByText('Saifuddin Ahmed')).toBeTruthy();
+      await waitFor(() => expect(screen.getByText('Saifuddin Ahmed')).toBeTruthy());
+      fetchSpy.mockRestore();
       expect(screen.getByText('Future Stars Center for Development and Capacity Building')).toBeTruthy();
 
       expect(screen.queryByText('Team lead and engineering')).toBeNull();
@@ -2960,7 +2975,8 @@ describe('Release 1.5.0 Features', () => {
         expect(parsed.some((m: any) => m.id === hiddenId)).toBe(false);
         const visible = parsed.find((m: any) => m.id === visibleId);
         expect(visible).toBeTruthy();
-        expect(visible.photo_url).toBe(`/api/team-photo/${visibleId}`);
+        // photo_url carries a version suffix so a replaced photo is not served from cache
+        expect(visible.photo_url.startsWith(`/api/team-photo/${visibleId}?v=`)).toBe(true);
         expect(visible.photo).toBeUndefined();
       });
 
@@ -3071,7 +3087,8 @@ describe('Release 1.5.0 Features', () => {
           });
 
           // Switch to Team tab
-          const teamTabBtn = screen.getByRole('button', { name: /Team/i });
+          // Dashboard sections are tabs (role="tab") since 1.11.0
+          const teamTabBtn = screen.getByRole('tab', { name: /Team/i });
           await act(async () => {
             fireEvent.click(teamTabBtn);
           });
@@ -6288,8 +6305,8 @@ describe('Release 1.5.0 Features', () => {
         const swCacheName = match![1];
 
         expect(swCacheName).toBe(`kwegatta-${pkg.version}`);
-        expect(pkg.version).toBe('1.10.4');
-        expect(swCacheName).toBe('kwegatta-1.10.4');
+        expect(pkg.version).toBe('1.11.0');
+        expect(swCacheName).toBe('kwegatta-1.11.0');
       });
 
       it('d) OG_RENDER_VERSION busts image cache', () => {

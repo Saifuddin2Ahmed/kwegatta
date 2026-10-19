@@ -46,42 +46,42 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
           >
             People
           </button>
-          <span className="text-[var(--fg-subtle)] select-none" aria-hidden="true">·</span>
+          <span className="hidden sm:inline text-[var(--fg-subtle)] select-none" aria-hidden="true">·</span>
           <button
             onClick={() => navigateToSection('matches')}
             className="min-h-[40px] px-2 inline-flex items-center hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--gold)] rounded transition-colors cursor-pointer"
           >
             Matches
           </button>
-          <span className="text-[var(--fg-subtle)] select-none" aria-hidden="true">·</span>
+          <span className="hidden sm:inline text-[var(--fg-subtle)] select-none" aria-hidden="true">·</span>
           <button
             onClick={() => navigateToSection('events')}
             className="min-h-[40px] px-2 inline-flex items-center hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--gold)] rounded transition-colors cursor-pointer"
           >
             Events
           </button>
-          <span className="text-[var(--fg-subtle)] select-none" aria-hidden="true">·</span>
+          <span className="hidden sm:inline text-[var(--fg-subtle)] select-none" aria-hidden="true">·</span>
           <button
             onClick={() => navigateToSection('wall')}
             className="min-h-[40px] px-2 inline-flex items-center hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--gold)] rounded transition-colors cursor-pointer"
           >
             Live wall
           </button>
-          <span className="text-[var(--fg-subtle)] select-none" aria-hidden="true">·</span>
+          <span className="hidden sm:inline text-[var(--fg-subtle)] select-none" aria-hidden="true">·</span>
           <button
             onClick={() => navigateToSection('about')}
             className="min-h-[40px] px-2 inline-flex items-center hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--gold)] rounded transition-colors cursor-pointer"
           >
             About
           </button>
-          <span className="text-[var(--fg-subtle)] select-none" aria-hidden="true">·</span>
+          <span className="hidden sm:inline text-[var(--fg-subtle)] select-none" aria-hidden="true">·</span>
           <button
             onClick={() => navigateToSection('about', 'how-it-works')}
             className="min-h-[40px] px-2 inline-flex items-center hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--gold)] rounded transition-colors cursor-pointer"
           >
             How it works
           </button>
-          <span className="text-[var(--fg-subtle)] select-none" aria-hidden="true">·</span>
+          <span className="hidden sm:inline text-[var(--fg-subtle)] select-none" aria-hidden="true">·</span>
           <button
             onClick={() => onNavigate('privacy')}
             className="min-h-[40px] px-2 inline-flex items-center hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--gold)] rounded transition-colors cursor-pointer"

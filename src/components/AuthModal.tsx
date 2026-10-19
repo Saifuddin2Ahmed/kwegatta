@@ -7,8 +7,7 @@ import {
   RefreshCw,
   AlertCircle,
   CheckCircle2,
-  KeyRound,
-  ExternalLink
+  KeyRound
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import {
@@ -216,7 +215,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h3 className="text-lg sm:text-xl font-bold font-display text-[var(--fg)] tracking-tight">
+          <h3 id="auth-modal-title" className="text-lg sm:text-xl font-bold font-display text-[var(--fg)] tracking-tight">
             {title || (existingProfile ? `Connect ${existingProfile.name.split(' ')[0]}'s Profile` : 'Sign in to Kwegatta')}
           </h3>
           <p className="text-xs text-[var(--fg-muted)] leading-relaxed mt-0.5">
@@ -381,11 +380,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       {mode === 'forgot' ? (
         <form onSubmit={handleForgotPassword} className="space-y-3">
           <div className="space-y-1">
-            <label className="text-xs font-medium text-[var(--fg)] flex items-center gap-1.5">
+            <label htmlFor="auth-email" className="text-xs font-medium text-[var(--fg)] flex items-center gap-1.5">
               <Mail className="w-3.5 h-3.5 text-[var(--fg-subtle)]" />
               <span>Your registered email address</span>
             </label>
             <input
+              id="auth-email"
               type="email"
               required
               value={email}
@@ -406,11 +406,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       ) : (
         <form onSubmit={handleSubmitEmail} className="space-y-3">
           <div className="space-y-1">
-            <label className="text-xs font-medium text-[var(--fg)] flex items-center gap-1.5">
+            <label htmlFor="auth-email-2" className="text-xs font-medium text-[var(--fg)] flex items-center gap-1.5">
               <Mail className="w-3.5 h-3.5 text-[var(--fg-subtle)]" />
               <span>Email address</span>
             </label>
             <input
+              id="auth-email-2"
               type="email"
               required
               value={email}
@@ -422,7 +423,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
           <div className="space-y-1">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-medium text-[var(--fg)] flex items-center gap-1.5">
+              <label htmlFor="auth-password" className="text-xs font-medium text-[var(--fg)] flex items-center gap-1.5">
                 <Lock className="w-3.5 h-3.5 text-[var(--fg-subtle)]" />
                 <span>Password</span>
               </label>
@@ -437,6 +438,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               )}
             </div>
             <input
+              id="auth-password"
               type="password"
               required
               minLength={6}
@@ -487,6 +489,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in"
       role="dialog"
       aria-modal="true"
+      aria-labelledby="auth-modal-title"
     >
       <div
         ref={modalRef}

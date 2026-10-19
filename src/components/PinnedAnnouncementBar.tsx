@@ -19,8 +19,18 @@ export const PinnedAnnouncementBar: React.FC = () => {
 
   useEffect(() => {
     checkAnnouncement();
-    const interval = setInterval(checkAnnouncement, 30000);
-    return () => clearInterval(interval);
+    // Skip polling while the tab is in the background; refresh as soon as it is visible again.
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') checkAnnouncement();
+    }, 30000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') checkAnnouncement();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   if (!announcement || !announcement.active || !announcement.text) {

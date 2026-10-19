@@ -144,7 +144,7 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="max-w-[1200px] mx-auto px-3 min-[380px]:px-4 md:px-6 h-16 sm:h-[68px] flex flex-nowrap items-center justify-between gap-2 min-[380px]:gap-3 sm:gap-4">
         
         {/* LEFT: Logo & Desktop Links (Single Navigation Row) */}
-        <div className="flex-shrink-0 flex items-center gap-4 lg:gap-6">
+        <div className="flex-shrink-0 flex items-center gap-3 lg:gap-6">
           <button
             onClick={() => onNavigate(currentProfile ? 'home' : 'people')}
             className="flex shrink-0 whitespace-nowrap items-center gap-2.5 hover:opacity-90 active:scale-[0.98] transition-all focus-visible:ring-2 focus-visible:ring-[var(--gold)] rounded-lg p-0.5 cursor-pointer"
@@ -154,7 +154,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {/* Desktop Navigation: exactly one row */}
-          <nav className="hidden md:flex items-center gap-1" aria-label="Desktop Navigation">
+          <nav className="hidden md:flex items-center gap-0.5 lg:gap-1" aria-label="Desktop Navigation">
             {navItems.map(link => {
               const isActive = activeTab === link.id || (!activeTab && link.id === (currentProfile ? 'home' : 'people'));
               return (
@@ -162,7 +162,7 @@ export const Header: React.FC<HeaderProps> = ({
                   key={link.id}
                   onClick={() => onNavigate(link.id)}
                   aria-current={isActive ? 'page' : undefined}
-                  className={`px-3 py-1.5 rounded-lg text-[14px] transition-all cursor-pointer ${
+                  className={`px-2 lg:px-3 py-1.5 rounded-lg text-[14px] transition-all cursor-pointer ${
                     isActive
                       ? 'text-[var(--gold-text)] bg-[var(--gold-subtle)] font-bold border-b-2 border-[var(--gold)]'
                       : 'text-[var(--fg-muted)] hover:text-[var(--fg)] hover:bg-[var(--bg-subtle)] font-medium'
@@ -176,7 +176,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* CENTER: Search */}
-        <div className="hidden md:flex flex-1 max-w-xs lg:max-w-sm mx-2 lg:mx-4 justify-center">
+        <div className="hidden lg:flex flex-1 max-w-xs xl:max-w-sm mx-2 lg:mx-4 justify-center">
           <div className="relative w-full group">
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--fg-subtle)] group-focus-within:text-[var(--gold-text)] transition-colors pointer-events-none" />
             <input
@@ -204,7 +204,7 @@ export const Header: React.FC<HeaderProps> = ({
                 setTimeout(() => mobileSearchInputRef.current?.focus(), 100);
               }
             }}
-            className={`md:hidden w-9 ${HEADER_CONTROL_CLASS} rounded-xl border border-[var(--card-border)] grid place-items-center bg-[var(--btn)] text-[var(--fg-muted)] hover:text-[var(--fg)] hover:bg-[var(--btn-hover)] active:scale-95 transition-all cursor-pointer`}
+            className={`lg:hidden w-9 ${HEADER_CONTROL_CLASS} rounded-xl border border-[var(--card-border)] grid place-items-center bg-[var(--btn)] text-[var(--fg-muted)] hover:text-[var(--fg)] hover:bg-[var(--btn-hover)] active:scale-95 transition-all cursor-pointer`}
             aria-label="Toggle search"
           >
             <Search className="w-4 h-4" />
@@ -299,7 +299,7 @@ export const Header: React.FC<HeaderProps> = ({
                 aria-expanded={showProfileMenu}
               >
                 <Avatar profile={currentProfile} className="w-7 h-7" />
-                <span className="text-[13px] font-semibold text-[var(--fg)] max-w-[85px] truncate hidden sm:inline">
+                <span className="text-[13px] font-semibold text-[var(--fg)] max-w-[85px] truncate hidden sm:inline md:hidden lg:inline">
                   {currentProfile.name.split(' ')[0]}
                 </span>
                 <ChevronDown className="w-3.5 h-3.5 text-[var(--fg-muted)]" />
@@ -405,7 +405,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Expandable Mobile Search Bar */}
       {showMobileSearch && (
-        <div className="md:hidden px-4 pb-3 pt-1 border-t border-[var(--card-border)] bg-[var(--bg)] animate-in slide-in-from-top-2 duration-200">
+        <div className="lg:hidden px-4 pb-3 pt-1 border-t border-[var(--card-border)] bg-[var(--bg)] animate-in slide-in-from-top-2 duration-200">
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--fg-subtle)] pointer-events-none" />
             <input

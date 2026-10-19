@@ -3,7 +3,6 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { Profile, Post } from '../types';
 import { db, PUBLIC_APP_URL } from '../services/api';
 import { generateQrCodeDataUrl, MIN_MEMBERS_FOR_STATS } from '../utils';
-import { Avatar } from './Avatar';
 import { BrandLogo } from './BrandLogo';
 
 const INITIAL_COLORS = [

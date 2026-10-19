@@ -4,6 +4,47 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-10-19
+
+### Added
+- Admins can manage the Team page from the Admin panel without code changes: add a person, edit their name, role (any wording), organisation, background, short bio, photo, GitHub, LinkedIn, X, website and WhatsApp number, and choose which of these show publicly.
+- Team order can be changed by dragging a card or with the up and down arrows. The order is saved straight away.
+- A person can be hidden from the public Team page without deleting their card. Removing a person asks for confirmation first.
+- A team card can be linked to a Kwegatta profile by searching for the member. The card then uses that profile's photo when no photo is uploaded.
+- Every team change is recorded in the admin audit log.
+- Links that go nowhere now show a "Page not found" screen with Back and Go home, including links to events that no longer exist.
+- Learn shows a short note and a button when nobody has shared what they can teach yet.
+
+### Changed
+- Event titles must be 4 to 120 characters. The form explains what to fix when a title repeats the example text ("e.g. Flutter Hackday") or the help text, or has an opening quote without a closing one. The server checks the same rules.
+- Pressing Create twice by accident no longer creates two events.
+- Team photos must be JPEG, PNG, WebP or GIF, up to 5 MB. They are resized and saved as WebP.
+- When Gemma is not available, Matches says so in plain words and labels the results "Quick match". Match reasons no longer say things like "Developer and Developer".
+- Events with an older stored date now show a normal date and time instead of a raw machine date.
+- Pages open faster: Events, Profile, Learn, Inbox, sign-in and the celebration effect now load when first needed. The first download is about a third smaller.
+- About 17 MB of unused photo copies were removed from the site.
+- Dialogs can be closed with Escape and keep keyboard focus inside while open. Event cards, tags and teacher cards can be opened with the keyboard. Form fields are linked to their labels for screen readers.
+- The made-up "activity" grid on profiles was removed.
+- Slow start-up work (one-time data fixes) now runs after the server starts answering requests.
+
+### Fixed
+- Security: members could change protected parts of their own profile (such as email, suspension or organiser status) and, through the email, gain admin rights. Profile updates now ignore those fields, and admin rights come only from the signed-in account's own email.
+- Security: admin emails added in the panel now need a verified address, and they are now kept after a restart.
+- Security: members could edit or remove team cards, other people's matches, and moderation fields on their own events through the general data API. These now go only through their own checked routes.
+- Security: sending an existing id or a date with a new post, message or match no longer overwrites someone else's item or backdates it.
+- Security: a profile that is not linked to an account can only be claimed by the account with the same email.
+- Signed-in members without admin rights now get "Admin access required" (403) on admin pages instead of "please sign in" (401).
+- Re-saving a profile no longer clears suspension or organiser status.
+- Deleting a member from the Admin panel now also removes their follows, matches, notifications and RSVPs. Deleting an event through any route removes its guest list, questions and check-ins.
+- Limits: members can send at most 30 messages in 10 minutes, reports are limited per network, and requests larger than 2 MB are refused outside admin uploads.
+- Audit log entries and event notices no longer overwrite each other when two happen at the same moment.
+- The site photo upload only accepts the three known photos and real images.
+- The Admin dashboard and the signed-in top bar no longer scroll sideways on phones and tablets (320 to 768 px). Admin sections scroll in one row on phones.
+- The mobile bottom bar no longer covers the end of the footer, and footer links no longer leave a stray "·" at the end of a line.
+- Long team affiliations wrap instead of being cut off. The Team page no longer briefly shows an old built-in list before loading.
+- Event share pages show titles containing "$" correctly.
+- Bumped service worker cache to `kwegatta-1.11.0`.
+
 ## [1.10.4] - 2026-10-19
 
 ### Added

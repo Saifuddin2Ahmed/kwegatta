@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { X, MessageCircle, UserPlus, Check, User, ExternalLink } from 'lucide-react';
+import { X, MessageCircle, UserPlus, User, ExternalLink } from 'lucide-react';
 import { NotificationItem, Profile } from '../types';
 import { formatTimeAgo, formatWhatsAppUrl } from '../utils';
 import { Avatar } from './Avatar';
