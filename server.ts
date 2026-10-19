@@ -6103,14 +6103,15 @@ function safeEmailHref(url: any): string {
   return /^https?:\/\/[^\s"'<>]+$/i.test(s) ? s : '';
 }
 
-export type EventEmailKind = 'confirmation' | 'promotion' | 'cancelled';
+export type EventEmailKind = 'confirmation' | 'promotion' | 'cancelled' | 'event_cancelled';
 
 /** Builds subject, plain-text and HTML bodies. All user text is escaped in the HTML part. */
 export function buildEventEmail(
   kind: EventEmailKind,
   item: any,
   recipientName: string,
-  ticketUrl: string
+  ticketUrl: string,
+  removedBy: 'host' | 'moderator' = 'host'
 ): { subject: string; text: string; html: string } {
   const title = String(item?.title || 'Event');
   const name = String(recipientName || '').trim() || 'there';
@@ -6121,16 +6122,23 @@ export function buildEventEmail(
   const organiser = String(item?.author_name || item?.created_by || '').trim();
   const eventUrl = `${getPublicAppUrl()}/e/${encodeURIComponent(String(item?.id || ''))}`;
   const ticketHref = safeEmailHref(ticketUrl) || eventUrl;
+  // A deleted event has no page any more, so that email links to the app instead.
+  const eventGone = kind === 'event_cancelled';
+  const appUrl = getPublicAppUrl();
 
   const subject = kind === 'promotion'
     ? `A spot opened up: ${title}`
     : kind === 'cancelled'
     ? `Registration cancelled: ${title}`
+    : kind === 'event_cancelled'
+    ? `Event cancelled: ${title}`
     : `Confirmation: ${title}`;
   const lead = kind === 'promotion'
     ? `A spot opened up. You're now registered for "${title}" on Kwegatta.`
     : kind === 'cancelled'
     ? `Your registration for "${title}" on Kwegatta has been cancelled. Your ticket is no longer valid.`
+    : kind === 'event_cancelled'
+    ? `"${title}" on Kwegatta has been cancelled by ${removedBy === 'moderator' ? 'a moderator' : 'the organiser'}. Your registration and ticket are no longer valid.`
     : `You are registered for "${title}" on Kwegatta.`;
   const placeText = isOnline
     ? `Online link: ${joinLink || 'Provided on event page'}`
@@ -6145,10 +6153,11 @@ export function buildEventEmail(
     placeText,
     ...(organiser ? [`Organiser: ${organiser}`] : []),
     '',
-    `Event page: ${eventUrl}`,
-    ...(kind === 'cancelled'
-      ? ['Changed your mind? You can register again from the event page while spots are open.']
-      : [`View your ticket: ${ticketHref}`, '', 'An .ics calendar invite is attached to this email.']),
+    ...(eventGone
+      ? [`Find other events: ${appUrl}`]
+      : kind === 'cancelled'
+      ? [`Event page: ${eventUrl}`, 'Changed your mind? You can register again from the event page while spots are open.']
+      : [`Event page: ${eventUrl}`, `View your ticket: ${ticketHref}`, '', 'An .ics calendar invite is attached to this email.']),
     '',
     footer
   ].join('\n');
@@ -6178,13 +6187,19 @@ export function buildEventEmail(
     row(isOnline ? 'Online' : 'Venue', placeHtml),
     ...(organiser ? [row('Organiser', e(organiser))] : []),
     '</table>',
-    kind === 'cancelled'
+    eventGone
+      ? button(appUrl, 'Find other events')
+      : kind === 'cancelled'
       ? button(eventUrl, 'View event')
       : button(ticketHref, 'View your ticket'),
-    kind === 'cancelled'
+    eventGone
+      ? ''
+      : kind === 'cancelled'
       ? '<p style="margin:8px 0 0;font-size:13px;color:#6b7280;">Changed your mind? You can register again from the event page while spots are open.</p>'
       : '<p style="margin:8px 0 0;font-size:13px;color:#6b7280;">Add to calendar: open the attached event.ics file.</p>',
-    `<p style="margin:12px 0 0;font-size:13px;color:#6b7280;">Event page: <a href="${e(eventUrl)}" style="color:#0f766e;word-break:break-all;">${e(eventUrl)}</a></p>`,
+    eventGone
+      ? ''
+      : `<p style="margin:12px 0 0;font-size:13px;color:#6b7280;">Event page: <a href="${e(eventUrl)}" style="color:#0f766e;word-break:break-all;">${e(eventUrl)}</a></p>`,
     '</td></tr>',
     `<tr><td style="padding:16px 24px;border-top:1px solid #e5e7eb;font-size:12px;color:#9ca3af;line-height:1.5;">${e(footer)}</td></tr>`,
     '</table></td></tr></table></body></html>'
@@ -6193,12 +6208,20 @@ export function buildEventEmail(
   return { subject, text, html };
 }
 
-/** Sends one message with the shared daily cap. Logs only "[Email] sent" or "[Email] failed: <reason>". */
+/** "[Email] skipped: <reason>". The reason is a fixed phrase and never contains an address. */
+export function logEmailSkipped(reason: string): void {
+  console.log(`[Email] skipped: ${reason}`);
+}
+
+/**
+ * Sends one message with the shared daily cap. Logs only "[Email] sent",
+ * "[Email] failed: <reason>" or "[Email] skipped: <reason>".
+ */
 async function deliverEventEmail(mailOptions: any): Promise<boolean> {
   const smtpUser = process.env.SMTP_USER ? process.env.SMTP_USER.trim() : '';
   const smtpPass = process.env.SMTP_PASS ? process.env.SMTP_PASS.trim() : '';
   if (!smtpUser || !smtpPass) {
-    // Silently disabled when SMTP credentials are not configured
+    logEmailSkipped('SMTP not configured');
     return false;
   }
 
@@ -6208,6 +6231,7 @@ async function deliverEventEmail(mailOptions: any): Promise<boolean> {
     dailyEmailCount = 0;
   }
   if (dailyEmailCount >= DAILY_EMAIL_LIMIT) {
+    logEmailSkipped('daily limit reached');
     return false;
   }
 
@@ -6245,7 +6269,10 @@ export async function sendEventConfirmationEmail(
   ticketUrl: string,
   isPromotion: boolean = false
 ): Promise<boolean> {
-  if (!recipientEmail || !recipientEmail.includes('@')) return false;
+  if (!recipientEmail || !recipientEmail.includes('@')) {
+    logEmailSkipped('no address');
+    return false;
+  }
   const { subject, text, html } = buildEventEmail(isPromotion ? 'promotion' : 'confirmation', item, recipientName, ticketUrl);
   return deliverEventEmail({
     to: recipientEmail,
@@ -6268,7 +6295,10 @@ export async function sendRegistrationCancelledEmail(
   recipientEmail: string | undefined,
   recipientName: string
 ): Promise<boolean> {
-  if (!recipientEmail || !recipientEmail.includes('@')) return false;
+  if (!recipientEmail || !recipientEmail.includes('@')) {
+    logEmailSkipped('no address');
+    return false;
+  }
   const { subject, text, html } = buildEventEmail('cancelled', item, recipientName, '');
   return deliverEventEmail({
     to: recipientEmail,
@@ -6277,6 +6307,41 @@ export async function sendRegistrationCancelledEmail(
     text,
     html
   });
+}
+
+/** "Event cancelled: <title>", sent to registered members and guests when an event is deleted. */
+export async function sendEventCancelledEmail(
+  item: any,
+  recipientEmail: string | undefined,
+  recipientName: string,
+  removedBy: 'host' | 'moderator' = 'host'
+): Promise<boolean> {
+  if (!recipientEmail || !recipientEmail.includes('@')) {
+    logEmailSkipped('no address');
+    return false;
+  }
+  const { subject, text, html } = buildEventEmail('event_cancelled', item, recipientName, '', removedBy);
+  return deliverEventEmail({
+    to: recipientEmail,
+    ...(item.contact_email ? { replyTo: item.contact_email } : {}),
+    subject,
+    text,
+    html
+  });
+}
+
+/** Address for a member: profile email, then the signed-in token, then Firebase Auth. */
+async function resolveMemberEmail(profile: any, uid?: string | null, tokenEmail?: string): Promise<string> {
+  if (profile?.email) return String(profile.email);
+  if (tokenEmail) return tokenEmail;
+  const authUid = profile?.account_uid || uid;
+  if (adminAuth && authUid) {
+    try {
+      const u = await adminAuth.getUser(authUid);
+      if (u?.email) return u.email;
+    } catch (_) {}
+  }
+  return '';
 }
 
 export async function promoteFromWaitlist(eventOrId: string | any): Promise<number> {
@@ -6338,10 +6403,9 @@ export async function promoteFromWaitlist(eventOrId: string | any): Promise<numb
         store.notifications.unshift(notif);
         await persistDoc('notifications', notif.id, notif);
 
-        if (memberProfile?.email) {
-          const ticketUrl = `${getPublicAppUrl()}/#/events/${eventId}/ticket`;
-          await sendEventConfirmationEmail(item, memberProfile.email, memberProfile.name || 'Member', ticketUrl, true);
-        }
+        const ticketUrl = `${getPublicAppUrl()}/#/events/${eventId}/ticket`;
+        const memberEmail = await resolveMemberEmail(memberProfile, next.id);
+        await sendEventConfirmationEmail(item, memberEmail, memberProfile?.name || 'Member', ticketUrl, true);
         promotedCount++;
       } else {
         await persistDoc('events', item.id, item);
@@ -6356,10 +6420,8 @@ export async function promoteFromWaitlist(eventOrId: string | any): Promise<numb
       guestRec.code_hash = hashTicketCode(code);
       await persistDoc('event_guests', guestRec.id, guestRec);
 
-      if (guestRec.email) {
-        const ticketUrl = `${getPublicAppUrl()}/e/${eventId}`;
-        await sendEventConfirmationEmail(item, guestRec.email, guestRec.name || 'Guest', ticketUrl, true);
-      }
+      const ticketUrl = `${getPublicAppUrl()}/e/${eventId}`;
+      await sendEventConfirmationEmail(item, guestRec.email, guestRec.name || 'Guest', ticketUrl, true);
       promotedCount++;
     }
   }
@@ -6854,20 +6916,18 @@ app.post('/api/events/:id/rsvp', async (req: Request, res: Response) => {
   if (storageMode === 'disk') saveStore(store);
 
   if (rsvpStatus === 'going' || freedConfirmedSeat) {
-    let memberEmail = callerProfile?.email || (req as any).authUser?.email || '';
-    if (!memberEmail && adminAuth && callerId) {
-      try {
-        const u = await adminAuth.getUser(callerId);
-        if (u?.email) memberEmail = u.email;
-      } catch (_) {}
-    }
+    const memberEmail = await resolveMemberEmail(callerProfile, callerId, (req as any).authUser?.email);
     if (rsvpStatus === 'going') {
       const appBase = getPublicAppUrl();
       const ticketUrl = `${appBase}/#/events/${item.id}/ticket`;
       await sendEventConfirmationEmail(item, memberEmail, callerProfile?.name || 'Member', ticketUrl);
     } else if (item.kind !== 'opportunity') {
       await sendRegistrationCancelledEmail(item, memberEmail, callerProfile?.name || 'Member');
+    } else {
+      logEmailSkipped('opportunity');
     }
+  } else if (rsvpStatus === 'left_waitlist') {
+    logEmailSkipped('left waitlist');
   }
 
   const regGuestCountAfter = (store.event_guests || []).filter(
@@ -7393,6 +7453,7 @@ async function deleteEventWithCascade(
   const registeredMemberIds: string[] = Array.from(new Set(
     (Array.isArray(item.attendee_ids) ? item.attendee_ids : []).filter((attId: any) => attId && !skipIds.has(attId))
   ));
+  const registeredGuests = (store.event_guests || []).filter((g: any) => g.event_id === id && g.status !== 'waitlist');
 
   store.events = (store.events || []).filter((e: any) => e.id !== id);
   await removeDoc('events', id);
@@ -7424,6 +7485,20 @@ async function deleteEventWithCascade(
   }
   if (notifs.length > 0) {
     await batchPersistDocs('notifications', notifs);
+  }
+
+  // "Event cancelled" email to each registered member and guest; same SMTP daily cap as other event emails.
+  if (item.kind === 'opportunity') {
+    if (registeredMemberIds.length + registeredGuests.length > 0) logEmailSkipped('opportunity');
+  } else {
+    for (const memberId of registeredMemberIds) {
+      const profile = store.profiles.find((p: any) => p.id === memberId || p.account_uid === memberId);
+      const email = await resolveMemberEmail(profile, memberId);
+      await sendEventCancelledEmail(item, email, profile?.name || 'Member', removedBy);
+    }
+    for (const guest of registeredGuests) {
+      await sendEventCancelledEmail(item, guest.email, guest.name || 'Guest', removedBy);
+    }
   }
 
   return { registeredMemberIds, deletedGuestIds, deletedQuestionIds, deletedCheckinIds };
@@ -7946,11 +8021,9 @@ app.post('/api/events/:id/guest-register', async (req: Request, res: Response) =
   store.event_guests.push(guestRecord);
   await persistDoc('event_guests', guestRecord.id, guestRecord);
 
-  if (email) {
-    const appBase = getPublicAppUrl();
-    const ticketUrl = `${appBase}/#/events/${id}/ticket?g=${encodeURIComponent(rawToken)}`;
-    await sendEventConfirmationEmail(item, email, name, ticketUrl);
-  }
+  const appBase = getPublicAppUrl();
+  const ticketUrl = `${appBase}/#/events/${id}/ticket?g=${encodeURIComponent(rawToken)}`;
+  await sendEventConfirmationEmail(item, email, name, ticketUrl);
 
   return res.json({
     success: true,
@@ -7987,6 +8060,17 @@ app.post('/api/events/:id/guest-cancel', async (req: Request, res: Response) => 
 
   if (wasRegistered) {
     await promoteFromWaitlist(id);
+  }
+
+  const item = (store.events || []).find((e: any) => e.id === id);
+  if (!wasRegistered) {
+    logEmailSkipped('left waitlist');
+  } else if (!item) {
+    logEmailSkipped('event not found');
+  } else if (item.kind === 'opportunity') {
+    logEmailSkipped('opportunity');
+  } else {
+    await sendRegistrationCancelledEmail(item, guestRec.email, guestRec.name || 'Guest');
   }
 
   return res.json({ success: true, message: 'Registration cancelled.' });

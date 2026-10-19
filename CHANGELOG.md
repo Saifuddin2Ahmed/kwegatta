@@ -4,6 +4,16 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.2] - 2026-10-19
+
+### Added
+- When an organiser or admin deletes an event, every registered member and guest now also gets an "Event cancelled: <title>" email, alongside the in-app notice. It says who cancelled it (the organiser or a moderator) and links to the app, since the event page no longer exists. People on the waitlist and the person who deleted the event are not emailed. The same daily email limit applies.
+- Email logs now also say when an event email was not sent and why, for example "[Email] skipped: no address", "skipped: daily limit reached", "skipped: opportunity" or "skipped: left waitlist". Addresses are never logged.
+
+### Fixed
+- Guests who registered without an account and then pressed "Cancel registration" did not get the "Registration cancelled" email. They now do.
+- A member moved off the waitlist now gets the "A spot opened up" email even when their address is only on their sign-in account and not on their profile.
+
 ## [1.11.1] - 2026-10-19
 
 ### Added
