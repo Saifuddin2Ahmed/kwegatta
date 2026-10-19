@@ -119,7 +119,10 @@ export function filterRoles(inputRoles: any, existingRoles: string[] = []): stri
 export const PRIVACY_VERSION = '2026-10';
 
 export const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+const PORT =
+  Number(process.env.DEFAULT_APP_PORT) ||
+  (process.env.NGINX_PORT && process.env.PORT === process.env.NGINX_PORT ? 3000 : Number(process.env.PORT)) ||
+  3000;
 
 /**
  * Express async handler wrapper: passes any rejected promise or thrown error to next(err).
@@ -10428,7 +10431,7 @@ async function setupVite() {
       initStorage(),
       import('vite').then(({ createServer }) =>
         createServer({
-          server: { middlewareMode: true, host: '0.0.0.0' },
+          server: { middlewareMode: true, host: '0.0.0.0', hmr: false },
           appType: 'spa'
         })
       )
