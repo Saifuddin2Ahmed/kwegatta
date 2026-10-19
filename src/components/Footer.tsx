@@ -76,6 +76,13 @@ export const Footer: React.FC<FooterProps> = ({ onNavigate }) => {
           </button>
           <span className="hidden sm:inline text-[var(--fg-subtle)] select-none" aria-hidden="true">·</span>
           <button
+            onClick={() => navigateToSection('team')}
+            className="min-h-[40px] px-2 inline-flex items-center hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--gold)] rounded transition-colors cursor-pointer"
+          >
+            Team
+          </button>
+          <span className="hidden sm:inline text-[var(--fg-subtle)] select-none" aria-hidden="true">·</span>
+          <button
             onClick={() => navigateToSection('about', 'how-it-works')}
             className="min-h-[40px] px-2 inline-flex items-center hover:text-[var(--fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--gold)] rounded transition-colors cursor-pointer"
           >

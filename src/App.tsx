@@ -34,6 +34,7 @@ const SetupView = React.lazy(() => import('./components/SetupView').then(m => ({
 const AboutView = React.lazy(() => import('./components/AboutView').then(m => ({ default: m.AboutView })));
 const PrivacyView = React.lazy(() => import('./components/PrivacyView').then(m => ({ default: m.PrivacyView })));
 const LicenseView = React.lazy(() => import('./components/LicenseView').then(m => ({ default: m.LicenseView })));
+const TeamView = React.lazy(() => import('./components/TeamView').then(m => ({ default: m.TeamView })));
 // Heavier screens load on first visit so the landing page stays small.
 const EventsView = React.lazy(() => import('./components/EventsView').then(m => ({ default: m.EventsView })));
 const LearnView = React.lazy(() => import('./components/LearnView').then(m => ({ default: m.LearnView })));
@@ -290,7 +291,7 @@ export default function App() {
       setActiveTab('events');
       setSelectedEventId(sub.split('?')[0]);
       setViewedProfileId(null);
-    } else if (['home', 'events', 'learn', 'people', 'feed', 'inbox', 'me', 'setup', 'admin', 'about', 'onboard', 'privacy', 'license'].includes(main)) {
+    } else if (['home', 'events', 'learn', 'people', 'feed', 'inbox', 'me', 'setup', 'admin', 'about', 'team', 'onboard', 'privacy', 'license'].includes(main)) {
       setActiveTab(main);
       setViewedProfileId(null);
       setSelectedEventId(null);
@@ -320,6 +321,7 @@ export default function App() {
     else if (tab === 'admin') window.location.hash = '#/admin';
     else if (tab === 'setup') window.location.hash = '#/setup';
     else if (tab === 'about') window.location.hash = '#/about';
+    else if (tab === 'team') window.location.hash = '#/team';
     else if (tab === 'privacy') window.location.hash = '#/privacy';
     else if (tab === 'license') window.location.hash = '#/license';
     else if (tab === 'onboard') triggerJoinFlow();
@@ -711,6 +713,10 @@ export default function App() {
         ) : activeTab === 'about' ? (
           <React.Suspense fallback={<div className="p-12 text-center"><div className="w-8 h-8 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin mx-auto"></div></div>}>
             <AboutView onNavigateHome={() => navigateTo('home')} isSignedIn={Boolean(currentProfile)} />
+          </React.Suspense>
+        ) : activeTab === 'team' ? (
+          <React.Suspense fallback={<div className="p-12 text-center"><div className="w-8 h-8 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin mx-auto"></div></div>}>
+            <TeamView />
           </React.Suspense>
         ) : activeTab === 'privacy' ? (
           <React.Suspense fallback={<div className="p-12 text-center"><div className="w-8 h-8 border-2 border-[var(--gold)] border-t-transparent rounded-full animate-spin mx-auto"></div></div>}>
