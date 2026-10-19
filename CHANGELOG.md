@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When an event is deleted, everyone who registered gets a notice that it was removed. Its guest list, questions and check-ins are removed with it. The admin audit log keeps a record.
 - The create form now asks whether you are posting an Event or an Opportunity, with a one-line explanation of each.
 - If you post something with the same title as one of your posts from the last 24 hours, the form asks whether you meant the existing one ("Open it") or want to post again ("Post anyway").
-- Feed is now a tab in the mobile bottom bar, and Learn is in the profile menu on mobile.
+- Feed is now a tab in the mobile bottom bar (between Events and Profile), and Learn is in the profile menu on mobile.
+- Admin deletes now clean up the same way: the event's guest list, questions and check-ins are removed, and registered members are told it was removed by a moderator.
 
 ### Changed
 - Events are ordered by their real start time. Older events that only have a written date (like "Sat, Nov 14 • 2:00 PM EAT") are now understood too. Upcoming shows the soonest first; Past shows the most recent first. Opportunities are ordered by deadline.

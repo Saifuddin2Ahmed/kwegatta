@@ -6642,6 +6642,51 @@ describe('Release 1.10.4', () => {
       expect(audit).toBeDefined();
     });
 
+    it('admin delete uses the same cascade, notifies registered members and the author without an event link, and keeps the audit log', async () => {
+      if (!Array.isArray(store.admin_emails)) store.admin_emails = [];
+      if (!store.admin_emails.includes('test-admin@kwegatta.test')) {
+        store.admin_emails.push('test-admin@kwegatta.test');
+      }
+      // Earlier suites may delete this profile; the author notice needs it to exist
+      if (!store.profiles.some((p: any) => p.id === authorId)) {
+        store.profiles.push({ id: authorId, account_uid: authorId, name: 'Author', headline: 'Host', created_at: new Date().toISOString() } as any);
+      }
+      const notifCountBefore = store.notifications.length;
+      const res = await fetch(`${baseUrl}/api/admin/events/${eventId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-admin' },
+        body: JSON.stringify({ reason: 'Spam or scam' })
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.notified).toBe(2);
+      expect(body.removed).toEqual({ guests: 1, questions: 1, checkins: 1 });
+
+      expect(store.events.some((e: any) => e.id === eventId)).toBe(false);
+      expect(store.event_guests.some((g: any) => g.event_id === eventId)).toBe(false);
+      expect(store.event_questions.some((q: any) => q.event_id === eventId)).toBe(false);
+      expect(store.event_checkins.some((c: any) => c.event_id === eventId)).toBe(false);
+      expect(store.events.some((e: any) => e.id === otherEventId)).toBe(true);
+      expect(store.event_guests.some((g: any) => g.id === 'g-1104-keep')).toBe(true);
+
+      const newNotifs = store.notifications.slice(0, store.notifications.length - notifCountBefore);
+      const memberNotifs = newNotifs.filter((n: any) => n.to_id !== authorId);
+      expect(memberNotifs.map((n: any) => n.to_id).sort()).toEqual(['test-member-a', 'test-member-b']);
+      for (const n of memberNotifs) {
+        expect(n.body).toContain('removed by a moderator');
+      }
+      const authorNotif = newNotifs.find((n: any) => n.to_id === authorId);
+      expect(authorNotif).toBeDefined();
+      for (const n of newNotifs) {
+        expect(n.event_id).toBeUndefined();
+        expect(resolveNotificationTarget(n, store.profiles)).toBeNull();
+      }
+
+      const audit = store.audit_log.find((a: any) => a.action === 'DELETE_EVENT_ADMIN' && a.details.includes(eventId));
+      expect(audit).toBeDefined();
+      expect(audit!.details).toContain('Spam or scam');
+    });
+
     it('confirm dialog text states how many people registered', () => {
       expect(deleteConfirmMessage(3)).toBe('3 people registered. They will be notified that the event was removed.');
       expect(deleteConfirmMessage(0)).toBe('0 people registered. They will be notified that the event was removed.');
@@ -6830,11 +6875,9 @@ describe('Release 1.10.4', () => {
       cleanup();
     });
 
-    it('mobile bottom tabs include Feed as the fifth tab', () => {
+    it('mobile bottom tabs include Feed before Profile', () => {
       const ids = MOBILE_SIGNED_IN_TABS.map(t => t.id);
-      expect(ids).toContain('feed');
-      expect(ids.length).toBe(5);
-      expect(ids[4]).toBe('feed');
+      expect(ids).toEqual(['home', 'people', 'events', 'feed', 'me']);
       expect(ids).not.toContain('learn');
     });
 

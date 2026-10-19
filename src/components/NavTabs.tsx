@@ -5,8 +5,8 @@ export const MOBILE_SIGNED_IN_TABS = [
   { id: 'home', label: 'Matches', icon: Zap },
   { id: 'people', label: 'People', icon: Users },
   { id: 'events', label: 'Events', icon: Calendar },
-  { id: 'me', label: 'Profile', icon: User },
-  { id: 'feed', label: 'Feed', icon: Newspaper }
+  { id: 'feed', label: 'Feed', icon: Newspaper },
+  { id: 'me', label: 'Profile', icon: User }
 ] as const;
 
 interface NavTabsProps {

@@ -7099,6 +7099,57 @@ app.post('/api/events/:id/cancel', async (req: Request, res: Response) => {
   return res.json({ success: true, message: 'Event cancelled successfully', item: sanitizeEventForPublic(item, callerId, isAllowedContact, isAdmin) });
 });
 
+/**
+ * Deletes an event and everything that belongs to it (guests, questions, check-ins),
+ * and tells registered members it was removed. The notice has no event_id because the
+ * event no longer exists. Callers write their own audit log entry.
+ */
+async function deleteEventWithCascade(
+  item: any,
+  excludeFromNotify: Array<string | null | undefined> = [],
+  removedBy: 'host' | 'moderator' = 'host'
+) {
+  const id = item.id;
+  const skipIds = new Set([item.author_id, ...excludeFromNotify].filter(Boolean));
+  const registeredMemberIds: string[] = Array.from(new Set(
+    (Array.isArray(item.attendee_ids) ? item.attendee_ids : []).filter((attId: any) => attId && !skipIds.has(attId))
+  ));
+
+  store.events = (store.events || []).filter((e: any) => e.id !== id);
+  await removeDoc('events', id);
+
+  const deletedGuestIds = (store.event_guests || []).filter((g: any) => g.event_id === id).map((g: any) => g.id);
+  const deletedQuestionIds = (store.event_questions || []).filter((q: any) => q.event_id === id).map((q: any) => q.id);
+  const deletedCheckinIds = (store.event_checkins || []).filter((c: any) => c.event_id === id).map((c: any) => c.id);
+  store.event_guests = (store.event_guests || []).filter((g: any) => g.event_id !== id);
+  store.event_questions = (store.event_questions || []).filter((q: any) => q.event_id !== id);
+  store.event_checkins = (store.event_checkins || []).filter((c: any) => c.event_id !== id);
+  if (deletedGuestIds.length > 0) await batchRemoveDocs('event_guests', deletedGuestIds);
+  if (deletedQuestionIds.length > 0) await batchRemoveDocs('event_questions', deletedQuestionIds);
+  if (deletedCheckinIds.length > 0) await batchRemoveDocs('event_checkins', deletedCheckinIds);
+
+  const kindLabel = item.kind === 'opportunity' ? 'opportunity' : 'event';
+  const notifs: Array<{ id: string; data: any }> = [];
+  for (const memberId of registeredMemberIds) {
+    const notif = {
+      id: 'notif-evdel-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      to_id: memberId,
+      from_id: removedBy === 'moderator' ? 'moderator' : 'organiser',
+      type: 'digest',
+      body: `The ${kindLabel} "${item.title}" you registered for was removed by ${removedBy === 'moderator' ? 'a moderator' : 'the host'}.`,
+      read: false,
+      created_at: new Date().toISOString()
+    };
+    store.notifications.unshift(notif);
+    notifs.push({ id: notif.id, data: notif });
+  }
+  if (notifs.length > 0) {
+    await batchPersistDocs('notifications', notifs);
+  }
+
+  return { registeredMemberIds, deletedGuestIds, deletedQuestionIds, deletedCheckinIds };
+}
+
 app.delete('/api/events/:id', async (req: Request, res: Response) => {
   const adminInfo = resolveAdminInfo(req);
   const isAdmin = adminInfo.isAdmin;
@@ -7116,45 +7167,8 @@ app.delete('/api/events/:id', async (req: Request, res: Response) => {
     return res.status(403).json({ error: 'Forbidden: You can only delete your own submissions.' });
   }
 
-  // Registered members (not the author) are told the event was removed
-  const authorIds = new Set([item.author_id, callerProfileId, callerId].filter(Boolean));
-  const registeredMemberIds: string[] = Array.from(new Set(
-    (Array.isArray(item.attendee_ids) ? item.attendee_ids : []).filter((attId: any) => attId && !authorIds.has(attId))
-  ));
-
-  store.events = (store.events || []).filter((e: any) => e.id !== id);
-  await removeDoc('events', id);
-
-  // Cascade: guests, questions and check-ins belonging to this event
-  const deletedGuestIds = (store.event_guests || []).filter((g: any) => g.event_id === id).map((g: any) => g.id);
-  const deletedQuestionIds = (store.event_questions || []).filter((q: any) => q.event_id === id).map((q: any) => q.id);
-  const deletedCheckinIds = (store.event_checkins || []).filter((c: any) => c.event_id === id).map((c: any) => c.id);
-  store.event_guests = (store.event_guests || []).filter((g: any) => g.event_id !== id);
-  store.event_questions = (store.event_questions || []).filter((q: any) => q.event_id !== id);
-  store.event_checkins = (store.event_checkins || []).filter((c: any) => c.event_id !== id);
-  if (deletedGuestIds.length > 0) await batchRemoveDocs('event_guests', deletedGuestIds);
-  if (deletedQuestionIds.length > 0) await batchRemoveDocs('event_questions', deletedQuestionIds);
-  if (deletedCheckinIds.length > 0) await batchRemoveDocs('event_checkins', deletedCheckinIds);
-
-  // No event_id on these notifications: the event no longer exists
-  const kindLabel = item.kind === 'opportunity' ? 'opportunity' : 'event';
-  const notifs: Array<{ id: string; data: any }> = [];
-  for (const memberId of registeredMemberIds) {
-    const notif = {
-      id: 'notif-evdel-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
-      to_id: memberId,
-      from_id: 'organiser',
-      type: 'digest',
-      body: `The ${kindLabel} "${item.title}" you registered for was removed by the host.`,
-      read: false,
-      created_at: new Date().toISOString()
-    };
-    store.notifications.unshift(notif);
-    notifs.push({ id: notif.id, data: notif });
-  }
-  if (notifs.length > 0) {
-    await batchPersistDocs('notifications', notifs);
-  }
+  const { registeredMemberIds, deletedGuestIds, deletedQuestionIds, deletedCheckinIds } =
+    await deleteEventWithCascade(item, [callerProfileId, callerId]);
 
   const auditEntry = {
     id: 'audit-' + Date.now(),
@@ -7891,14 +7905,14 @@ app.delete('/api/admin/events/:id', async (req: Request, res: Response) => {
   const note = req.body?.note ? sanitizeText(req.body.note, 300) : '';
   const reasonStr = rawReason === 'Other' && note ? `Other (${note})` : rawReason;
 
-  store.events = (store.events || []).filter((e: any) => e.id !== id);
-  await removeDoc('events', id);
+  const { registeredMemberIds, deletedGuestIds, deletedQuestionIds, deletedCheckinIds } =
+    await deleteEventWithCascade(item, [], 'moderator');
 
   const auditEntry = {
     id: 'audit-' + Date.now(),
     timestamp: new Date().toISOString(),
     action: 'DELETE_EVENT_ADMIN',
-    details: `Admin deleted event "${item.title}" (${id}). Reason: ${reasonStr}`,
+    details: `Admin deleted event "${item.title}" (${id}). Reason: ${reasonStr}. Notified ${registeredMemberIds.length} member(s); removed ${deletedGuestIds.length} guest(s), ${deletedQuestionIds.length} question(s), ${deletedCheckinIds.length} check-in(s).`,
     admin: admin.adminName
   };
   store.audit_log.unshift(auditEntry);
@@ -7914,7 +7928,6 @@ app.delete('/api/admin/events/:id', async (req: Request, res: Response) => {
         from_id: 'moderator',
         type: 'moderation',
         body: `Your event "${item.title}" was removed by a moderator. Reason: ${reasonStr}.`,
-        event_id: id,
         read: false,
         created_at: new Date().toISOString()
       };
@@ -7924,7 +7937,12 @@ app.delete('/api/admin/events/:id', async (req: Request, res: Response) => {
   }
 
   if (storageMode === 'disk') saveStore(store);
-  return res.json({ success: true, message: 'Event deleted' });
+  return res.json({
+    success: true,
+    message: 'Event deleted',
+    notified: registeredMemberIds.length,
+    removed: { guests: deletedGuestIds.length, questions: deletedQuestionIds.length, checkins: deletedCheckinIds.length }
+  });
 });
 
 app.post('/api/admin/events/:id/block-author', async (req: Request, res: Response) => {
