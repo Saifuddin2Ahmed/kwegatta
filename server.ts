@@ -6111,7 +6111,8 @@ export function buildEventEmail(
   item: any,
   recipientName: string,
   ticketUrl: string,
-  removedBy: 'host' | 'moderator' = 'host'
+  removedBy: 'host' | 'moderator' = 'host',
+  onWaitlist = false
 ): { subject: string; text: string; html: string } {
   const title = String(item?.title || 'Event');
   const name = String(recipientName || '').trim() || 'there';
@@ -6138,12 +6139,14 @@ export function buildEventEmail(
     : kind === 'cancelled'
     ? `Your registration for "${title}" on Kwegatta has been cancelled. Your ticket is no longer valid.`
     : kind === 'event_cancelled'
-    ? `"${title}" on Kwegatta has been cancelled by ${removedBy === 'moderator' ? 'a moderator' : 'the organiser'}. Your registration and ticket are no longer valid.`
+    ? `"${title}" on Kwegatta has been cancelled by ${removedBy === 'moderator' ? 'a moderator' : 'the organiser'}. ${onWaitlist ? 'You were on the waitlist, and the waitlist has been closed.' : 'Your registration and ticket are no longer valid.'}`
     : `You are registered for "${title}" on Kwegatta.`;
   const placeText = isOnline
     ? `Online link: ${joinLink || 'Provided on event page'}`
     : `Venue: ${venue}`;
-  const footer = 'You received this because you registered on Kwegatta. Reply to contact the organiser.';
+  const footer = onWaitlist
+    ? 'You received this because you joined the waitlist on Kwegatta. Reply to contact the organiser.'
+    : 'You received this because you registered on Kwegatta. Reply to contact the organiser.';
 
   const text = [
     `Hi ${name},`,
@@ -6309,18 +6312,19 @@ export async function sendRegistrationCancelledEmail(
   });
 }
 
-/** "Event cancelled: <title>", sent to registered members and guests when an event is deleted. */
+/** "Event cancelled: <title>", sent to registered and waitlisted members and guests when an event is deleted. */
 export async function sendEventCancelledEmail(
   item: any,
   recipientEmail: string | undefined,
   recipientName: string,
-  removedBy: 'host' | 'moderator' = 'host'
+  removedBy: 'host' | 'moderator' = 'host',
+  onWaitlist = false
 ): Promise<boolean> {
   if (!recipientEmail || !recipientEmail.includes('@')) {
     logEmailSkipped('no address');
     return false;
   }
-  const { subject, text, html } = buildEventEmail('event_cancelled', item, recipientName, '', removedBy);
+  const { subject, text, html } = buildEventEmail('event_cancelled', item, recipientName, '', removedBy, onWaitlist);
   return deliverEventEmail({
     to: recipientEmail,
     ...(item.contact_email ? { replyTo: item.contact_email } : {}),
@@ -7454,6 +7458,11 @@ async function deleteEventWithCascade(
     (Array.isArray(item.attendee_ids) ? item.attendee_ids : []).filter((attId: any) => attId && !skipIds.has(attId))
   ));
   const registeredGuests = (store.event_guests || []).filter((g: any) => g.event_id === id && g.status !== 'waitlist');
+  const registeredSet = new Set(registeredMemberIds);
+  const waitlistMemberIds: string[] = Array.from(new Set(
+    (Array.isArray(item.waitlist_ids) ? item.waitlist_ids : []).filter((wId: any) => wId && !skipIds.has(wId) && !registeredSet.has(wId))
+  ));
+  const waitlistGuests = (store.event_guests || []).filter((g: any) => g.event_id === id && g.status === 'waitlist');
 
   store.events = (store.events || []).filter((e: any) => e.id !== id);
   await removeDoc('events', id);
@@ -7487,17 +7496,24 @@ async function deleteEventWithCascade(
     await batchPersistDocs('notifications', notifs);
   }
 
-  // "Event cancelled" email to each registered member and guest; same SMTP daily cap as other event emails.
+  // "Event cancelled" email to each registered and waitlisted member and guest; same SMTP daily cap as other event emails.
   if (item.kind === 'opportunity') {
-    if (registeredMemberIds.length + registeredGuests.length > 0) logEmailSkipped('opportunity');
+    if (registeredMemberIds.length + registeredGuests.length + waitlistMemberIds.length + waitlistGuests.length > 0) {
+      logEmailSkipped('opportunity');
+    }
   } else {
-    for (const memberId of registeredMemberIds) {
+    const emailMember = async (memberId: string, onWaitlist: boolean) => {
       const profile = store.profiles.find((p: any) => p.id === memberId || p.account_uid === memberId);
       const email = await resolveMemberEmail(profile, memberId);
-      await sendEventCancelledEmail(item, email, profile?.name || 'Member', removedBy);
-    }
+      await sendEventCancelledEmail(item, email, profile?.name || 'Member', removedBy, onWaitlist);
+    };
+    for (const memberId of registeredMemberIds) await emailMember(memberId, false);
     for (const guest of registeredGuests) {
       await sendEventCancelledEmail(item, guest.email, guest.name || 'Guest', removedBy);
+    }
+    for (const memberId of waitlistMemberIds) await emailMember(memberId, true);
+    for (const guest of waitlistGuests) {
+      await sendEventCancelledEmail(item, guest.email, guest.name || 'Guest', removedBy, true);
     }
   }
 

@@ -230,7 +230,7 @@ describe('"[Email] skipped: <reason>" log lines', () => {
 
 /* ------------------------------------------------------------------------- */
 describe('Deleting an event emails registered members and guests', () => {
-  it('organiser delete: "Event cancelled: <title>" to members and registered guests, not the organiser or the waitlist', async () => {
+  it('organiser delete: "Event cancelled: <title>" to members and guests (waitlist included since 1.12.0), not the organiser', async () => {
     const ev = await createEvent('p-host-i', 'uid-host-i', 'Deleted Demo Night', { capacity: 3 });
     addMember('p-mem-i1', 'uid-mem-i1', { email: 'mem-i1@example.com' });
     await api('POST', `/api/events/${ev.id}/rsvp`, auth('uid-mem-i1'));
@@ -245,9 +245,10 @@ describe('Deleting an event emails registered members and guests', () => {
     });
     expect(mails.map(m => `${m.to} | ${m.subject}`).sort()).toEqual([
       'ivy@example.com | Event cancelled: Deleted Demo Night',
-      'mem-i1@example.com | Event cancelled: Deleted Demo Night'
+      'mem-i1@example.com | Event cancelled: Deleted Demo Night',
+      'wes@example.com | Event cancelled: Deleted Demo Night'
     ]);
-    expect(lines).toEqual(['[Email] sent', '[Email] sent']);
+    expect(lines).toEqual(['[Email] sent', '[Email] sent', '[Email] sent']);
     expect(mails[0].text).toContain('cancelled by the organiser');
     expect(mails[0].text).not.toContain(`/e/${ev.id}`);
 
