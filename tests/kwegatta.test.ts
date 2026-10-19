@@ -344,8 +344,8 @@ describe('Service Worker & Cache-Control Configuration (PWA v1.5.2)', () => {
     const path = await import('path');
     const swContent = fs.readFileSync(path.join(process.cwd(), 'public', 'sw.js'), 'utf-8');
 
-    // 1. Cache name includes version kwegatta-1.11.2
-    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.11.2'");
+    // 1. Cache name includes version kwegatta-1.12.0
+    expect(swContent).toContain("CACHE_NAME = 'kwegatta-1.12.0'");
 
     // 2. Skip waiting and clients claim are preserved
     expect(swContent).toContain('self.skipWaiting()');
@@ -6305,8 +6305,8 @@ describe('Release 1.5.0 Features', () => {
         const swCacheName = match![1];
 
         expect(swCacheName).toBe(`kwegatta-${pkg.version}`);
-        expect(pkg.version).toBe('1.11.2');
-        expect(swCacheName).toBe('kwegatta-1.11.2');
+        expect(pkg.version).toBe('1.12.0');
+        expect(swCacheName).toBe('kwegatta-1.12.0');
       });
 
       it('d) OG_RENDER_VERSION busts image cache', () => {

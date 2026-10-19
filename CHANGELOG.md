@@ -4,6 +4,25 @@ All notable changes to **Kwegatta** are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] - 2026-10-19
+
+### Added
+- New page headers on Events, People, Learn, Feed and Team: a photo with a dark overlay, the page title and a short line about the page. Text stays readable on the photo in light and dark mode. Pages without a photo get a plain brand-colour header instead.
+- New Team page at /#/team with the same team cards as the About page. There is a "Team" link in the footer.
+- Photo credits for the new header photos are listed in images/CREDITS.md. All photos come from Unsplash or Pexels under their free licences and are served from this site.
+
+### Changed
+- The About page has a new layout: a large photo at the top with "Start matching" and "Meet the team" buttons, then the problem and our answer, the team, how it works in three steps, the Hack Day award, and privacy and open source.
+- The team now appears higher on the About page, with the two Hack Day photos above the cards. Team cards show photo, name, role, organisation and links.
+- A team member without a photo, or whose photo fails to load, now shows their initials in gold or teal instead of an empty circle. The same person always gets the same colour.
+- Technical details (model names, how it runs, the Gemma licence) are now in a "Technical details" section that is closed until you open it. The MIT licence is one line with a link instead of the full text.
+- Numbered labels such as "01 / The challenge" were removed from the About page.
+- Header photos come in two sizes, so phones download the smaller one. Photos further down the page load only when you scroll to them.
+- New-event notifications now have one limit of 50 people per event. People who follow the organiser are notified first, and members whose interests match the event fill the rest. The limit of 3 new-event notifications per person per day and each person's notification setting still apply.
+
+### Fixed
+- When an event is deleted, people on its waitlist (members and guests) now also get the "Event cancelled" email. Their email says they were on the waitlist instead of mentioning a ticket.
+
 ## [1.11.2] - 2026-10-19
 
 ### Added
